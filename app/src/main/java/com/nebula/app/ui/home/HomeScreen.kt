@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.ExperimentalMaterialApi
@@ -49,6 +48,7 @@ import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.LiquidGlassProfileOverlay
 import com.nebula.app.ui.components.NABottomBar
+import com.nebula.app.ui.components.NebulaLogo
 import com.nebula.app.ui.dialogs.AboutSheet
 import com.nebula.app.ui.dialogs.CreateRoomSheet
 import com.nebula.app.ui.dialogs.FriendProfileSheet
@@ -375,11 +375,6 @@ fun HomeScreen(
                                         .align(Alignment.TopEnd)
                                 )
                             }
-                            PullRefreshIndicator(
-                                refreshing = uiState.isRefreshing,
-                                state = pullRefreshState,
-                                modifier = Modifier.align(Alignment.TopCenter)
-                            )
                         }
                     }
                 }
@@ -732,6 +727,36 @@ fun HomeScreen(
                         ),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
+                }
+
+                if (uiState.isRefreshing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(82.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(theme.colors.surface.copy(alpha = 0.96f))
+                                .border(
+                                    width = 1.dp,
+                                    color = theme.colors.primaryAccent.copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(24.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            NebulaLogo(modifier = Modifier.size(38.dp))
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(58.dp),
+                                color = theme.colors.primaryAccent,
+                                trackColor = theme.colors.primaryAccent.copy(alpha = 0.18f),
+                                strokeWidth = 3.dp
+                            )
+                        }
+                    }
                 }
             }
         }
