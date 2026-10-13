@@ -1,6 +1,6 @@
 import { io as ClientSocket, Socket } from 'socket.io-client';
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE = process.env.TEST_API_BASE || 'http://localhost:5001';
 
 interface AuthResponse {
   success: boolean;
