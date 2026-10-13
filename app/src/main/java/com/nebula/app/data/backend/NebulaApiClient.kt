@@ -17,7 +17,7 @@ import java.net.URL
 object NebulaApiClient {
     var sessionManager: com.nebula.app.data.local.SessionManager? = null
 
-    private var defaultBaseUrl: String = "https://mid-skilled-segment-determination.trycloudflare.com/api/v1"
+    private var defaultBaseUrl: String = "https://nebula-73kb.onrender.com/api/v1"
 
     var baseUrl: String
         get() = sessionManager?.getBackendUrl() ?: defaultBaseUrl

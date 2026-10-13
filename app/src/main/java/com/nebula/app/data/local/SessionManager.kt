@@ -41,7 +41,7 @@ class SessionManager(context: Context) {
         val saved = prefs.getString(KEY_BACKEND_URL, null)
         if (!saved.isNullOrBlank()) return saved
 
-        return "https://mid-skilled-segment-determination.trycloudflare.com/api/v1"
+        return "https://nebula-73kb.onrender.com/api/v1"
     }
 
     fun saveBackendUrl(url: String) {
