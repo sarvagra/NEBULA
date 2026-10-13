@@ -55,7 +55,7 @@ object NebulaApiClient {
                 readTimeout = 60000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
-                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                authToken?.takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
 
                 if (jsonBody != null && (method == "POST" || method == "PUT" || method == "PATCH")) {
                     doOutput = true
@@ -235,6 +235,14 @@ object NebulaApiClient {
 
     suspend fun getRoom(roomId: String): ApiResponse<JSONObject> {
         return request("/rooms/$roomId", "GET")
+    }
+
+    suspend fun getRoomMessages(roomId: String): ApiResponse<JSONArray> {
+        val res = request("/chat/room/$roomId?limit=50", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
     }
 
     suspend fun joinRoom(roomId: String): ApiResponse<JSONObject> {

@@ -62,11 +62,43 @@ class RoomRepositoryImpl(
                 if (item != null) {
                     list.add(parseRoomFromJson(item))
                 }
+
             }
             _rooms.value = list
             return list
         }
         return _rooms.value
+    }
+
+    suspend fun reconnectActiveRoom() {
+        val current = _activeRoom.value ?: return
+        socketClient.connect(current.id, current.hostId)
+        syncActiveRoom()
+        loadRoomMessages(current.id)
+    }
+
+    private suspend fun loadRoomMessages(roomId: String) {
+        val current = _activeRoom.value ?: return
+        val response = apiClient.getRoomMessages(roomId)
+        if (response !is ApiResponse.Success) return
+        val messages = mutableListOf<RoomChatMessage>()
+        for (i in 0 until response.data.length()) {
+            val json = response.data.optJSONObject(i) ?: continue
+            val id = json.optString("id").ifBlank { json.optString("_id") }
+            if (id.isBlank()) continue
+            messages += RoomChatMessage(
+                id = id,
+                roomId = json.optString("roomId", roomId),
+                senderId = json.optString("senderId"),
+                senderName = json.optString("senderName", "Nebula User"),
+                senderAvatar = json.optString("senderAvatarLetter", "U"),
+                content = json.optString("text", ""),
+                timeLabel = "Earlier",
+                isSystemMessage = json.optString("messageType") == "system"
+            )
+        }
+        _activeRoom.value = current.copy(recentMessages = messages)
+        _rooms.value = _rooms.value.map { if (it.id == roomId) current.copy(recentMessages = messages) else it }
     }
 
     override suspend fun createRoom(
@@ -121,6 +153,7 @@ class RoomRepositoryImpl(
             _activeRoom.value = room
             _rooms.value = _rooms.value.map { if (it.id == room.id) room else it }
             socketClient.connect(room.id, room.hostId)
+            loadRoomMessages(room.id)
             return room
         }
 

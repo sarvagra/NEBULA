@@ -66,6 +66,11 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    override fun onStart() {
+        super.onStart()
+        homeViewModel.onAppForegrounded()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install Android 12+ system splashscreen
         installSplashScreen()

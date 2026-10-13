@@ -79,12 +79,20 @@ class HomeViewModel(
                                 profileRepository.setLoggedInUser(refreshed)
                                 sessionManager?.saveUserProfile(refreshed)
                             }
+
                         }
                     }
                 }
             } finally {
                 _uiState.value = _uiState.value.copy(isRefreshing = false)
             }
+        }
+    }
+
+    fun onAppForegrounded() {
+        viewModelScope.launch {
+            (roomRepository as? RoomRepositoryImpl)?.reconnectActiveRoom()
+            refreshAll()
         }
     }
 
