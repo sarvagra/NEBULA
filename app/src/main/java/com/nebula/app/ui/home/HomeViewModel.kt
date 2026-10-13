@@ -55,6 +55,39 @@ class HomeViewModel(
     )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    fun refreshAll() {
+        if (_uiState.value.isRefreshing) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            try {
+                (roomRepository as? RoomRepositoryImpl)?.refreshRooms()
+                socialRepository.refresh()
+                val token = sessionManager?.getAuthToken()
+                if (!token.isNullOrBlank()) {
+                    com.nebula.app.data.backend.NebulaApiClient.authToken = token
+                    val profile = profileRepository.userProfile.value
+                    if (profile.isLoggedIn) {
+                        val result = com.nebula.app.data.backend.NebulaApiClient.getMe()
+                        if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                            val user = result.data.optJSONObject("data")
+                            if (user != null) {
+                                val refreshed = profile.copy(
+                                    displayName = user.optString("displayName", profile.displayName),
+                                    username = user.optString("username", profile.username),
+                                    email = user.optString("email", profile.email)
+                                )
+                                profileRepository.setLoggedInUser(refreshed)
+                                sessionManager?.saveUserProfile(refreshed)
+                            }
+                        }
+                    }
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(isRefreshing = false)
+            }
+        }
+    }
+
     init {
         // Collect Theme
         viewModelScope.launch {

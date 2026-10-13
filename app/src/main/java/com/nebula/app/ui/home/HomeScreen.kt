@@ -28,6 +28,10 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,6 +76,7 @@ import com.nebula.app.ui.settings.NebulaSettingsScreen
  * the profile navigation sidebar drawer, and modal sheets.
  */
 @Composable
+@OptIn(ExperimentalMaterialApi::class)
 fun HomeScreen(
     viewModel: HomeViewModel,
     modifier: Modifier = Modifier
@@ -79,6 +84,10 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val theme = Theme.current
     val context = LocalContext.current
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = uiState.isRefreshing,
+        onRefresh = viewModel::refreshAll
+    )
 
     // Quick Toast feedback
     LaunchedEffect(uiState.quickToastMessage) {
@@ -104,6 +113,7 @@ fun HomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .pullRefresh(pullRefreshState)
             .background(theme.colors.background)
     ) {
         // 1. MAIN CONTENT (Full screen destination, room, chat detail, or tab screen)
@@ -365,6 +375,11 @@ fun HomeScreen(
                                         .align(Alignment.TopEnd)
                                 )
                             }
+                            PullRefreshIndicator(
+                                refreshing = uiState.isRefreshing,
+                                state = pullRefreshState,
+                                modifier = Modifier.align(Alignment.TopCenter)
+                            )
                         }
                     }
                 }

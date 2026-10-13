@@ -57,6 +57,7 @@ data class HomeUiState(
     val authErrorMessage: String? = null,
     val backendUrl: String = com.nebula.app.data.backend.NebulaApiClient.baseUrl,
     val isCreatingRoom: Boolean = false,
+    val isRefreshing: Boolean = false,
     val roomCreationQuote: String = "Finding somewhere to be.",
     val fullScreenDestination: FullScreenDestination? = null
 )
