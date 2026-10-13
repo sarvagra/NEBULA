@@ -368,7 +368,7 @@ fun NebulaRoomScreen(
                                 </head>
                                 <body>
                                 <iframe id="player"
-                                  src="https://www.youtube-nocookie.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0"
+                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com"
                                   referrerpolicy="strict-origin-when-cross-origin"
                                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                                   allowfullscreen>
@@ -377,7 +377,7 @@ fun NebulaRoomScreen(
                                   function playVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: '' }), '*'); }
                                   function pauseVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }), '*'); }
                                   function seekTo(s) { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*'); }
-                                  function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube-nocookie.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0'; }
+                                  function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com'; }
                                 </script>
                                 </body>
                                 </html>
@@ -725,7 +725,7 @@ fun NebulaRoomScreen(
                                 </head>
                                 <body>
                                 <iframe id="player"
-                                  src="https://www.youtube-nocookie.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0"
+                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com"
                                   referrerpolicy="strict-origin-when-cross-origin"
                                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                                   allowfullscreen>
@@ -752,7 +752,7 @@ fun NebulaRoomScreen(
                                   function loadVideo(id) {
                                     var f = document.getElementById('player');
                                     if (f) {
-                                      f.src = 'https://www.youtube-nocookie.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0';
+                                      f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com';
                                     }
                                   }
                                 </script>

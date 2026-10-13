@@ -89,6 +89,25 @@ export async function resolveYoutube(req: Request, res: Response): Promise<void>
     }
 
     const oembedData = (await oembedRes.json()) as any;
+    let isEmbeddable = true;
+    if (config.media.youtubeApiKey) {
+      const statusRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=status&id=${videoId}&key=${config.media.youtubeApiKey}`
+      );
+      if (statusRes.ok) {
+        const statusData = (await statusRes.json()) as any;
+        isEmbeddable = statusData.items?.[0]?.status?.embeddable !== false;
+      }
+    }
+    if (!isEmbeddable) {
+      res.status(422).json({
+        success: false,
+        code: 'VIDEO_NOT_EMBEDDABLE',
+        error: 'This video cannot be played inside a room. Choose another video.',
+        isEmbeddable: false,
+      });
+      return;
+    }
 
     res.json({
       success: true,
@@ -100,7 +119,7 @@ export async function resolveYoutube(req: Request, res: Response): Promise<void>
         thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
         embedUrl: `https://www.youtube.com/embed/${videoId}`,
         sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        isEmbeddable: true,
+        isEmbeddable,
       },
     });
   } catch (err: any) {

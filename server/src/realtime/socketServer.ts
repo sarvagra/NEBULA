@@ -70,6 +70,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as AuthenticatedSocketUser;
+    const joinedRooms = new Set<string>();
     console.log(`[Socket Authenticated] ${user.displayName} (@${user.username}) connected [${socket.id}]`);
 
     // Rate limiting tracking for this socket
@@ -120,6 +121,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         }
 
         socket.join(`room:${room._id.toString()}`);
+        joinedRooms.add(room._id.toString());
 
         io.to(`room:${room._id.toString()}`).emit('participant:joined', {
           userId: user.id,
@@ -140,11 +142,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
         if (room) {
           room.participants = room.participants.filter((p) => p.userId !== user.id);
           if (room.participants.length === 0) {
-            room.isEnded = true;
-            await RoomModel.findByIdAndDelete(data.roomId);
-            socket.emit('room:ended', { roomId: data.roomId });
-            io.to(`room:${data.roomId}`).emit('room:ended', { roomId: data.roomId });
-            io.emit('room:ended', { roomId: data.roomId });
+            // Rooms are durable. An empty room is inactive, not destroyed, so
+            // members can return without losing the room and its media state.
+            await room.save();
           } else {
             if (room.hostId === user.id) {
               room.hostId = room.participants[0].userId;
@@ -161,6 +161,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         });
 
         socket.leave(`room:${data.roomId}`);
+        joinedRooms.delete(data.roomId);
       } catch (err: any) {
         // Ignored on leave
       }
@@ -393,8 +394,26 @@ export function initSocketServer(httpServer: HttpServer): Server {
       }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       console.log(`[Socket Disconnected] ${user.displayName} (${socket.id})`);
+      for (const roomId of joinedRooms) {
+        try {
+          const room = await RoomModel.findById(roomId);
+          if (!room) continue;
+          room.participants = room.participants.filter((p) => p.userId !== user.id);
+          if (room.hostId === user.id && room.participants.length > 0) {
+            room.hostId = room.participants[0].userId;
+            room.participants[0].isHost = true;
+          }
+          await room.save();
+          io.to(`room:${roomId}`).emit('participant:left', {
+            userId: user.id,
+            displayName: user.displayName,
+          });
+        } catch {
+          // Disconnect cleanup is best-effort; room data remains durable.
+        }
+      }
     });
   });
 
