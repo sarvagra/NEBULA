@@ -182,6 +182,7 @@ fun NebulaRoomScreen(
     var mediaSendTimestamps by remember { mutableStateOf(listOf<Long>()) }
     var cooldownSecondsRemaining by remember { mutableIntStateOf(0) }
     var isMediaBanned by remember { mutableStateOf(false) }
+    var pendingImageData by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(cooldownSecondsRemaining) {
         if (cooldownSecondsRemaining > 0) {
@@ -249,8 +250,7 @@ fun NebulaRoomScreen(
                             val base64 = android.util.Base64.encodeToString(compressed, android.util.Base64.NO_WRAP)
                             val dataUrl = "data:image/jpeg;base64,$base64"
 
-                            onSendRoomMessage("[IMG:$dataUrl]")
-                            Toast.makeText(context, "Photo preview shared", Toast.LENGTH_SHORT).show()
+                            pendingImageData = dataUrl
                         }
                     }
                 } catch (e: Exception) {
@@ -354,7 +354,14 @@ fun NebulaRoomScreen(
 
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    view?.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
+                                    view?.evaluateJavascript(
+                                        if (room.isPlaying) {
+                                            "if (typeof playVideo === 'function') playVideo();"
+                                        } else {
+                                            "if (typeof pauseVideo === 'function') pauseVideo();"
+                                        },
+                                        null
+                                    )
                                 }
                             }
                             currentLoadedId = videoId
@@ -717,7 +724,14 @@ fun NebulaRoomScreen(
 
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    view?.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
+                                    view?.evaluateJavascript(
+                                        if (room.isPlaying) {
+                                            "if (typeof playVideo === 'function') playVideo();"
+                                        } else {
+                                            "if (typeof pauseVideo === 'function') pauseVideo();"
+                                        },
+                                        null
+                                    )
                                 }
                             }
                             currentLoadedId = videoId
@@ -814,32 +828,6 @@ fun NebulaRoomScreen(
                     )
                 }
 
-                // Play button overlay when paused
-                if (!room.isPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .align(Alignment.Center)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.65f))
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                            .clickable {
-                                if (isCurrentUserAdmin) {
-                                    onTogglePlayPause()
-                                } else {
-                                    Toast.makeText(context, "Playback is controlled by the room host (${room.hostName.split(" ").first()})", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
             }
         }
 
@@ -1402,6 +1390,42 @@ fun NebulaRoomScreen(
             },
             onDismiss = {
                 selectedMemberForProfile = null
+            }
+        )
+    }
+
+    pendingImageData?.let { imageData ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingImageData = null },
+            title = { Text("Send photo?") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val bytes = android.util.Base64.decode(imageData.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                    val preview = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (preview != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = preview.asImageBitmap(),
+                            contentDescription = "Photo preview",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Send this image to everyone in the room?")
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onSendRoomMessage("[IMG:$imageData]")
+                    pendingImageData = null
+                    Toast.makeText(context, "Photo sent", Toast.LENGTH_SHORT).show()
+                }) { Text("Send") }
+            },
+            dismissButton = {
+                Button(onClick = { pendingImageData = null }) { Text("Cancel") }
             }
         )
     }
@@ -2127,6 +2151,7 @@ private fun ParticipantAvatarPill(
 @Composable
 private fun RoomChatMessageItem(message: RoomChatMessage) {
     val theme = Theme.current
+    var showFullImage by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -2178,12 +2203,12 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
             val isImageMessage = (message.content.startsWith("[IMG:") && message.content.contains("]")) ||
                 message.content.startsWith("data:image/") ||
                 message.content.contains("Shared Photo")
+            val rawUrl = when {
+                message.content.startsWith("[IMG:") -> message.content.substringAfter("[IMG:").substringBefore("]")
+                message.content.startsWith("data:image/") -> message.content
+                else -> ""
+            }
             if (isImageMessage) {
-                val rawUrl = when {
-                    message.content.startsWith("[IMG:") -> message.content.substringAfter("[IMG:").substringBefore("]")
-                    message.content.startsWith("data:image/") -> message.content
-                    else -> ""
-                }
                 val caption = if (message.content.startsWith("[IMG:")) {
                     message.content.substringAfter("]", "").trim()
                 } else ""
@@ -2207,6 +2232,7 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
                         .clip(RoundedCornerShape(12.dp))
                         .background(theme.colors.surfaceElevated)
                         .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                        .clickable { showFullImage = true }
                 ) {
                     if (decodedBitmap != null) {
                         androidx.compose.foundation.Image(
@@ -2265,6 +2291,40 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
                         fontSize = 13.sp
                     )
                 )
+            }
+
+            if (showFullImage) {
+                androidx.compose.ui.window.Dialog(onDismissRequest = { showFullImage = false }) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                            .clickable { showFullImage = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val fullBitmap = if (rawUrl.startsWith("data:image/")) {
+                            try {
+                                val bytes = android.util.Base64.decode(rawUrl.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            } catch (_: Exception) { null }
+                        } else null
+                        if (fullBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = fullBitmap.asImageBitmap(),
+                                contentDescription = "Full-size shared photo",
+                                modifier = Modifier.fillMaxWidth(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        } else {
+                            coil.compose.AsyncImage(
+                                model = rawUrl,
+                                contentDescription = "Full-size shared photo",
+                                modifier = Modifier.fillMaxWidth(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        }
+                    }
+                }
             }
         }
     }

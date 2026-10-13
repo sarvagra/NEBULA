@@ -155,6 +155,11 @@ class HomeViewModel(
                 (roomRepository as? RoomRepositoryImpl)?.refreshRooms()
             } catch (_: Exception) {}
         }
+        viewModelScope.launch {
+            try {
+                socialRepository.refresh()
+            } catch (_: Exception) {}
+        }
 
         // Restore session from SessionManager or Firebase
         viewModelScope.launch {

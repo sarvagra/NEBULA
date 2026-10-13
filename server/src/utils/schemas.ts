@@ -25,7 +25,7 @@ export const RefreshTokenSchema = z.object({
 
 export const UpdateProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(60).optional(),
-  username: z.string().trim().min(3).max(20).regex(/^[a-z0-9_]+$/, 'Username must be between 3 and 20 characters containing only lowercase letters, numbers, and underscores').optional(),
+  username: z.string().trim().min(3).max(16).regex(/^(?!_)(?!.*_$)[a-z0-9_]+$/, 'Username must be 3 to 16 characters using lowercase letters, numbers, and underscores, without leading or trailing underscores').optional(),
   bio: z.string().trim().max(500).optional(),
   status: z.string().trim().max(100).optional(),
   bannerIndex: z.number().int().min(0).max(4).optional(),
@@ -40,7 +40,7 @@ export const UpdateProfileSchema = z.object({
 
 export const CompleteOnboardingSchema = z.object({
   displayName: z.string().trim().min(2).max(60),
-  username: z.string().trim().min(3).max(20).regex(/^[a-z0-9_]+$/, 'Username must be between 3 and 20 characters containing only lowercase letters, numbers, and underscores'),
+  username: z.string().trim().min(3).max(16).regex(/^(?!_)(?!.*_$)[a-z0-9_]+$/, 'Username must be 3 to 16 characters using lowercase letters, numbers, and underscores, without leading or trailing underscores'),
   dateOfBirth: z.string().trim().max(60).optional(),
   gender: z.string().trim().max(60).optional(),
   avatarUrl: z.string().trim().max(5000000).optional(),

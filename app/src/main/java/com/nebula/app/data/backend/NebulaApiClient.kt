@@ -384,6 +384,54 @@ object NebulaApiClient {
         return request("/chat/upload", "POST", body)
     }
 
+    suspend fun getFriends(): ApiResponse<JSONArray> {
+        val res = request("/friends", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun getFriendRequests(): ApiResponse<JSONArray> {
+        val res = request("/friends/requests", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun getSuggestedPeople(): ApiResponse<JSONArray> {
+        val res = request("/friends/suggested", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun sendFriendRequest(userId: String): ApiResponse<JSONObject> =
+        request("/friends/request", "POST", JSONObject().put("recipientId", userId))
+
+    suspend fun acceptFriendRequest(requestId: String): ApiResponse<JSONObject> =
+        request("/friends/request/$requestId/accept", "POST")
+
+    suspend fun declineFriendRequest(requestId: String): ApiResponse<JSONObject> =
+        request("/friends/request/$requestId/decline", "POST")
+
+    suspend fun sendDirectMessage(conversationId: String, text: String): ApiResponse<JSONObject> =
+        request(
+            "/chat",
+            "POST",
+            JSONObject().put("conversationId", conversationId).put("text", text)
+        )
+
+    suspend fun getConversationMessages(conversationId: String): ApiResponse<JSONArray> {
+        val res = request("/chat/conversation/$conversationId", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
 
     // ==========================================
     // MEMBERSHIP & BILLING
