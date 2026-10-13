@@ -17,6 +17,7 @@ interface AuthenticatedSocketUser {
 }
 
 export function initSocketServer(httpServer: HttpServer): Server {
+  const disconnectGraceTimers = new Map<string, NodeJS.Timeout>();
   const io = new Server(httpServer, {
     cors: {
       origin: config.server.isProduction ? config.server.corsAllowedOrigins : '*',
@@ -122,6 +123,12 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
         socket.join(`room:${room._id.toString()}`);
         joinedRooms.add(room._id.toString());
+        const graceKey = `${room._id.toString()}:${user.id}`;
+        const pendingCleanup = disconnectGraceTimers.get(graceKey);
+        if (pendingCleanup) {
+          clearTimeout(pendingCleanup);
+          disconnectGraceTimers.delete(graceKey);
+        }
 
         io.to(`room:${room._id.toString()}`).emit('participant:joined', {
           userId: user.id,
@@ -444,22 +451,28 @@ export function initSocketServer(httpServer: HttpServer): Server {
     socket.on('disconnect', async () => {
       console.log(`[Socket Disconnected] ${user.displayName} (${socket.id})`);
       for (const roomId of joinedRooms) {
-        try {
-          const room = await RoomModel.findById(roomId);
-          if (!room) continue;
-          room.participants = room.participants.filter((p) => p.userId !== user.id);
-          if (room.hostId === user.id && room.participants.length > 0) {
-            room.hostId = room.participants[0].userId;
-            room.participants[0].isHost = true;
+        const graceKey = `${roomId}:${user.id}`;
+        const timer = setTimeout(async () => {
+          disconnectGraceTimers.delete(graceKey);
+          try {
+            const room = await RoomModel.findById(roomId);
+            if (!room || !room.participants.some((p) => p.userId === user.id)) return;
+            room.participants = room.participants.filter((p) => p.userId !== user.id);
+            if (room.hostId === user.id && room.participants.length > 0) {
+              room.hostId = room.participants[0].userId;
+              room.participants[0].isHost = true;
+            }
+            await room.save();
+            io.to(`room:${roomId}`).emit('participant:left', {
+              userId: user.id,
+              displayName: user.displayName,
+            });
+          } catch {
+            // Disconnect cleanup is best-effort; room data remains durable.
           }
-          await room.save();
-          io.to(`room:${roomId}`).emit('participant:left', {
-            userId: user.id,
-            displayName: user.displayName,
-          });
-        } catch {
-          // Disconnect cleanup is best-effort; room data remains durable.
-        }
+        }, 15000);
+        timer.unref();
+        disconnectGraceTimers.set(graceKey, timer);
       }
     });
   });
