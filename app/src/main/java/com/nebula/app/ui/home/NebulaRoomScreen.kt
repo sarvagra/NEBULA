@@ -345,12 +345,17 @@ fun NebulaRoomScreen(
                                 allowFileAccess = true
                                 allowContentAccess = true
                                 databaseEnabled = true
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                 mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             }
+                            android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             webChromeClient = object : android.webkit.WebChromeClient() {}
                             webViewClient = object : android.webkit.WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean = false
+
+                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    view?.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
+                                }
                             }
                             currentLoadedId = videoId
                             val html = """
@@ -368,7 +373,7 @@ fun NebulaRoomScreen(
                                 </head>
                                 <body>
                                 <iframe id="player"
-                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com"
+                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com"
                                   referrerpolicy="strict-origin-when-cross-origin"
                                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                                   allowfullscreen>
@@ -377,12 +382,12 @@ fun NebulaRoomScreen(
                                   function playVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: '' }), '*'); }
                                   function pauseVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }), '*'); }
                                   function seekTo(s) { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*'); }
-                                  function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com'; }
+                                  function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com'; }
                                 </script>
                                 </body>
                                 </html>
                             """.trimIndent()
-                            loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                            loadDataWithBaseURL("https://nebula-73kb.onrender.com/", html, "text/html", "UTF-8", null)
                         }
                     },
                     update = { webView ->
@@ -393,9 +398,9 @@ fun NebulaRoomScreen(
                             webView.evaluateJavascript("loadVideo('$targetId');", null)
                         }
                         if (room.isPlaying) {
-                            webView.evaluateJavascript("playVideo();", null)
+                            webView.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
                         } else {
-                            webView.evaluateJavascript("pauseVideo();", null)
+                            webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
                         }
                         val currentSec = room.playbackPositionMs / 1000L
                         if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 3) {
@@ -695,9 +700,9 @@ fun NebulaRoomScreen(
                                 allowFileAccess = true
                                 allowContentAccess = true
                                 databaseEnabled = true
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                 mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             }
+                            android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             webChromeClient = object : android.webkit.WebChromeClient() {
                                 override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
                                     android.util.Log.d("NebulaPlayer", "Player: ${consoleMessage?.message()}")
@@ -707,6 +712,11 @@ fun NebulaRoomScreen(
                             webViewClient = object : android.webkit.WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
                                     return false
+                                }
+
+                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    view?.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
                                 }
                             }
                             currentLoadedId = videoId
@@ -725,7 +735,7 @@ fun NebulaRoomScreen(
                                 </head>
                                 <body>
                                 <iframe id="player"
-                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com"
+                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com"
                                   referrerpolicy="strict-origin-when-cross-origin"
                                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                                   allowfullscreen>
@@ -752,14 +762,14 @@ fun NebulaRoomScreen(
                                   function loadVideo(id) {
                                     var f = document.getElementById('player');
                                     if (f) {
-                                      f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fwww.youtube.com';
+                                      f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com';
                                     }
                                   }
                                 </script>
                                 </body>
                                 </html>
                             """.trimIndent()
-                            loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                            loadDataWithBaseURL("https://nebula-73kb.onrender.com/", html, "text/html", "UTF-8", null)
                         }
                     },
                     update = { webView ->
@@ -770,9 +780,9 @@ fun NebulaRoomScreen(
                             webView.evaluateJavascript("loadVideo('$targetId');", null)
                         }
                         if (room.isPlaying) {
-                            webView.evaluateJavascript("playVideo();", null)
+                            webView.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
                         } else {
-                            webView.evaluateJavascript("pauseVideo();", null)
+                            webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
                         }
                     }
                 )
