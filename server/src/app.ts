@@ -117,12 +117,13 @@ export function createApp(): express.Application {
         status: 'ready',
         database: 'connected',
       });
-      app.get('/storage/:encodedKey', redirectToObject);
     } else {
       res.status(503).json({
         status: 'not_ready',
         database: dbState === 2 ? 'connecting' : 'disconnected',
       });
+
+      app.get('/storage/:encodedKey', redirectToObject);
     }
   });
 

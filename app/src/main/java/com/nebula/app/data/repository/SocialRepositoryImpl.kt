@@ -102,7 +102,7 @@ class SocialRepositoryImpl(
         _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
     }
 
-    suspend fun withdrawFriendRequest(userId: String) {
+    override suspend fun withdrawFriendRequest(userId: String) {
         if (apiClient.withdrawFriendRequest(userId) is ApiResponse.Success) {
             _suggestedPeople.value = _suggestedPeople.value.map {
                 if (it.id == userId) it.copy(friendRequestPending = false) else it

@@ -18,5 +18,6 @@ interface ISocialRepository {
     suspend fun acceptFriendRequest(requestId: String)
     suspend fun declineFriendRequest(requestId: String)
     suspend fun addFriend(user: NebulaUser)
+    suspend fun withdrawFriendRequest(userId: String)
     suspend fun refresh()
 }

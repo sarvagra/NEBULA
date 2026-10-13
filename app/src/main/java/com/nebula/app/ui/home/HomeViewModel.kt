@@ -642,7 +642,7 @@ class HomeViewModel(
 
     fun onCancelFriendRequest(user: NebulaUser) {
         viewModelScope.launch {
-            (socialRepository as? SocialRepositoryImpl)?.withdrawFriendRequest(user.id)
+            socialRepository.withdrawFriendRequest(user.id)
         }
     }
 
