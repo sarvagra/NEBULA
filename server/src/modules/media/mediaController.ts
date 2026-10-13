@@ -31,7 +31,7 @@ export async function searchYoutube(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(
+    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoSyndicated=true&q=${encodeURIComponent(
       query
     )}&maxResults=${maxResults}&key=${apiKey}`;
 
@@ -96,7 +96,8 @@ export async function resolveYoutube(req: Request, res: Response): Promise<void>
       );
       if (statusRes.ok) {
         const statusData = (await statusRes.json()) as any;
-        isEmbeddable = statusData.items?.[0]?.status?.embeddable !== false;
+        const status = statusData.items?.[0]?.status;
+        isEmbeddable = status?.embeddable === true && status?.privacyStatus === 'public';
       }
     }
     if (!isEmbeddable) {
