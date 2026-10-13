@@ -269,22 +269,17 @@ async function runMultiClientSyncTest() {
     console.log('  ✅ PASS 10: Client B left room, Client A received participant:left');
     passedTests++;
 
-    // 14. Host leaves room -> room automatically ended (isEnded: true)
-    const roomEndedPromise = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout waiting for room:ended')), 5000);
-      socketA.once('room:ended', (payload: any) => {
-        clearTimeout(timeout);
-        if (payload.roomId === room.id) {
-          resolve();
-        } else {
-          reject(new Error(`Expected room ended for ${room.id}`));
-        }
-      });
-    });
-
+    // 14. Host leaves last -> room remains durable and can be rejoined later.
     socketA.emit('room:leave', { roomId: room.id });
-    await roomEndedPromise;
-    console.log('  ✅ PASS 11: Host left last, room marked ended and emitted room:ended');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const persistedRoomResponse = await fetch(`${API_BASE}/api/v1/rooms/${room.id}`, {
+      headers: { Authorization: `Bearer ${clientA.token}` },
+    });
+    const persistedRoom = (await persistedRoomResponse.json()) as any;
+    if (!persistedRoom.success || persistedRoom.data?._id !== room.id && persistedRoom.data?.id !== room.id) {
+      throw new Error(`Expected durable room after last participant left: ${JSON.stringify(persistedRoom)}`);
+    }
+    console.log('  ✅ PASS 11: Last participant left, room remained durable for later rejoin');
     passedTests++;
 
     // Cleanup sockets
