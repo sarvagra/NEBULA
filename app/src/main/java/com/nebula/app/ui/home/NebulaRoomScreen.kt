@@ -1366,8 +1366,8 @@ private fun NebulaYoutubePlayer(
                 }, "Nebula")
                 player.value = this
                 val html = """
-                    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"></head>
-                    <body style="margin:0;background:#000"><div id="p"></div><script src="https://www.youtube.com/iframe_api"></script><script>
+                    <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body,#p{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}</style></head>
+                    <body><div id="p"></div><script src="https://www.youtube.com/iframe_api"></script><script>
                     let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false;
                     function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1},events:{onReady:()=>{ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
                     function applyPending(){if(!ready||!pending)return;let s=pending; if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
