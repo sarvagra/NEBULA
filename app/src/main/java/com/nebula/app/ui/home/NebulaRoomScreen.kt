@@ -1333,7 +1333,10 @@ private fun NebulaYoutubePlayer(
     onHostSample: (Long, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
+    // Realme's app-clone profile is a separate Android user on the same audio
+    // device. Keep its YouTube renderer silent so it cannot steal audio focus
+    // from the original profile and pause the room's shared playback.
+    val muteAudioForAndroidProfile = android.os.Process.myUid() / 100000 >= 900
     val player = remember(roomId, videoId) { mutableStateOf<WebView?>(null) }
     val latestSample = remember { AtomicReference(onHostSample) }
     val latestIsHost = remember { AtomicBoolean(isHost) }
@@ -1375,9 +1378,9 @@ private fun NebulaYoutubePlayer(
                 val html = """
                     <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}body{position:fixed;inset:0}#p{position:absolute;top:0;left:0}</style></head>
                     <body><div id="p"></div><script>
-                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false;
+                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false, muteAudioForProfile=$muteAudioForAndroidProfile;
                     function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
-                    function applyPending(){if(!ready||!pending)return;let s=pending; if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
+                    function applyPending(){if(!ready||!pending)return;let s=pending; if(muteAudioForProfile)player.mute(); if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
                     function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;applyPending();}
                     setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
                     let apiScript=document.createElement('script');apiScript.src='https://www.youtube.com/iframe_api';document.head.appendChild(apiScript);
