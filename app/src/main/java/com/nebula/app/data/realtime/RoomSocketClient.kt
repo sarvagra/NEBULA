@@ -58,6 +58,13 @@ class RoomSocketClient(
             }
             on("media:sync") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
+                state.optJSONObject("mediaState")?.let { mediaState ->
+                    mediaState.put(
+                        "playbackPositionMs",
+                        mediaState.optLong("playbackPositionMs", state.optLong("positionMs", 0L))
+                    )
+                    onMediaSwitch(mediaState)
+                }
                 applyState(
                     state.optLong("positionMs", state.optLong("position", 0L) * 1000L),
                     state.optBoolean("isPlaying", false),

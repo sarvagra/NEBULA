@@ -244,6 +244,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
           position: currentPositionMs / 1000,
           positionMs: currentPositionMs,
           isPlaying: livePlayback?.isPlaying ?? room.mediaState.isPlaying,
+          mediaState: {
+            title: room.mediaState.title,
+            subtitle: room.mediaState.subtitle,
+            mediaUrl: room.mediaState.mediaUrl,
+            durationSeconds: room.mediaState.durationSeconds,
+            playbackPosition: currentPositionMs / 1000,
+            playbackPositionMs: currentPositionMs,
+            isPlaying: livePlayback?.isPlaying ?? room.mediaState.isPlaying,
+          },
           timestamp: Date.now(),
           senderId: room.hostId,
         });
