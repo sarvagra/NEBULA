@@ -5,13 +5,13 @@ import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 class RoomSocketClient(
     private val tokenProvider: () -> String?,
-    private val onMediaState: (positionSeconds: Long, isPlaying: Boolean) -> Unit,
+    private val onMediaState: (positionMs: Long, isPlaying: Boolean) -> Unit,
     private val onMediaSwitch: (JSONObject) -> Unit,
     private val onChatMessage: (JSONObject) -> Unit
 ) {
@@ -19,7 +19,7 @@ class RoomSocketClient(
     private var roomId: String? = null
     private var hostId: String? = null
     private var heartbeat: ScheduledExecutorService? = null
-    private var basePositionSeconds = 0L
+    private var basePositionMs = 0L
     private var baseTimestampMs = 0L
     private var playing = false
 
@@ -28,39 +28,47 @@ class RoomSocketClient(
         this.roomId = roomId
         this.hostId = hostId
         val token = tokenProvider()?.takeIf { it.isNotBlank() } ?: return
-        val root = "https://nebula-73kb.onrender.com"
         val options = IO.Options().apply {
             auth = mapOf("token" to token)
             transports = arrayOf("websocket", "polling")
             reconnection = true
         }
-        socket = IO.socket(root, options).apply {
+        socket = IO.socket("https://nebula-73kb.onrender.com", options).apply {
             on(Socket.EVENT_CONNECT) {
                 emit("room:join", JSONObject().put("roomId", roomId))
             }
             on("media:sync") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
-                val position = state.optLong("position", 0L)
-                val isPlaying = state.optBoolean("isPlaying", false)
-                basePositionSeconds = position
-                baseTimestampMs = state.optLong("timestamp", System.currentTimeMillis())
-                playing = isPlaying
-                onMediaState(position, isPlaying)
+                applyState(
+                    state.optLong("positionMs", state.optLong("position", 0L) * 1000L),
+                    state.optBoolean("isPlaying", false),
+                    state.optLong("timestamp", System.currentTimeMillis())
+                )
             }
             on("media:play") { args -> handlePlayback(args, true) }
             on("media:pause") { args -> handlePlayback(args, false) }
-            on("media:seek") { args -> handlePlayback(args, playing) }
+            on("media:seek") { args ->
+                val payload = args.firstOrNull() as? JSONObject ?: return@on
+                applyState(
+                    payload.optLong("positionMs", payload.optLong("position", 0L) * 1000L),
+                    playing,
+                    payload.optLong("timestamp", System.currentTimeMillis())
+                )
+            }
             on("media:switch") { args ->
                 val payload = args.firstOrNull() as? JSONObject ?: return@on
                 val mediaState = payload.optJSONObject("mediaState") ?: return@on
-                basePositionSeconds = mediaState.optLong("playbackPosition", 0L)
-                baseTimestampMs = System.currentTimeMillis()
+                mediaState.put(
+                    "playbackPositionMs",
+                    mediaState.optLong("playbackPositionMs", mediaState.optLong("playbackPosition", 0L) * 1000L)
+                )
+                basePositionMs = mediaState.optLong("playbackPositionMs")
+                baseTimestampMs = payload.optLong("timestamp", System.currentTimeMillis())
                 playing = mediaState.optBoolean("isPlaying", false)
                 onMediaSwitch(mediaState)
             }
             on("chat:message") { args ->
-                val message = args.firstOrNull() as? JSONObject ?: return@on
-                onChatMessage(message)
+                (args.firstOrNull() as? JSONObject)?.let(onChatMessage)
             }
             connect()
         }
@@ -72,24 +80,23 @@ class RoomSocketClient(
         disconnect()
     }
 
-    fun play(positionSeconds: Long) = emitPlayback("media:play", positionSeconds, true)
+    fun play(positionMs: Long) = emitPlayback("media:play", positionMs, true)
 
-    fun pause(positionSeconds: Long) = emitPlayback("media:pause", positionSeconds, false)
+    fun pause(positionMs: Long) = emitPlayback("media:pause", positionMs, false)
 
-    fun seek(positionSeconds: Long) {
-        basePositionSeconds = positionSeconds.coerceAtLeast(0L)
+    fun seek(positionMs: Long) {
+        basePositionMs = positionMs.coerceAtLeast(0L)
         baseTimestampMs = System.currentTimeMillis()
         socket?.emit(
             "media:seek",
-            JSONObject().put("roomId", roomId).put("position", basePositionSeconds)
+            JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
         )
     }
 
     fun switchMedia(title: String, mediaUrl: String, durationSeconds: Long = 0L) {
         socket?.emit(
             "media:switch",
-            JSONObject()
-                .put("roomId", roomId)
+            JSONObject().put("roomId", roomId)
                 .put("title", title)
                 .put("mediaUrl", mediaUrl)
                 .put("durationSeconds", durationSeconds)
@@ -99,9 +106,7 @@ class RoomSocketClient(
     fun sendChat(text: String, mediaUrl: String? = null) {
         val currentRoom = roomId ?: return
         if (text.isBlank() && mediaUrl.isNullOrBlank()) return
-        val payload = JSONObject()
-            .put("roomId", currentRoom)
-            .put("text", text)
+        val payload = JSONObject().put("roomId", currentRoom).put("text", text)
         if (!mediaUrl.isNullOrBlank()) payload.put("mediaUrl", mediaUrl)
         socket?.emit("chat:message", payload)
     }
@@ -116,23 +121,35 @@ class RoomSocketClient(
         hostId = null
     }
 
-    private fun emitPlayback(event: String, positionSeconds: Long, isPlaying: Boolean) {
-        basePositionSeconds = positionSeconds.coerceAtLeast(0L)
+    private fun emitPlayback(event: String, positionMs: Long, isPlaying: Boolean) {
+        basePositionMs = positionMs.coerceAtLeast(0L)
         baseTimestampMs = System.currentTimeMillis()
         playing = isPlaying
         socket?.emit(
             event,
-            JSONObject().put("roomId", roomId).put("position", basePositionSeconds)
+            JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
         )
     }
 
     private fun handlePlayback(args: Array<Any>, isPlaying: Boolean) {
         val payload = args.firstOrNull() as? JSONObject ?: return
-        val position = payload.optLong("position", 0L)
-        basePositionSeconds = position
-        baseTimestampMs = payload.optLong("timestamp", System.currentTimeMillis())
+        applyState(
+            payload.optLong("positionMs", payload.optLong("position", 0L) * 1000L),
+            isPlaying,
+            payload.optLong("timestamp", System.currentTimeMillis())
+        )
+    }
+
+    private fun applyState(positionMs: Long, isPlaying: Boolean, timestampMs: Long) {
+        basePositionMs = positionMs.coerceAtLeast(0L)
+        baseTimestampMs = timestampMs
         playing = isPlaying
-        onMediaState(position, isPlaying)
+        val projected = if (isPlaying) {
+            basePositionMs + (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
+        } else {
+            basePositionMs
+        }
+        onMediaState(projected, isPlaying)
     }
 
     private fun startHeartbeat() {
@@ -142,12 +159,13 @@ class RoomSocketClient(
             val currentRoom = roomId ?: return@scheduleAtFixedRate
             if (!isHost()) return@scheduleAtFixedRate
             val now = System.currentTimeMillis()
-            val position = basePositionSeconds + if (playing) ((now - baseTimestampMs) / 1000L) else 0L
+            val positionMs = basePositionMs + if (playing) {
+                (now - baseTimestampMs).coerceAtLeast(0L)
+            } else 0L
             currentSocket.emit(
                 "media:sync",
-                JSONObject()
-                    .put("roomId", currentRoom)
-                    .put("position", position)
+                JSONObject().put("roomId", currentRoom)
+                    .put("positionMs", positionMs)
                     .put("isPlaying", playing)
                     .put("timestamp", now)
             )

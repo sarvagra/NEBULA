@@ -39,8 +39,8 @@ class RoomRepositoryImpl(
     private val realtimeScope = CoroutineScope(Dispatchers.IO)
     private val socketClient = RoomSocketClient(
         tokenProvider = { apiClient.authToken },
-        onMediaState = { positionSeconds, isPlaying ->
-            applyRealtimeMediaState(positionSeconds, isPlaying)
+        onMediaState = { positionMs, isPlaying ->
+            applyRealtimeMediaState(positionMs, isPlaying)
         },
         onMediaSwitch = {
             realtimeScope.launch { syncActiveRoom() }
@@ -245,7 +245,7 @@ class RoomRepositoryImpl(
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        socketClient.seek(positionMs / 1000L)
+        socketClient.seek(positionMs)
     }
 
     override suspend fun updateMedia(title: String, mediaUrl: String, durationSeconds: Long): NebulaRoom? {
@@ -272,16 +272,16 @@ class RoomRepositoryImpl(
         return updated
     }
 
-    private fun applyRealtimeMediaState(positionSeconds: Long, isPlaying: Boolean) {
+    private fun applyRealtimeMediaState(positionMs: Long, isPlaying: Boolean) {
         val current = _activeRoom.value ?: return
-        val positionMs = positionSeconds.coerceAtLeast(0L) * 1000L
+        val safePositionMs = positionMs.coerceAtLeast(0L)
         val updated = current.copy(
             isPlaying = isPlaying,
-            playbackPositionMs = positionMs,
+            playbackPositionMs = safePositionMs,
             playbackPositionLabel = String.format(
                 "%02d:%02d",
-                positionSeconds / 60L,
-                positionSeconds % 60L
+                safePositionMs / 60000L,
+                (safePositionMs / 1000L) % 60L
             )
         )
         _activeRoom.value = updated
@@ -359,7 +359,7 @@ class RoomRepositoryImpl(
         val mediaTitle = mediaObj?.optString("title", "Ambient Stream") ?: "Ambient Stream"
         val mediaSubtitle = mediaObj?.optString("subtitle", "Synchronized Session") ?: "Synchronized Session"
         val isPlaying = mediaObj?.optBoolean("isPlaying", true) ?: true
-        val positionSeconds = mediaObj?.optLong("playbackPosition", 0L) ?: 0L
+        val positionMs = mediaObj?.optDouble("playbackPosition", 0.0)?.times(1000.0)?.toLong() ?: 0L
         val durationSeconds = mediaObj?.optLong("durationSeconds", 3600L) ?: 3600L
 
         val participantsJson = json.optJSONArray("participants") ?: JSONArray()
@@ -433,8 +433,8 @@ class RoomRepositoryImpl(
                 listOf(RoomParticipant(user = NebulaUser.CurrentUser, isHost = true))
             },
             isPlaying = isPlaying,
-            playbackPositionMs = positionSeconds * 1000L,
-            playbackPositionLabel = String.format("%02d:%02d", positionSeconds / 60, positionSeconds % 60),
+            playbackPositionMs = positionMs,
+            playbackPositionLabel = String.format("%02d:%02d", positionMs / 60000L, (positionMs / 1000L) % 60L),
             durationLabel = String.format("%02d:%02d", durationSeconds / 60, durationSeconds % 60),
             tags = if (parsedTags.isNotEmpty()) parsedTags else listOf("Social", "Cinema"),
             playMode = PlayMode.POLL_PLAY

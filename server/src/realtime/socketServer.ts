@@ -131,6 +131,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         });
         socket.emit('media:sync', {
           position: room.mediaState.playbackPosition,
+          positionMs: room.mediaState.playbackPosition * 1000,
           isPlaying: room.mediaState.isPlaying,
           timestamp: Date.now(),
           senderId: room.hostId,
@@ -194,7 +195,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
         await room.save();
 
         io.to(`room:${data.roomId}`).emit('media:switch', {
-          mediaState: room.mediaState,
+          mediaState: {
+            title: room.mediaState.title,
+            subtitle: room.mediaState.subtitle,
+            mediaUrl: room.mediaState.mediaUrl,
+            durationSeconds: room.mediaState.durationSeconds,
+            playbackPosition: room.mediaState.playbackPosition,
+            isPlaying: room.mediaState.isPlaying,
+            playbackPositionMs: room.mediaState.playbackPosition * 1000,
+          },
           senderId: user.id,
           timestamp: Date.now(),
         });
@@ -204,7 +213,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
     });
 
     // 2. SYNCHRONIZED MEDIA (STRICT HOST PERMISSION ONLY)
-    socket.on('media:play', async (data: { roomId: string; position: number }) => {
+    socket.on('media:play', async (data: { roomId: string; positionMs?: number; position?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -217,13 +226,14 @@ export function initSocketServer(httpServer: HttpServer): Server {
           return;
         }
 
-        const safePosition = Math.max(0, Number(data.position) || 0);
+        const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         room.mediaState.isPlaying = true;
-        room.mediaState.playbackPosition = safePosition;
+        room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
 
         socket.to(`room:${data.roomId}`).emit('media:play', {
-          position: safePosition,
+          position: safePositionMs / 1000,
+          positionMs: safePositionMs,
           senderId: user.id,
           timestamp: Date.now(),
         });
@@ -232,7 +242,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       }
     });
 
-    socket.on('media:pause', async (data: { roomId: string; position: number }) => {
+    socket.on('media:pause', async (data: { roomId: string; positionMs?: number; position?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -244,13 +254,14 @@ export function initSocketServer(httpServer: HttpServer): Server {
           return;
         }
 
-        const safePosition = Math.max(0, Number(data.position) || 0);
+        const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         room.mediaState.isPlaying = false;
-        room.mediaState.playbackPosition = safePosition;
+        room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
 
         socket.to(`room:${data.roomId}`).emit('media:pause', {
-          position: safePosition,
+          position: safePositionMs / 1000,
+          positionMs: safePositionMs,
           senderId: user.id,
           timestamp: Date.now(),
         });
@@ -259,7 +270,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       }
     });
 
-    socket.on('media:seek', async (data: { roomId: string; position: number }) => {
+    socket.on('media:seek', async (data: { roomId: string; positionMs?: number; position?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -271,12 +282,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
           return;
         }
 
-        const safePosition = Math.max(0, Number(data.position) || 0);
-        room.mediaState.playbackPosition = safePosition;
+        const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
+        room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
 
         socket.to(`room:${data.roomId}`).emit('media:seek', {
-          position: safePosition,
+          position: safePositionMs / 1000,
+          positionMs: safePositionMs,
           senderId: user.id,
           timestamp: Date.now(),
         });
@@ -287,7 +299,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     socket.on(
       'media:sync',
-      async (data: { roomId: string; position: number; isPlaying: boolean; timestamp: number }) => {
+      async (data: { roomId: string; positionMs?: number; position?: number; isPlaying: boolean; timestamp: number }) => {
         try {
           if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
           const room = await RoomModel.findById(data.roomId);
@@ -296,13 +308,14 @@ export function initSocketServer(httpServer: HttpServer): Server {
             return;
           }
 
-          const position = Math.max(0, Number(data.position) || 0);
+          const positionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
           const isPlaying = data.isPlaying === true;
-          room.mediaState.playbackPosition = position;
+          room.mediaState.playbackPosition = positionMs / 1000;
           room.mediaState.isPlaying = isPlaying;
           await room.save();
           io.to(`room:${data.roomId}`).emit('media:sync', {
-            position,
+            position: positionMs / 1000,
+            positionMs,
             isPlaying,
             timestamp: Date.now(),
             senderId: user.id,

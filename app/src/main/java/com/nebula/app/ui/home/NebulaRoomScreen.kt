@@ -326,7 +326,6 @@ fun NebulaRoomScreen(
                 }
             } else {
                 var currentLoadedId by remember { mutableStateOf<String?>(null) }
-                var lastSyncedSec by remember { mutableLongStateOf(-1L) }
 
                 androidx.compose.ui.viewinterop.AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -389,6 +388,20 @@ fun NebulaRoomScreen(
                                   function playVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: '' }), '*'); }
                                   function pauseVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }), '*'); }
                                   function seekTo(s) { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*'); }
+                                  var syncPositionMs = 0;
+                                  var syncAtMs = Date.now();
+                                  var syncPlaying = false;
+                                  function syncTo(positionMs, shouldPlay) {
+                                    var now = Date.now();
+                                    var predicted = syncPositionMs + (syncPlaying ? now - syncAtMs : 0);
+                                    if (Math.abs(positionMs - predicted) > 1200) {
+                                      seekTo(positionMs / 1000.0);
+                                    }
+                                    syncPositionMs = positionMs;
+                                    syncAtMs = now;
+                                    syncPlaying = shouldPlay;
+                                    if (shouldPlay) playVideo(); else pauseVideo();
+                                  }
                                   function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com'; }
                                 </script>
                                 </body>
@@ -404,16 +417,10 @@ fun NebulaRoomScreen(
                             currentLoadedId = targetId
                             webView.evaluateJavascript("loadVideo('$targetId');", null)
                         }
-                        if (room.isPlaying) {
-                            webView.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
-                        } else {
-                            webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
-                        }
-                        val currentSec = room.playbackPositionMs / 1000L
-                        if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 1) {
-                            lastSyncedSec = currentSec
-                            webView.evaluateJavascript("if (typeof seekTo === 'function') seekTo($currentSec);", null)
-                        }
+                        webView.evaluateJavascript(
+                            "if (typeof syncTo === 'function') syncTo(${room.playbackPositionMs}, ${room.isPlaying});",
+                            null
+                        )
                     }
                 )
             }
@@ -689,7 +696,6 @@ fun NebulaRoomScreen(
             } else {
                 // Persistent Real YouTube Webview Player
                 var currentLoadedId by remember { mutableStateOf<String?>(null) }
-                var lastSyncedSec by remember { mutableLongStateOf(-1L) }
 
                 androidx.compose.ui.viewinterop.AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -773,6 +779,20 @@ fun NebulaRoomScreen(
                                     if (f && f.contentWindow) {
                                       f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*');
                                     }
+                                    var syncPositionMs = 0;
+                                    var syncAtMs = Date.now();
+                                    var syncPlaying = false;
+                                    function syncTo(positionMs, shouldPlay) {
+                                      var now = Date.now();
+                                      var predicted = syncPositionMs + (syncPlaying ? now - syncAtMs : 0);
+                                      if (Math.abs(positionMs - predicted) > 1200) {
+                                        seekTo(positionMs / 1000.0);
+                                      }
+                                      syncPositionMs = positionMs;
+                                      syncAtMs = now;
+                                      syncPlaying = shouldPlay;
+                                      if (shouldPlay) playVideo(); else pauseVideo();
+                                    }
                                   }
                                   function loadVideo(id) {
                                     var f = document.getElementById('player');
@@ -794,16 +814,10 @@ fun NebulaRoomScreen(
                             currentLoadedId = targetId
                             webView.evaluateJavascript("loadVideo('$targetId');", null)
                         }
-                        if (room.isPlaying) {
-                            webView.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
-                        } else {
-                            webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
-                        }
-                        val currentSec = room.playbackPositionMs / 1000L
-                        if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 1) {
-                            lastSyncedSec = currentSec
-                            webView.evaluateJavascript("if (typeof seekTo === 'function') seekTo($currentSec);", null)
-                        }
+                        webView.evaluateJavascript(
+                            "if (typeof syncTo === 'function') syncTo(${room.playbackPositionMs}, ${room.isPlaying});",
+                            null
+                        )
                     }
                 )
 
