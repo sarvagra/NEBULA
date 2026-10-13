@@ -19,6 +19,14 @@ class SocialRepositoryImpl(
     private val apiClient: NebulaApiClient = NebulaApiClient
 ) : ISocialRepository {
 
+    fun clearLocalState() {
+        _friends.value = emptyList()
+        _friendRequests.value = emptyList()
+        _suggestedPeople.value = emptyList()
+        _conversations.value = emptyList()
+        _activeConversation.value = null
+    }
+
     private val _friends = MutableStateFlow<List<NebulaUser>>(emptyList())
     override val friends: StateFlow<List<NebulaUser>> = _friends.asStateFlow()
 
@@ -64,11 +72,11 @@ class SocialRepositoryImpl(
         _activeConversation.value = null
     }
 
-    override suspend fun sendMessage(conversationId: String, content: String) {
-        if (content.isBlank()) return
+    override suspend fun sendMessage(conversationId: String, content: String): Boolean {
+        if (content.isBlank()) return false
         val response = apiClient.sendDirectMessage(conversationId, content.trim())
-        if (response is ApiResponse.Error) return
-        val currentConv = _conversations.value.firstOrNull { it.id == conversationId } ?: return
+        if (response !is ApiResponse.Success) return false
+        val currentConv = _conversations.value.firstOrNull { it.id == conversationId } ?: return false
         val newMsg = ChatMessage(
             id = "msg_${UUID.randomUUID().toString().take(6)}",
             role = MessageRole.USER,
@@ -86,34 +94,37 @@ class SocialRepositoryImpl(
         if (_activeConversation.value?.id == conversationId) {
             _activeConversation.value = updatedConv
         }
+        return true
     }
 
-    override suspend fun acceptFriendRequest(requestId: String) {
-        if (apiClient.acceptFriendRequest(requestId) is ApiResponse.Error) return
+    override suspend fun acceptFriendRequest(requestId: String): Boolean {
+        if (apiClient.acceptFriendRequest(requestId) !is ApiResponse.Success) return false
         val req = _friendRequests.value.firstOrNull { it.id == requestId }
         if (req != null) {
             _friends.value = _friends.value + req.sender
             _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
         }
+        return true
     }
 
-    override suspend fun declineFriendRequest(requestId: String) {
-        if (apiClient.declineFriendRequest(requestId) is ApiResponse.Error) return
+    override suspend fun declineFriendRequest(requestId: String): Boolean {
+        if (apiClient.declineFriendRequest(requestId) !is ApiResponse.Success) return false
         _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
+        return true
     }
 
-    override suspend fun withdrawFriendRequest(userId: String) {
-        if (apiClient.withdrawFriendRequest(userId) is ApiResponse.Success) {
-            _suggestedPeople.value = _suggestedPeople.value.map {
-                if (it.id == userId) it.copy(friendRequestPending = false) else it
-            }
+    override suspend fun withdrawFriendRequest(userId: String): Boolean {
+        if (apiClient.withdrawFriendRequest(userId) !is ApiResponse.Success) return false
+        _suggestedPeople.value = _suggestedPeople.value.map {
+            if (it.id == userId) it.copy(friendRequestPending = false) else it
         }
+        return true
     }
 
-    override suspend fun addFriend(user: NebulaUser) {
-        if (apiClient.sendFriendRequest(user.id) is ApiResponse.Success) {
-            _suggestedPeople.value = _suggestedPeople.value.filter { it.id != user.id }
-        }
+    override suspend fun addFriend(user: NebulaUser): Boolean {
+        if (apiClient.sendFriendRequest(user.id) !is ApiResponse.Success) return false
+        _suggestedPeople.value = _suggestedPeople.value.filter { it.id != user.id }
+        return true
     }
 
     override suspend fun refresh() {

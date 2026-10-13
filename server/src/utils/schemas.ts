@@ -68,6 +68,15 @@ export const CreateRoomSchema = z.object({
   mediaUrl: z.string().trim().max(500).optional(),
 });
 
+export const InviteRoomSchema = z.object({
+  userId: z.string().trim().length(24, 'Invalid user ID format'),
+});
+
+export const ModerateRoomParticipantSchema = z.object({
+  isMuted: z.boolean().optional(),
+  isCameraOff: z.boolean().optional(),
+}).refine((value) => value.isMuted !== undefined || value.isCameraOff !== undefined);
+
 export const UpdateMediaSchema = z.object({
   title: z.string().trim().max(120).optional(),
   subtitle: z.string().trim().max(120).optional(),

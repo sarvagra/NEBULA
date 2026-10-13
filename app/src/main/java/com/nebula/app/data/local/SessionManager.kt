@@ -23,6 +23,7 @@ class SessionManager(context: Context) {
     companion object {
         private const val PREFS_NAME = "nebula_session_prefs"
         private const val KEY_AUTH_TOKEN = "key_auth_token"
+        private const val KEY_REFRESH_TOKEN = "key_refresh_token"
         private const val KEY_USER_PROFILE_JSON = "key_user_profile_json"
         private const val KEY_IS_LOGGED_IN = "key_is_logged_in"
         private const val KEY_BACKEND_URL = "key_backend_url"
@@ -66,6 +67,12 @@ class SessionManager(context: Context) {
         return prefs.getString(KEY_AUTH_TOKEN, null)
     }
 
+    fun saveRefreshToken(token: String) {
+        prefs.edit().putString(KEY_REFRESH_TOKEN, token).apply()
+    }
+
+    fun getRefreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
+
     fun saveUserProfile(profile: UserProfile) {
         val json = JSONObject().apply {
             put("id", profile.id)
@@ -91,7 +98,7 @@ class SessionManager(context: Context) {
             put("roomsJoinedCount", profile.roomsJoinedCount)
             put("timeInSyncHours", profile.timeInSyncHours)
             put("isFriendCountPublic", profile.isFriendCountPublic)
-            put("isOnboardingCompleted", true)
+            put("isOnboardingCompleted", profile.isOnboardingCompleted)
             put("dateOfBirth", profile.dateOfBirth ?: "")
             put("gender", profile.gender ?: "")
             put("bannerUrl", profile.bannerUrl ?: "")
@@ -148,7 +155,7 @@ class SessionManager(context: Context) {
                 roomsJoinedCount = json.optInt("roomsJoinedCount", 0),
                 timeInSyncHours = json.optDouble("timeInSyncHours", 0.0),
                 isFriendCountPublic = json.optBoolean("isFriendCountPublic", true),
-                isOnboardingCompleted = true,
+                isOnboardingCompleted = json.optBoolean("isOnboardingCompleted", false),
                 dateOfBirth = json.optString("dateOfBirth", "").ifEmpty { null },
                 gender = json.optString("gender", "").ifEmpty { null },
                 bannerUrl = json.optString("bannerUrl", "").ifEmpty { null }
@@ -165,6 +172,7 @@ class SessionManager(context: Context) {
     fun clearSession() {
         prefs.edit()
             .remove(KEY_AUTH_TOKEN)
+            .remove(KEY_REFRESH_TOKEN)
             .remove(KEY_USER_PROFILE_JSON)
             .putBoolean(KEY_IS_LOGGED_IN, false)
             .apply()

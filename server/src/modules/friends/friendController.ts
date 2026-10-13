@@ -3,6 +3,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { UserModel } from '../../models/User';
 import { NotificationModel } from '../../models/Notification';
 import { toPublicUserDTO } from '../../utils/dto';
+import { notifyUserSocialChanged } from '../../realtime/socketServer';
 
 export async function listFriends(req: Request, res: Response): Promise<void> {
   try {
@@ -129,6 +130,7 @@ export async function sendFriendRequest(req: Request, res: Response): Promise<vo
       body: `${req.user.displayName} sent you a friend request.`,
       actionData: { friendshipId: friendship._id.toString(), requesterId: req.user.id },
     });
+    notifyUserSocialChanged([req.user.id, targetRecipientId]);
 
     res.status(201).json({
       success: true,
@@ -193,6 +195,7 @@ export async function acceptFriendRequest(req: Request, res: Response): Promise<
 
     friendship.status = 'accepted';
     await friendship.save();
+    notifyUserSocialChanged([friendship.requesterId, friendship.recipientId]);
 
     res.json({ success: true, message: 'Friend request accepted' });
   } catch (err: any) {
@@ -214,7 +217,10 @@ export async function declineFriendRequest(req: Request, res: Response): Promise
       return;
     }
 
+    const requesterId = friendship.requesterId;
+    const recipientId = friendship.recipientId;
     await FriendshipModel.findByIdAndDelete(id);
+    notifyUserSocialChanged([requesterId, recipientId]);
     res.json({ success: true, message: 'Friend request removed' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to decline friend request' });
@@ -236,6 +242,7 @@ export async function withdrawFriendRequest(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'Pending friend request not found' });
       return;
     }
+    notifyUserSocialChanged([friendship.requesterId, friendship.recipientId]);
     res.json({ success: true, message: 'Friend request withdrawn' });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to withdraw friend request' });

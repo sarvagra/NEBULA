@@ -154,6 +154,12 @@ class ChatRepositoryImpl : IChatRepository {
         _activeMessages.value = emptyList()
     }
 
+    override suspend fun clearAllLocalData() {
+        _conversations.value = emptyList()
+        _activeConversation.value = null
+        _activeMessages.value = emptyList()
+    }
+
     private fun summarizeTitle(prompt: String): String {
         val clean = prompt.trim().replace(Regex("[^a-zA-Z0-9 ]"), "")
         val words = clean.split(" ").filter { it.isNotBlank() }

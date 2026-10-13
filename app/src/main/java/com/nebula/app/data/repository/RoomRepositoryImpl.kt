@@ -4,6 +4,8 @@ import com.nebula.app.data.backend.NebulaApiClient
 import com.nebula.app.data.backend.NebulaApiClient.ApiResponse
 import com.nebula.app.data.realtime.RoomSocketClient
 import com.nebula.app.domain.model.NebulaRoom
+import com.nebula.app.domain.model.PollOption
+import com.nebula.app.domain.model.RoomPoll
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.domain.model.PlayMode
 import com.nebula.app.domain.model.RoomActivityType
@@ -26,6 +28,13 @@ class RoomRepositoryImpl(
     private val apiClient: NebulaApiClient = NebulaApiClient
 ) : IRoomRepository {
 
+    var onSocialChanged: (() -> Unit)? = null
+
+    fun disconnectRealtime() {
+        socketClient.disconnect()
+        _activeRoom.value = null
+    }
+
     // Clean initial state: no hardcoded fake rooms
     private val _rooms = MutableStateFlow<List<NebulaRoom>>(emptyList())
     override val rooms: StateFlow<List<NebulaRoom>> = _rooms.asStateFlow()
@@ -39,6 +48,7 @@ class RoomRepositoryImpl(
     private val realtimeScope = CoroutineScope(Dispatchers.IO)
     private val socketClient = RoomSocketClient(
         tokenProvider = { apiClient.authToken },
+        baseUrlProvider = { apiClient.socketBaseUrl() },
         onMediaState = { positionMs, isPlaying ->
             applyRealtimeMediaState(positionMs, isPlaying)
         },
@@ -47,8 +57,18 @@ class RoomRepositoryImpl(
         },
         onChatMessage = { message ->
             applyRealtimeChatMessage(message)
+        },
+        onParticipantsChanged = { realtimeScope.launch { syncActiveRoom() } },
+        onSocialChanged = { onSocialChanged?.invoke() },
+        onRoomRemoved = { removedRoomId, reason ->
+            _activeRoom.value = null
+            if (reason == "kicked" && !removedRoomId.isNullOrBlank()) {
+                _rooms.value = _rooms.value.filterNot { it.id == removedRoomId }
+            }
         }
     )
+
+    fun setAppForegrounded(foregrounded: Boolean) = socketClient.setAppForegrounded(foregrounded)
 
     /**
      * Refreshes the active room list from the authoritative Nebula backend server.
@@ -150,47 +170,25 @@ class RoomRepositoryImpl(
         val apiRes = apiClient.joinRoom(roomId)
         if (apiRes is ApiResponse.Success) {
             val room = parseRoomFromJson(apiRes.data.optJSONObject("data") ?: apiRes.data)
-            _activeRoom.value = room
-            _rooms.value = _rooms.value.map { if (it.id == room.id) room else it }
+            val roomWithPoll = loadActivePoll(room)
+            _activeRoom.value = roomWithPoll
+            _rooms.value = _rooms.value.map { if (it.id == room.id) roomWithPoll else it }
             socketClient.connect(room.id, room.hostId)
             loadRoomMessages(room.id)
-            return room
+            return roomWithPoll
         }
 
-        val target = _rooms.value.firstOrNull { it.id == roomId }
-        if (target != null) {
-            val hasUser = target.participants.any {
-                it.user.id == NebulaUser.CurrentUser.id ||
-                it.user.displayName.equals(NebulaUser.CurrentUser.displayName, ignoreCase = true)
-            }
-            val updated = if (!hasUser) {
-                target.copy(
-                    participantCount = target.participantCount + 1,
-                    participants = target.participants + RoomParticipant(NebulaUser.CurrentUser, isHost = false)
-                )
-            } else target
-            _activeRoom.value = updated
-            return updated
-        }
         return null
     }
 
     override suspend fun leaveRoom(newHostId: String?) {
         val current = _activeRoom.value
-        if (current != null) {
-            socketClient.leave()
-            val res = apiClient.leaveRoom(current.id, newHostId)
-            val isDissolved = if (res is ApiResponse.Success) {
-                res.data.optBoolean("dissolved", current.participants.size <= 1)
-            } else {
-                current.participants.size <= 1
-            }
-            if (isDissolved) {
-                _rooms.value = _rooms.value.filter { it.id != current.id }
-            } else {
-                refreshRooms()
-            }
-        }
+        if (current == null) return
+        val res = apiClient.leaveRoom(current.id, newHostId)
+        if (res !is ApiResponse.Success) return
+        socketClient.leave()
+        if (res.data.optBoolean("dissolved", false)) _rooms.value = _rooms.value.filter { it.id != current.id }
+        else refreshRooms()
         _activeRoom.value = null
     }
 
@@ -210,17 +208,8 @@ class RoomRepositoryImpl(
             isVideoAllowed = isVideoAllowed,
             tags = tags
         )
-        val updated = if (res is ApiResponse.Success) {
-            parseRoomFromJson(res.data.optJSONObject("data") ?: res.data)
-        } else {
-            current.copy(
-                name = name ?: current.name,
-                maxParticipants = maxParticipants ?: current.maxParticipants,
-                isMicAllowed = isMicAllowed ?: current.isMicAllowed,
-                isVideoAllowed = isVideoAllowed ?: current.isVideoAllowed,
-                tags = tags ?: current.tags
-            )
-        }
+        if (res !is ApiResponse.Success) return null
+        val updated = parseRoomFromJson(res.data.optJSONObject("data") ?: res.data)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
         return updated
@@ -229,21 +218,8 @@ class RoomRepositoryImpl(
     override suspend fun transferHost(newHostId: String?, random: Boolean): NebulaRoom? {
         val current = _activeRoom.value ?: return null
         val res = apiClient.transferHost(current.id, newHostId, random)
-        val updated = if (res is ApiResponse.Success) {
-            parseRoomFromJson(res.data.optJSONObject("data") ?: res.data)
-        } else {
-            val candidate = current.participants.firstOrNull { it.user.id == newHostId }
-                ?: if (random) current.participants.filter { it.user.id != current.hostId }.randomOrNull() else null
-            if (candidate != null) {
-                current.copy(
-                    hostId = candidate.user.id,
-                    hostName = candidate.user.displayName,
-                    participants = current.participants.map {
-                        it.copy(isHost = it.user.id == candidate.user.id)
-                    }
-                )
-            } else current
-        }
+        if (res !is ApiResponse.Success) return null
+        val updated = parseRoomFromJson(res.data.optJSONObject("data") ?: res.data)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
         return updated
@@ -253,9 +229,35 @@ class RoomRepositoryImpl(
         val current = _activeRoom.value ?: return null
         val res = apiClient.getRoom(current.id)
         if (res is ApiResponse.Success) {
-            val fresh = parseRoomFromJson(res.data.optJSONObject("data") ?: res.data)
+            val freshFromServer = loadActivePoll(parseRoomFromJson(res.data.optJSONObject("data") ?: res.data))
+            // Roster/settings refreshes may read a checkpointed DB playhead. Keep
+            // the live socket timeline when the selected media has not changed.
+            val fresh = if (freshFromServer.mediaItem?.mediaUrl == current.mediaItem?.mediaUrl) {
+                freshFromServer.copy(
+                    isPlaying = current.isPlaying,
+                    playbackPositionMs = current.playbackPositionMs,
+                    playbackPositionLabel = current.playbackPositionLabel
+                )
+            } else freshFromServer
+            // An active room without its member roster is invalid. Do not leave a
+            // phantom room on screen with a zero-member badge.
+            if (fresh.participants.isEmpty()) {
+                socketClient.leave()
+                _activeRoom.value = null
+                _rooms.value = _rooms.value.filterNot { it.id == current.id }
+                refreshRooms()
+                return null
+            }
             _activeRoom.value = fresh
+            _rooms.value = _rooms.value.map { if (it.id == fresh.id) fresh else it }
             return fresh
+        }
+        if (res is ApiResponse.Error && (res.statusCode == 404 || res.statusCode == 403)) {
+            socketClient.leave()
+            _activeRoom.value = null
+            _rooms.value = _rooms.value.filterNot { it.id == current.id }
+            refreshRooms()
+            return null
         }
         return current
     }
@@ -263,11 +265,11 @@ class RoomRepositoryImpl(
     override suspend fun togglePlayPause() {
         val current = _activeRoom.value ?: return
         val newPlay = !current.isPlaying
-        val positionSeconds = current.playbackPositionMs / 1000L
+        val positionMs = socketClient.currentPlaybackPositionMs().takeIf { it > 0L } ?: current.playbackPositionMs
         val updated = current.copy(isPlaying = newPlay)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        if (newPlay) socketClient.play(positionSeconds) else socketClient.pause(positionSeconds)
+        if (newPlay) socketClient.play(positionMs) else socketClient.pause(positionMs)
     }
 
     override suspend fun seekTo(positionMs: Long, positionLabel: String) {
@@ -281,8 +283,21 @@ class RoomRepositoryImpl(
         socketClient.seek(positionMs)
     }
 
+    override fun reportHostPlayerSample(positionMs: Long, isPlaying: Boolean) {
+        socketClient.reportHostPlayerSample(positionMs, isPlaying)
+        applyRealtimeMediaState(positionMs, isPlaying)
+    }
+
     override suspend fun updateMedia(title: String, mediaUrl: String, durationSeconds: Long): NebulaRoom? {
         val current = _activeRoom.value ?: return null
+        val persisted = apiClient.updateMedia(
+            current.id,
+            title = title,
+            mediaUrl = mediaUrl,
+            playbackPosition = 0L,
+            isPlaying = true
+        )
+        if (persisted !is ApiResponse.Success) return null
         val ytId = SharedMediaItem.extractYouTubeId(mediaUrl)
         val newMedia = SharedMediaItem(
             id = "media_${System.currentTimeMillis()}",
@@ -347,22 +362,22 @@ class RoomRepositoryImpl(
     }
 
     override suspend fun sendReaction(emoji: String) {
+        if (!socketClient.isConnected()) return
+        socketClient.sendReaction(emoji)
         _lastReaction.value = emoji
     }
 
-    override suspend fun votePoll(optionId: String) {
-        val current = _activeRoom.value ?: return
-        val poll = current.activePoll ?: return
-        val updatedOptions = poll.options.map { opt ->
-            if (opt.id == optionId) opt.copy(votes = opt.votes + 1) else opt
-        }
-        val updatedPoll = poll.copy(
-            options = updatedOptions,
-            userVotedOptionId = optionId
-        )
+    override suspend fun votePoll(optionId: String): Boolean {
+        val current = _activeRoom.value ?: return false
+        val poll = current.activePoll ?: return false
+        val response = apiClient.votePoll(poll.id, optionId)
+        if (response !is ApiResponse.Success) return false
+        val updatedPollJson = response.data.optJSONObject("data") ?: return false
+        val updatedPoll = parsePoll(updatedPollJson) ?: return false
         val updatedRoom = current.copy(activePoll = updatedPoll)
         _activeRoom.value = updatedRoom
         _rooms.value = _rooms.value.map { if (it.id == updatedRoom.id) updatedRoom else it }
+        return true
     }
 
     override suspend fun switchPlayMode(playMode: PlayMode) {
@@ -397,13 +412,14 @@ class RoomRepositoryImpl(
 
         val participantsJson = json.optJSONArray("participants") ?: JSONArray()
         val participantList = mutableListOf<RoomParticipant>()
-        var hostName = "Host"
+        var hostName = json.optString("hostName").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
         for (i in 0 until participantsJson.length()) {
             val p = participantsJson.optJSONObject(i) ?: continue
             val pId = p.optString("userId")
-            val pName = p.optString("displayName", "Explorer")
+            if (pId.isBlank() || pId == "null") continue
+            val pName = p.optString("displayName").takeIf { it.isNotBlank() && it != "null" } ?: "Explorer"
             val isHost = p.optBoolean("isHost", false)
-            if (isHost) hostName = pName
+            if (pId == hostId || isHost) hostName = pName
             val u = NebulaUser(
                 id = pId,
                 username = "@${pName.lowercase().replace(" ", "")}",
@@ -416,7 +432,14 @@ class RoomRepositoryImpl(
                 roomsJoinedCount = 0,
                 timeInSyncHours = 0.0
             )
-            participantList.add(RoomParticipant(user = u, isHost = isHost))
+            if (participantList.none { it.user.id == pId }) participantList.add(
+                RoomParticipant(
+                    user = u,
+                    isHost = isHost,
+                    isAudioActive = !p.optBoolean("isMuted", false),
+                    isVideoActive = !p.optBoolean("isCameraOff", false)
+                )
+            )
         }
 
         val mediaUrl = mediaObj?.optString("mediaUrl", "") ?: ""
@@ -454,23 +477,49 @@ class RoomRepositoryImpl(
             id = id,
             name = name,
             hostId = hostId,
-            hostName = hostName,
+            hostName = hostName.ifBlank { participantList.firstOrNull { it.user.id == hostId }?.user?.displayName ?: "Host unavailable" },
             privacy = privacy,
             activityType = activity,
             mediaItem = sharedMedia,
-            participantCount = json.optInt("participantCount", participantList.size.coerceAtLeast(1)),
+            participantCount = participantList.size,
             maxParticipants = json.optInt("maxParticipants", 20),
             isMicAllowed = json.optBoolean("isMicAllowed", true),
             isVideoAllowed = json.optBoolean("isVideoAllowed", true),
-            participants = participantList.ifEmpty {
-                listOf(RoomParticipant(user = NebulaUser.CurrentUser, isHost = true))
-            },
+            participants = participantList,
             isPlaying = isPlaying,
             playbackPositionMs = positionMs,
             playbackPositionLabel = String.format("%02d:%02d", positionMs / 60000L, (positionMs / 1000L) % 60L),
             durationLabel = String.format("%02d:%02d", durationSeconds / 60, durationSeconds % 60),
-            tags = if (parsedTags.isNotEmpty()) parsedTags else listOf("Social", "Cinema"),
+            tags = parsedTags,
             playMode = PlayMode.POLL_PLAY
+        )
+    }
+
+    private suspend fun loadActivePoll(room: NebulaRoom): NebulaRoom {
+        val response = apiClient.getRoomPoll(room.id)
+        if (response !is ApiResponse.Success) return room
+        val payload = response.data.optJSONObject("data")
+        return room.copy(activePoll = payload?.let(::parsePoll))
+    }
+
+    private fun parsePoll(json: JSONObject): RoomPoll? {
+        val id = json.optString("id").ifBlank { return null }
+        val optionsJson = json.optJSONArray("options") ?: JSONArray()
+        val options = List(optionsJson.length()) { index ->
+            val option = optionsJson.optJSONObject(index) ?: JSONObject()
+            PollOption(
+                id = option.optString("id"),
+                text = option.optString("text"),
+                votes = option.optInt("votes")
+            )
+        }.filter { it.id.isNotBlank() }
+        return RoomPoll(
+            id = id,
+            roomId = json.optString("roomId"),
+            question = json.optString("question"),
+            options = options,
+            userVotedOptionId = json.optString("userVotedOptionId").ifBlank { null },
+            isClosed = !json.optBoolean("isActive", true)
         )
     }
 }

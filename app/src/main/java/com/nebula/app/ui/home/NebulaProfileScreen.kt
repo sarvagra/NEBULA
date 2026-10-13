@@ -164,7 +164,7 @@ fun NebulaProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 18.dp),
-            contentPadding = PaddingValues(top = 4.dp, bottom = 280.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             // 2. PROFILE HERO & STATS with sleek 21:9 banner

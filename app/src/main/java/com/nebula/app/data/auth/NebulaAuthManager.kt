@@ -148,6 +148,8 @@ class NebulaAuthManager(
      */
     suspend fun signOut(): Boolean {
         return try {
+            // Revoke the server refresh token before clearing its local copy.
+            try { apiClient.logout() } catch (_: Exception) {}
             firebaseAuth.signOut()
             apiClient.authToken = null
             try {
@@ -215,9 +217,9 @@ class NebulaAuthManager(
         fallbackEmail: String,
         fallbackDisplayName: String
     ): UserProfile {
-        val isSpecialAdmin = fallbackEmail.equals("sarvagrawork@gmail.com", ignoreCase = true) ||
-                (userObj?.optString("email")?.equals("sarvagrawork@gmail.com", ignoreCase = true) == true)
-        val rawTier = if (isSpecialAdmin) "premium_plus" else (userObj?.optString("tier")?.lowercase() ?: "free")
+        // Entitlements and onboarding state come from the authenticated backend profile.
+        // An email address on the client is not an authorization source.
+        val rawTier = userObj?.optString("tier")?.lowercase() ?: "free"
         val tier = when (rawTier) {
             "premium_plus", "plus" -> NebulaSubscriptionTier.PREMIUM_PLUS
             "premium", "pro" -> NebulaSubscriptionTier.PREMIUM
@@ -226,7 +228,7 @@ class NebulaAuthManager(
 
         val email = userObj?.optString("email")?.ifBlank { null } ?: fallbackEmail
         val rawDisplayName = userObj?.optString("displayName")?.ifBlank { null }
-        val displayName = if (isSpecialAdmin) (rawDisplayName ?: "Sarvagra") else (rawDisplayName ?: fallbackDisplayName)
+        val displayName = rawDisplayName ?: fallbackDisplayName
 
         val rawUsername = userObj?.optString("username")?.ifBlank { null }
         val username = if (rawUsername != null) {
@@ -242,7 +244,7 @@ class NebulaAuthManager(
 
         val avatarUrl = userObj?.optString("avatarUrl")?.ifBlank { null }
         val backendOnboarding = userObj?.optBoolean("isOnboardingCompleted", true) ?: true
-        val isOnboardingCompleted = if (isSpecialAdmin) true else (backendOnboarding && displayName.isNotBlank())
+        val isOnboardingCompleted = backendOnboarding && displayName.isNotBlank()
 
         return UserProfile(
             id = userObj?.optString("id")?.ifBlank { null } ?: java.util.UUID.randomUUID().toString(),
@@ -256,7 +258,7 @@ class NebulaAuthManager(
             avatarFallbackLetter = (displayName.firstOrNull() ?: 'N').uppercaseChar().toString(),
             isCustomAvatar = !avatarUrl.isNullOrBlank(),
             isLoggedIn = true,
-            isPremium = isSpecialAdmin || tier != NebulaSubscriptionTier.FREE,
+            isPremium = tier != NebulaSubscriptionTier.FREE,
             subscriptionTier = tier,
             roomsJoinedCount = roomsJoined,
             roomsHostedCount = roomsHosted,

@@ -4,10 +4,24 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
+val releaseStoreFile = providers.gradleProperty("NEBULA_RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("NEBULA_RELEASE_STORE_FILE")).orNull
+val releaseStorePassword = providers.gradleProperty("NEBULA_RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("NEBULA_RELEASE_STORE_PASSWORD")).orNull
+val releaseKeyAlias = providers.gradleProperty("NEBULA_RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("NEBULA_RELEASE_KEY_ALIAS")).orNull
+val releaseKeyPassword = providers.gradleProperty("NEBULA_RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("NEBULA_RELEASE_KEY_PASSWORD")).orNull
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.nebula.app"
     compileSdk = 34
-
     defaultConfig {
         applicationId = "com.nebula.app"
         minSdk = 26
@@ -23,16 +37,18 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("nebula-release.jks")
-            storePassword = "nebula2026release"
-            keyAlias = "nebula_key"
-            keyPassword = "nebula2026release"
+            if (hasReleaseSigning) {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -61,6 +77,21 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+tasks.configureEach {
+    val isReleasePackagingTask =
+        (name.startsWith("assemble") || name.startsWith("bundle") || name.startsWith("package")) &&
+            name.endsWith("Release")
+    if (isReleasePackagingTask) {
+        doFirst {
+            check(hasReleaseSigning) {
+                "Release signing is not configured. Supply NEBULA_RELEASE_STORE_FILE, " +
+                    "NEBULA_RELEASE_STORE_PASSWORD, NEBULA_RELEASE_KEY_ALIAS, and " +
+                    "NEBULA_RELEASE_KEY_PASSWORD through Gradle properties or environment variables."
+            }
         }
     }
 }

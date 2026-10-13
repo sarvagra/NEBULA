@@ -92,9 +92,6 @@ export async function verifyGooglePlayPurchase(req: Request, res: Response): Pro
       return;
     }
 
-    const { purchaseToken, planTier } = req.body;
-    const targetTier: SubscriptionTier = planTier === 'premium_plus' ? 'premium_plus' : 'premium';
-
     // In production: Google Play Service Account JSON must be supplied to verify with Google Play API
     if (config.server.isProduction && !config.billing.serviceAccountJson) {
       res.status(503).json({
@@ -104,23 +101,8 @@ export async function verifyGooglePlayPurchase(req: Request, res: Response): Pro
       return;
     }
 
-    // Development mode testing token verification
-    if (!config.server.isProduction && purchaseToken.startsWith('test_token_')) {
-      const updated = await UserModel.findByIdAndUpdate(
-        req.user.id,
-        { tier: targetTier },
-        { new: true }
-      );
-
-      res.json({
-        success: true,
-        message: `Successfully granted test entitlement for ${targetTier}`,
-        data: { tier: updated?.tier },
-      });
-      return;
-    }
-
-    // For any unverified or forged token without Google Play signature
+    // Never grant entitlement from a client-asserted or development-only token.
+    // The verifier is unavailable until the Play Developer API integration is configured.
     res.status(400).json({
       success: false,
       error: 'Invalid or unverifiable Google Play purchase token receipt',

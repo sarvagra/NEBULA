@@ -11,13 +11,17 @@ import java.util.concurrent.TimeUnit
 
 class RoomSocketClient(
     private val tokenProvider: () -> String?,
+    private val baseUrlProvider: () -> String,
     private val onMediaState: (positionMs: Long, isPlaying: Boolean) -> Unit,
     private val onMediaSwitch: (JSONObject) -> Unit,
-    private val onChatMessage: (JSONObject) -> Unit
+    private val onChatMessage: (JSONObject) -> Unit,
+    private val onParticipantsChanged: () -> Unit,
+    private val onSocialChanged: () -> Unit,
+    private val onRoomRemoved: (roomId: String?, reason: String?) -> Unit
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
-    private var hostId: String? = null
+    @Volatile private var hostId: String? = null
     private var heartbeat: ScheduledExecutorService? = null
     private var basePositionMs = 0L
     private var baseTimestampMs = 0L
@@ -33,9 +37,24 @@ class RoomSocketClient(
             transports = arrayOf("websocket", "polling")
             reconnection = true
         }
-        socket = IO.socket("https://nebula-73kb.onrender.com", options).apply {
+        socket = IO.socket(baseUrlProvider(), options).apply {
             on(Socket.EVENT_CONNECT) {
                 emit("room:join", JSONObject().put("roomId", roomId))
+                emit("room:foreground", JSONObject().put("roomId", roomId))
+            }
+            on("participant:joined") { onParticipantsChanged() }
+            on("participant:left") { onParticipantsChanged() }
+            on("participant:updated") { onParticipantsChanged() }
+            on("room:host_changed") { args ->
+                val payload = args.firstOrNull() as? JSONObject
+                this@RoomSocketClient.hostId = payload?.optString("newHostId")?.takeIf { it.isNotBlank() } ?: this@RoomSocketClient.hostId
+                onParticipantsChanged()
+            }
+            on("friendship:changed") { onSocialChanged() }
+            on("room:removed") { args ->
+                val payload = args.firstOrNull() as? JSONObject
+                onRoomRemoved(payload?.optString("roomId"), payload?.optString("reason"))
+                disconnect()
             }
             on("media:sync") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
@@ -80,6 +99,14 @@ class RoomSocketClient(
         disconnect()
     }
 
+    fun setAppForegrounded(foregrounded: Boolean) {
+        val currentRoom = roomId ?: return
+        socket?.emit(
+            if (foregrounded) "room:foreground" else "room:background",
+            JSONObject().put("roomId", currentRoom)
+        )
+    }
+
     fun play(positionMs: Long) = emitPlayback("media:play", positionMs, true)
 
     fun pause(positionMs: Long) = emitPlayback("media:pause", positionMs, false)
@@ -92,6 +119,24 @@ class RoomSocketClient(
             JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
         )
     }
+
+    fun reportHostPlayerSample(positionMs: Long, isPlaying: Boolean) {
+        if (!isHost()) return
+        val stateChanged = playing != isPlaying
+        basePositionMs = positionMs.coerceAtLeast(0L)
+        baseTimestampMs = System.currentTimeMillis()
+        playing = isPlaying
+        if (stateChanged) {
+            socket?.emit(
+                if (isPlaying) "media:play" else "media:pause",
+                JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
+            )
+        }
+    }
+
+    fun currentPlaybackPositionMs(): Long = (basePositionMs + if (playing) {
+        (System.currentTimeMillis() - baseTimestampMs).coerceAtLeast(0L)
+    } else 0L).coerceAtLeast(0L)
 
     fun switchMedia(title: String, mediaUrl: String, durationSeconds: Long = 0L) {
         socket?.emit(
@@ -110,6 +155,14 @@ class RoomSocketClient(
         if (!mediaUrl.isNullOrBlank()) payload.put("mediaUrl", mediaUrl)
         socket?.emit("chat:message", payload)
     }
+
+    fun sendReaction(emoji: String) {
+        val currentRoom = roomId ?: return
+        if (emoji.isBlank()) return
+        socket?.emit("chat:reaction", JSONObject().put("roomId", currentRoom).put("emoji", emoji))
+    }
+
+    fun isConnected(): Boolean = socket?.connected() == true
 
     fun disconnect() {
         heartbeat?.shutdownNow()
@@ -169,7 +222,7 @@ class RoomSocketClient(
                     .put("isPlaying", playing)
                     .put("timestamp", now)
             )
-        }, 0L, 1L, TimeUnit.SECONDS)
+        }, 0L, 250L, TimeUnit.MILLISECONDS)
     }
 
     private fun isHost(): Boolean {

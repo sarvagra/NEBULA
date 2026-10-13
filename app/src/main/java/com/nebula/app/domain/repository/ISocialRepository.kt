@@ -14,10 +14,10 @@ interface ISocialRepository {
 
     suspend fun selectConversation(id: String)
     suspend fun closeConversation()
-    suspend fun sendMessage(conversationId: String, content: String)
-    suspend fun acceptFriendRequest(requestId: String)
-    suspend fun declineFriendRequest(requestId: String)
-    suspend fun addFriend(user: NebulaUser)
-    suspend fun withdrawFriendRequest(userId: String)
+    suspend fun sendMessage(conversationId: String, content: String): Boolean
+    suspend fun acceptFriendRequest(requestId: String): Boolean
+    suspend fun declineFriendRequest(requestId: String): Boolean
+    suspend fun addFriend(user: NebulaUser): Boolean
+    suspend fun withdrawFriendRequest(userId: String): Boolean
     suspend fun refresh()
 }

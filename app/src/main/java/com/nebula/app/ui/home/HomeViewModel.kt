@@ -12,6 +12,8 @@ import com.nebula.app.domain.model.RoomActivityType
 import com.nebula.app.domain.model.RoomPrivacy
 import com.nebula.app.domain.model.SharedMediaItem
 import com.nebula.app.domain.model.NebulaSubscriptionTier
+import com.nebula.app.domain.model.NebulaNotification
+import com.nebula.app.domain.model.NotificationType
 import com.nebula.app.domain.repository.IChatRepository
 import com.nebula.app.domain.repository.IProfileRepository
 import com.nebula.app.domain.repository.IRoomRepository
@@ -35,6 +37,19 @@ class HomeViewModel(
     private val authManager: NebulaAuthManager? = null,
     private val sessionManager: com.nebula.app.data.local.SessionManager? = null
 ) : ViewModel() {
+
+    private val _showWelcomeBack = MutableStateFlow(false)
+    val showWelcomeBack: StateFlow<Boolean> = _showWelcomeBack.asStateFlow()
+
+    fun dismissWelcomeBack() {
+        _showWelcomeBack.value = false
+    }
+
+    init {
+        (roomRepository as? RoomRepositoryImpl)?.onSocialChanged = {
+            viewModelScope.launch { socialRepository.refresh() }
+        }
+    }
 
     private val _uiState = MutableStateFlow(
         HomeUiState(
@@ -62,6 +77,38 @@ class HomeViewModel(
             try {
                 (roomRepository as? RoomRepositoryImpl)?.refreshRooms()
                 socialRepository.refresh()
+                val notificationResult = com.nebula.app.data.backend.NebulaApiClient.getNotifications()
+                if (notificationResult is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                    _uiState.value = _uiState.value.copy(
+                        notifications = (0 until notificationResult.data.length()).mapNotNull { index ->
+                            notificationResult.data.optJSONObject(index)?.let { item ->
+                                val action = item.optJSONObject("actionData")
+                                val type = when (item.optString("type")) {
+                                    "friend_request" -> NotificationType.FRIEND_REQUEST
+                                    "room_invite" -> NotificationType.ROOM_INVITE
+                                    "room_activity" -> NotificationType.ROOM_STARTED
+                                    else -> NotificationType.NOTICE
+                                }
+                                val actionLabel = when (type) {
+                                    NotificationType.FRIEND_REQUEST -> "Accept"
+                                    NotificationType.ROOM_INVITE, NotificationType.ROOM_STARTED -> "Open"
+                                    NotificationType.NOTICE -> null
+                                }
+                                NebulaNotification(
+                                    id = item.optString("id"),
+                                    type = type,
+                                    title = item.optString("title"),
+                                    subtitle = item.optString("body"),
+                                    timeLabel = "Recent",
+                                    actionLabel = actionLabel,
+                                    relatedId = action?.optString("friendshipId")?.ifBlank { null }
+                                        ?: action?.optString("roomId")?.ifBlank { null },
+                                    isRead = item.optBoolean("isRead", false)
+                                )
+                            }
+                        }
+                    )
+                }
                 val token = sessionManager?.getAuthToken()
                 if (!token.isNullOrBlank()) {
                     com.nebula.app.data.backend.NebulaApiClient.authToken = token
@@ -71,13 +118,42 @@ class HomeViewModel(
                         if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
                             val user = result.data.optJSONObject("data")
                             if (user != null) {
+                                val tier = when (user.optString("tier").lowercase()) {
+                                    "premium_plus", "plus" -> NebulaSubscriptionTier.PREMIUM_PLUS
+                                    "premium", "pro" -> NebulaSubscriptionTier.PREMIUM
+                                    else -> NebulaSubscriptionTier.FREE
+                                }
+                                val stats = user.optJSONObject("stats")
                                 val refreshed = profile.copy(
                                     displayName = user.optString("displayName", profile.displayName),
                                     username = user.optString("username", profile.username),
-                                    email = user.optString("email", profile.email)
+                                    email = user.optString("email", profile.email),
+                                    bio = user.optString("bio", profile.bio),
+                                    status = user.optString("status", profile.status),
+                                    avatarUri = user.optString("avatarUrl").ifBlank { null },
+                                    bannerUrl = user.optString("bannerUrl").ifBlank { null },
+                                    bannerIndex = user.optInt("bannerIndex", profile.bannerIndex),
+                                    interests = user.optJSONArray("interests")?.let { values ->
+                                        List(values.length()) { index -> values.optString(index) }
+                                    } ?: profile.interests,
+                                    isFriendCountPublic = user.optBoolean("isFriendCountPublic", profile.isFriendCountPublic),
+                                    isPremium = tier != NebulaSubscriptionTier.FREE,
+                                    subscriptionTier = tier,
+                                    isTrial = user.optBoolean("isTrial", false),
+                                    roomsJoinedCount = stats?.optInt("roomsJoinedCount", profile.roomsJoinedCount) ?: profile.roomsJoinedCount,
+                                    roomsHostedCount = stats?.optInt("roomsHostedCount", profile.roomsHostedCount) ?: profile.roomsHostedCount,
+                                    timeInSyncHours = stats?.optDouble("timeInSyncHours", profile.timeInSyncHours) ?: profile.timeInSyncHours,
+                                    isOnboardingCompleted = user.optBoolean("isOnboardingCompleted", profile.isOnboardingCompleted),
+                                    dateOfBirth = user.optString("dateOfBirth").ifBlank { null },
+                                    gender = user.optString("gender").ifBlank { null }
                                 )
                                 profileRepository.setLoggedInUser(refreshed)
                                 sessionManager?.saveUserProfile(refreshed)
+                                _uiState.value = _uiState.value.copy(
+                                    userProfile = refreshed,
+                                    activeSubscriptionTier = tier,
+                                    isFriendCountPublic = refreshed.isFriendCountPublic
+                                )
                             }
 
                         }
@@ -92,8 +168,17 @@ class HomeViewModel(
     fun onAppForegrounded() {
         viewModelScope.launch {
             (roomRepository as? RoomRepositoryImpl)?.reconnectActiveRoom()
+            (roomRepository as? RoomRepositoryImpl)?.setAppForegrounded(true)
             refreshAll()
         }
+    }
+
+    fun onAppBackgrounded() {
+        (roomRepository as? RoomRepositoryImpl)?.setAppForegrounded(false)
+    }
+
+    fun refreshActiveRoom() {
+        viewModelScope.launch { roomRepository.syncActiveRoom() }
     }
 
     init {
@@ -266,6 +351,7 @@ class HomeViewModel(
 
     // --- NAVIGATION ---
     fun onTabSelected(tab: NebulaTab) {
+        if (tab == NebulaTab.FRIENDS) viewModelScope.launch { socialRepository.refresh() }
         _uiState.value = _uiState.value.copy(
             currentTab = tab,
             activeRoom = null,
@@ -291,6 +377,8 @@ class HomeViewModel(
                     activeRoom = room,
                     activeSocialConversation = null
                 )
+            } else {
+                showToast("Could not join this room. Check access and try again.")
             }
         }
     }
@@ -308,7 +396,7 @@ class HomeViewModel(
         } else {
             pendingRoomInviteFriend = user
             onCreateRoomClick()
-            showToast("Create a room first — Nebula will automatically invite ${user.displayName.split(" ").first()}")
+            showToast("Create a room first, then you can invite ${user.displayName.split(" ").first()}.")
         }
     }
 
@@ -333,7 +421,6 @@ class HomeViewModel(
                 roomCreationQuote = quote,
                 activeModalSheet = null
             )
-            kotlinx.coroutines.delay(1200)
             try {
                 val created = roomRepository.createRoom(
                     name = name,
@@ -343,10 +430,7 @@ class HomeViewModel(
                     tags = tags,
                     maxParticipants = maxParticipants
                 )
-                val finalRoom = roomRepository.updateRoomSettings(
-                    tags = tags,
-                    maxParticipants = maxParticipants
-                ) ?: created.copy(tags = tags, maxParticipants = maxParticipants)
+                val finalRoom = created
 
                 val invited = pendingRoomInviteFriend
                 pendingRoomInviteFriend = null
@@ -356,8 +440,12 @@ class HomeViewModel(
                     activeSocialConversation = null
                 )
                 if (invited != null) {
-                    roomRepository.sendRoomMessage("${invited.displayName.split(" ").first()} was automatically invited to ${finalRoom.name}!")
-                    showToast("Room created! Automatically invited ${invited.displayName.split(" ").first()}")
+                    when (com.nebula.app.data.backend.NebulaApiClient.inviteToRoom(finalRoom.id, invited.id)) {
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success ->
+                            showToast("Room created and invitation sent to ${invited.displayName.split(" ").first()}.")
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                            showToast("Room created, but the invitation could not be sent.")
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isCreatingRoom = false)
@@ -369,7 +457,9 @@ class HomeViewModel(
     fun onLeaveRoom(newHostId: String? = null) {
         viewModelScope.launch {
             roomRepository.leaveRoom(newHostId)
-            _uiState.value = _uiState.value.copy(activeRoom = null)
+            val remaining = roomRepository.activeRoom.value
+            _uiState.value = _uiState.value.copy(activeRoom = remaining)
+            if (remaining != null) showToast("Could not leave the room. Check your connection and try again.")
         }
     }
 
@@ -391,6 +481,8 @@ class HomeViewModel(
             if (updated != null) {
                 _uiState.value = _uiState.value.copy(activeRoom = updated)
                 showToast("Room settings saved successfully")
+            } else {
+                showToast("Room settings could not be saved. Check your connection and permissions.")
             }
         }
     }
@@ -401,6 +493,30 @@ class HomeViewModel(
             if (updated != null) {
                 _uiState.value = _uiState.value.copy(activeRoom = updated)
                 showToast("Room host updated: ${updated.hostName}")
+            } else {
+                showToast("Room host could not be changed. Check your connection and permissions.")
+            }
+        }
+    }
+
+    fun onModerateRoomParticipant(userId: String, isMuted: Boolean?, isCameraOff: Boolean?) {
+        val roomId = _uiState.value.activeRoom?.id ?: return
+        viewModelScope.launch {
+            val response = com.nebula.app.data.backend.NebulaApiClient.moderateRoomParticipant(
+                roomId, userId, isMuted, isCameraOff
+            )
+            if (response !is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                showToast("Participant controls could not be updated.")
+            }
+        }
+    }
+
+    fun onKickRoomParticipant(userId: String) {
+        val roomId = _uiState.value.activeRoom?.id ?: return
+        viewModelScope.launch {
+            val response = com.nebula.app.data.backend.NebulaApiClient.kickRoomParticipant(roomId, userId)
+            if (response !is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                showToast("Participant could not be removed from the room.")
             }
         }
     }
@@ -409,6 +525,10 @@ class HomeViewModel(
         viewModelScope.launch {
             roomRepository.togglePlayPause()
         }
+    }
+
+    fun onHostPlaybackSample(positionMs: Long, isPlaying: Boolean) {
+        roomRepository.reportHostPlayerSample(positionMs, isPlaying)
     }
 
     fun onSeekTo(positionMs: Long) {
@@ -463,7 +583,9 @@ class HomeViewModel(
     fun onSendDirectMessage(content: String) {
         val convId = _uiState.value.activeSocialConversation?.id ?: return
         viewModelScope.launch {
-            socialRepository.sendMessage(convId, content)
+            if (!socialRepository.sendMessage(convId, content)) {
+                showToast("Message could not be sent. Check your connection and friendship status.")
+            }
         }
     }
 
@@ -471,13 +593,17 @@ class HomeViewModel(
         val currentRoom = _uiState.value.activeRoom
         if (currentRoom != null) {
             viewModelScope.launch {
-                roomRepository.sendRoomMessage("${user.displayName.split(" ").first()} was invited to ${currentRoom.name}!")
+                when (com.nebula.app.data.backend.NebulaApiClient.inviteToRoom(currentRoom.id, user.id)) {
+                    is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success ->
+                        showToast("Invitation sent to ${user.displayName.split(" ").first()}.")
+                    is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                        showToast("Invitation could not be sent. Only accepted friends can be invited.")
+                }
             }
-            showToast("Invited ${user.displayName.split(" ").first()} to room")
         } else {
-            // Invite to cinema room by default
-            onJoinRoom("room_cinema")
-            showToast("Invited ${user.displayName.split(" ").first()} to watchparty")
+            pendingRoomInviteFriend = user
+            onCreateRoomClick()
+            showToast("Create a room first, then you can invite ${user.displayName.split(" ").first()}.")
         }
     }
 
@@ -559,8 +685,8 @@ class HomeViewModel(
                     ?: _uiState.value.userProfile.email.substringBefore("@").filter { it.isLetterOrDigit() || it == '_' }.take(15).lowercase()
             }.ifEmpty { "nebula_user" }
 
-            if (!cleanUsername.matches("^[a-z0-9_]{3,20}$".toRegex())) {
-                showToast("Username must be 3-20 alphanumeric characters or underscores")
+            if (cleanUsername.length !in 3..16 || !cleanUsername.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
+                showToast("Username must be 3-16 characters, with no leading or trailing underscore")
                 return@launch
             }
 
@@ -616,23 +742,34 @@ class HomeViewModel(
     }
 
 
-    fun onAcceptFriendRequest(requestId: String) {
+    fun onAcceptFriendRequest(requestId: String, onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
-            socialRepository.acceptFriendRequest(requestId)
-            showToast("Friend request accepted")
+            if (socialRepository.acceptFriendRequest(requestId)) {
+                refreshAll()
+                showToast("Friend request accepted")
+                onSuccess?.invoke()
+            } else {
+                showToast("Friend request could not be accepted. Try again.")
+            }
         }
     }
 
     fun onDeclineFriendRequest(requestId: String) {
         viewModelScope.launch {
-            socialRepository.declineFriendRequest(requestId)
+            if (!socialRepository.declineFriendRequest(requestId)) {
+                showToast("Friend request could not be declined. Try again.")
+            } else refreshAll()
         }
     }
 
     fun onAddSuggestedFriend(user: NebulaUser) {
         viewModelScope.launch {
-            socialRepository.addFriend(user)
-            showToast("Added ${user.displayName.split(" ").first()}")
+            if (socialRepository.addFriend(user)) {
+                refreshAll()
+                showToast("Friend request sent to ${user.displayName.split(" ").first()}")
+            } else {
+                showToast("Friend request could not be sent. Try again.")
+            }
         }
     }
 
@@ -642,7 +779,9 @@ class HomeViewModel(
 
     fun onCancelFriendRequest(user: NebulaUser) {
         viewModelScope.launch {
-            socialRepository.withdrawFriendRequest(user.id)
+            if (!socialRepository.withdrawFriendRequest(user.id)) {
+                showToast("Friend request could not be cancelled. Try again.")
+            } else refreshAll()
         }
     }
 
@@ -799,70 +938,100 @@ class HomeViewModel(
 
     fun onVotePoll(optionId: String) {
         viewModelScope.launch {
-            roomRepository.votePoll(optionId)
-            showToast("Vote recorded!")
+            if (roomRepository.votePoll(optionId)) showToast("Vote recorded!")
+            else showToast("Your vote could not be recorded. You may already have voted.")
         }
     }
 
     fun onToggleFriendCountPrivacy() {
-        val current = _uiState.value.isFriendCountPublic
-        _uiState.value = _uiState.value.copy(isFriendCountPublic = !current)
-        showToast(if (!current) "Friend list is now Public" else "Friend list is now Private")
-    }
-
-    fun onSelectSubscriptionTier(tier: com.nebula.app.domain.model.NebulaSubscriptionTier) {
         viewModelScope.launch {
-            val tierStr = when (tier) {
-                com.nebula.app.domain.model.NebulaSubscriptionTier.PREMIUM_PLUS -> "premium_plus"
-                com.nebula.app.domain.model.NebulaSubscriptionTier.PREMIUM -> "premium"
-                else -> "free"
-            }
-            if (tierStr != "free") {
-                try {
-                    com.nebula.app.data.backend.NebulaApiClient.verifyPurchase(
-                        purchaseToken = "test_token_${System.currentTimeMillis()}",
-                        planTier = tierStr
-                    )
-                } catch (_: Exception) {}
-            }
-            val updatedUser = _uiState.value.userProfile.copy(
-                subscriptionTier = tier,
-                isPremium = tier != com.nebula.app.domain.model.NebulaSubscriptionTier.FREE
+            val profile = _uiState.value.userProfile
+            val nextValue = !_uiState.value.isFriendCountPublic
+            val result = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
+                displayName = profile.displayName,
+                username = profile.username?.removePrefix("@"),
+                bio = profile.bio,
+                status = profile.status,
+                bannerIndex = profile.bannerIndex,
+                interests = profile.interests,
+                avatarUrl = profile.avatarUri,
+                isFriendCountPublic = nextValue,
+                dateOfBirth = profile.dateOfBirth,
+                gender = profile.gender,
+                bannerUrl = profile.bannerUrl
             )
-            profileRepository.setLoggedInUser(updatedUser)
-            sessionManager?.saveUserProfile(updatedUser)
-            _uiState.value = _uiState.value.copy(
-                userProfile = updatedUser,
-                activeSubscriptionTier = tier,
-                activeModalSheet = null
-            )
-            showToast("Switched to ${tier.title} tier • Themes & Premium unlocked")
+            if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                val updated = profile.copy(isFriendCountPublic = nextValue)
+                profileRepository.setLoggedInUser(updated)
+                sessionManager?.saveUserProfile(updated)
+                _uiState.value = _uiState.value.copy(
+                    userProfile = updated,
+                    isFriendCountPublic = nextValue
+                )
+                showToast(if (nextValue) "Friend list is now public" else "Friend list is now private")
+            } else {
+                showToast("Privacy setting could not be saved. Try again.")
+            }
         }
     }
 
+    fun onSelectSubscriptionTier(tier: com.nebula.app.domain.model.NebulaSubscriptionTier) {
+        if (tier == _uiState.value.userProfile.subscriptionTier) return
+
+        // Choosing a plan is not a verified purchase. Keep the authoritative profile and
+        // entitlement unchanged until Google Play Billing returns a verified receipt.
+        showToast("Purchases are not available yet. Your plan has not been changed.")
+    }
+
     fun onExportSavedVault() {
-        showToast("Exported ${_uiState.value.savedVaultItems.size} images to DCIM/Nebula")
+        showToast("Media export is not available yet. No files were exported.")
     }
 
     fun onPurgeSavedVault() {
-        _uiState.value = _uiState.value.copy(savedVaultItems = emptyList())
-        showToast("Saved media vault cleared")
+        showToast("Vault storage is not available yet. No saved media was deleted.")
     }
 
     fun onDismissNotification(id: String) {
-        _uiState.value = _uiState.value.copy(
-            notifications = _uiState.value.notifications.filterNot { it.id == id }
-        )
+        viewModelScope.launch {
+            when (com.nebula.app.data.backend.NebulaApiClient.deleteNotification(id)) {
+                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                    _uiState.value = _uiState.value.copy(
+                        notifications = _uiState.value.notifications.filterNot { it.id == id }
+                    )
+                }
+                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                    showToast("Notification could not be dismissed. Try again.")
+            }
+        }
     }
 
     fun onAcceptNotification(notif: com.nebula.app.domain.model.NebulaNotification) {
         when (notif.type) {
             com.nebula.app.domain.model.NotificationType.FRIEND_REQUEST -> {
-                notif.relatedId?.let { onAcceptFriendRequest(it) }
-                onDismissNotification(notif.id)
+                notif.relatedId?.let { requestId ->
+                    onAcceptFriendRequest(requestId) {
+                        viewModelScope.launch {
+                            com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)
+                            onDismissNotification(notif.id)
+                        }
+                    }
+                }
             }
             com.nebula.app.domain.model.NotificationType.ROOM_INVITE,
             com.nebula.app.domain.model.NotificationType.ROOM_STARTED -> {
+                viewModelScope.launch {
+                    when (com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)) {
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                            _uiState.value = _uiState.value.copy(
+                                notifications = _uiState.value.notifications.map {
+                                    if (it.id == notif.id) it.copy(isRead = true) else it
+                                }
+                            )
+                        }
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                            showToast("Notification could not be marked read. Try again.")
+                    }
+                }
                 notif.relatedId?.let { onJoinRoom(it) }
                 onDismissModalSheet()
             }
@@ -879,15 +1048,18 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(isAuthLoading = true, authErrorMessage = null)
             when (val result = manager.signInWithGoogle(activityContext)) {
                 is GoogleAuthResult.Success -> {
-                    val finalProfile = result.profile.copy(isOnboardingCompleted = true)
+                    val finalProfile = result.profile
+                    _showWelcomeBack.value = finalProfile.isOnboardingCompleted
                     profileRepository.setLoggedInUser(finalProfile)
                     sessionManager?.saveUserProfile(finalProfile)
                     _uiState.value = _uiState.value.copy(
                         userProfile = finalProfile,
+                        activeSubscriptionTier = finalProfile.subscriptionTier,
                         isAuthLoading = false,
                         authErrorMessage = null,
                         quickToastMessage = "Connected as ${finalProfile.displayName}"
                     )
+                    refreshAll()
                 }
                 is GoogleAuthResult.Error -> {
                     _uiState.value = _uiState.value.copy(
@@ -938,14 +1110,17 @@ class HomeViewModel(
             when (val result = manager.verifyOtp(target, otp)) {
                 is GoogleAuthResult.Success -> {
                     val profile = result.profile
+                    _showWelcomeBack.value = profile.isOnboardingCompleted
                     profileRepository.setLoggedInUser(profile)
                     sessionManager?.saveUserProfile(profile)
                     _uiState.value = _uiState.value.copy(
                         userProfile = profile,
+                        activeSubscriptionTier = profile.subscriptionTier,
                         isAuthLoading = false,
                         authErrorMessage = null,
                         quickToastMessage = if (profile.isOnboardingCompleted) "Connected as ${profile.displayName}" else "Welcome to Nebula!"
                     )
+                    refreshAll()
                 }
                 is GoogleAuthResult.Error -> {
                     _uiState.value = _uiState.value.copy(
@@ -965,15 +1140,18 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(isAuthLoading = true, authErrorMessage = null)
             when (val result = manager.signInWithEmailAccount(email, displayName)) {
                 is GoogleAuthResult.Success -> {
-                    val finalProfile = result.profile.copy(isOnboardingCompleted = true)
+                    val finalProfile = result.profile
+                    _showWelcomeBack.value = finalProfile.isOnboardingCompleted
                     profileRepository.setLoggedInUser(finalProfile)
                     sessionManager?.saveUserProfile(finalProfile)
                     _uiState.value = _uiState.value.copy(
                         userProfile = finalProfile,
+                        activeSubscriptionTier = finalProfile.subscriptionTier,
                         isAuthLoading = false,
                         authErrorMessage = null,
                         quickToastMessage = "Connected as ${finalProfile.displayName}"
                     )
+                    refreshAll()
                 }
                 is GoogleAuthResult.Error -> {
                     _uiState.value = _uiState.value.copy(
@@ -1007,8 +1185,12 @@ class HomeViewModel(
         val manager = authManager
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAuthLoading = true)
+            runCatching { roomRepository.leaveRoom() }
+            (roomRepository as? RoomRepositoryImpl)?.disconnectRealtime()
             manager?.signOut()
             sessionManager?.clearSession()
+            (socialRepository as? SocialRepositoryImpl)?.clearLocalState()
+            chatRepository.clearAllLocalData()
             profileRepository.setLoggedInUser(com.nebula.app.domain.model.UserProfile(isLoggedIn = false))
             com.nebula.app.data.backend.NebulaApiClient.authToken = null
             _uiState.value = _uiState.value.copy(
@@ -1017,6 +1199,12 @@ class HomeViewModel(
                 fullScreenDestination = null,
                 activeRoom = null,
                 activeSocialConversation = null,
+                socialConversations = emptyList(),
+                friends = emptyList(),
+                friendRequests = emptyList(),
+                suggestedPeople = emptyList(),
+                notifications = emptyList(),
+                activeSubscriptionTier = NebulaSubscriptionTier.FREE,
                 quickToastMessage = "Signed out of Nebula"
             )
         }

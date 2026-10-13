@@ -6,8 +6,10 @@ import { initSocketServer } from '../realtime/socketServer';
 import { config } from '../config/env';
 import { UserModel } from '../models/User';
 import { RoomModel } from '../models/Room';
-import { connectDatabase } from '../config/database';
+import { FriendshipModel } from '../models/Friendship';
+import { NotificationModel } from '../models/Notification';
 import mongoose from 'mongoose';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 
 // Standalone security test runner
 async function runSecurityTests() {
@@ -15,7 +17,10 @@ async function runSecurityTests() {
   console.log('🔒 RUNNING NEBULA BACKEND SECURITY AUDIT TEST SUITE');
   console.log('====================================================');
 
-  await connectDatabase();
+  // Security tests seed and delete records. Keep them isolated from every configured
+  // shared or production database, regardless of the caller's environment variables.
+  const testDatabase = await MongoMemoryServer.create();
+  await mongoose.connect(testDatabase.getUri(), { dbName: 'nebula_security_test' });
 
   const app = createApp();
   const server = http.createServer(app);
@@ -236,6 +241,74 @@ async function runSecurityTests() {
     if (deleteRes.status !== 403) throw new Error(`Expected 403 when Bob attempts to delete Alice asset, got ${deleteRes.status}`);
   });
 
+  await assertTest('Accepted friend can join invite-only room from persisted invitation', async () => {
+    const room = await RoomModel.create({
+      name: 'Invite authorization test',
+      hostId: validUserPayload.id,
+      privacy: 'invite_only',
+      participants: [{
+        userId: validUserPayload.id,
+        displayName: validUserPayload.displayName,
+        avatarLetter: 'A',
+        isHost: true,
+      }],
+    });
+    await FriendshipModel.create({
+      requesterId: validUserPayload.id,
+      recipientId: bobUserPayload.id,
+      status: 'accepted',
+    });
+
+    const deniedJoin = await makeRequest(`/api/v1/rooms/${room.id}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${bobToken}` },
+    });
+    if (deniedJoin.status !== 403) {
+      throw new Error(`Expected uninvited join to be rejected with 403, got ${deniedJoin.status}`);
+    }
+
+    const deniedInvite = await makeRequest(`/api/v1/rooms/${room.id}/invite`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bobToken}`,
+      },
+      body: JSON.stringify({ userId: validUserPayload.id }),
+    });
+    if (deniedInvite.status !== 403) {
+      throw new Error(`Expected non-host invite to be rejected with 403, got ${deniedInvite.status}`);
+    }
+
+    const inviteRes = await makeRequest(`/api/v1/rooms/${room.id}/invite`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${validToken}`,
+      },
+      body: JSON.stringify({ userId: bobUserPayload.id }),
+    });
+    if (inviteRes.status !== 201) {
+      throw new Error(`Expected invite creation 201, got ${inviteRes.status}`);
+    }
+
+    const persistedInvite = await NotificationModel.findOne({
+      userId: bobUserPayload.id,
+      type: 'room_invite',
+      'actionData.roomId': room.id,
+    });
+    if (!persistedInvite) throw new Error('Room invitation was not persisted for the recipient');
+
+    const joinRes = await makeRequest(`/api/v1/rooms/${room.id}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${bobToken}` },
+    });
+    if (joinRes.status !== 200) throw new Error(`Expected invite-authorized join 200, got ${joinRes.status}`);
+    const updatedRoom = await RoomModel.findById(room.id);
+    if (!updatedRoom?.participants.some((participant) => participant.userId === bobUserPayload.id)) {
+      throw new Error('Authorized participant membership was not persisted');
+    }
+  });
+
   await assertTest('Excessive OTP requests trigger rate limiting (429)', async () => {
     let got429 = false;
     for (let i = 0; i < 6; i++) {
@@ -314,6 +387,7 @@ async function runSecurityTests() {
   try {
     await UserModel.deleteMany({ username: { $in: ['test_alice', 'test_bob'] } });
     await mongoose.disconnect();
+    await testDatabase.stop();
   } catch {}
 
   await new Promise<void>((resolve) => server.close(() => resolve()));

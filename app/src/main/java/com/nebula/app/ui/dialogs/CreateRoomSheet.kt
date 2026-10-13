@@ -193,14 +193,6 @@ fun CreateRoomSheet(
                         onClick = { selectedPrivacy = RoomPrivacy.FRIENDS },
                         modifier = Modifier.weight(1f)
                     )
-                    Text(
-                        text = "tap a video to play",
-                        color = Color.White,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
                     PrivacyOption(
                         label = "Invite Only",
                         icon = Icons.Default.Lock,
@@ -216,6 +208,14 @@ fun CreateRoomSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Text(
+                    text = when (selectedPrivacy) {
+                        RoomPrivacy.FRIENDS -> "Only your friends can join."
+                        RoomPrivacy.INVITE_ONLY -> "Only people you invite can join."
+                        RoomPrivacy.PUBLIC -> "Anyone can find and join this room."
+                    },
+                    style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 11.sp)
+                )
             }
 
             // ROOM TAGS SELECTOR (up to 3 from 50+ predefined tags)

@@ -49,7 +49,7 @@ import java.time.Period
  * Native 7-step onboarding flow for newly registered Nebula users.
  * Enforces:
  * - Single-line fields max 60 characters
- * - Username 3-20 chars (^[a-z0-9_]+$) with live backend availability check
+ * - Username 3-16 chars (lowercase letters, numbers, underscores; no leading/trailing underscore) with live backend availability check
  * - Structured Date of Birth & Gender selection (including "Prefer not to say")
  * - Profile picture selection via Photo Picker
  * - Review and atomic profile completion
@@ -115,12 +115,12 @@ fun NebulaOnboardingScreen(
     var checkJob by remember { mutableStateOf<Job?>(null) }
     fun triggerUsernameCheck(name: String) {
         val clean = name.trim().lowercase().replace("^@".toRegex(), "")
-        if (clean.length < 3 || clean.length > 20) {
-            usernameError = "Username must be 3 to 20 characters."
+        if (clean.length < 3 || clean.length > 16) {
+            usernameError = "Username must be 3 to 16 characters."
             isUsernameAvailable = null
             return
         }
-        if (!clean.matches("^[a-z0-9_]+$".toRegex())) {
+        if (!clean.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
             usernameError = "Only lowercase letters, numbers, and underscores allowed."
             isUsernameAvailable = null
             return
@@ -422,7 +422,7 @@ fun NebulaOnboardingScreen(
                                 value = username,
                                 onValueChange = { input ->
                                     val clean = input.lowercase().replace("^@".toRegex(), "").filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
-                                    if (clean.length <= 20) {
+                                    if (clean.length <= 16 && clean.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
                                         username = clean
                                         triggerUsernameCheck(clean)
                                     }

@@ -99,18 +99,21 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
 export async function checkUsername(req: Request, res: Response): Promise<void> {
   try {
     const rawUsername = (req.params.username || '').toLowerCase().trim().replace(/^@/, '');
-    if (!rawUsername || rawUsername.length < 3 || rawUsername.length > 20) {
-      res.status(400).json({ success: false, error: 'Username must be between 3 and 20 characters' });
+    if (!rawUsername || rawUsername.length < 3 || rawUsername.length > 16) {
+      res.status(400).json({ success: false, error: 'Username must be between 3 and 16 characters' });
       return;
     }
 
-    if (!/^[a-z0-9_]+$/.test(rawUsername)) {
-      res.status(400).json({ success: false, error: 'Username can only contain letters, numbers, and underscores' });
+    if (!/^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$/.test(rawUsername)) {
+      res.status(400).json({ success: false, error: 'Username must use lowercase letters, numbers, and underscores, without leading or trailing underscores' });
       return;
     }
 
     const cleanUsername = rawUsername;
-    const existing = await UserModel.findOne({ username: cleanUsername }).select('_id');
+    const existing = await UserModel.findOne({
+      username: cleanUsername,
+      ...(req.user ? { _id: { $ne: req.user.id } } : {}),
+    }).select('_id');
 
     res.json({
       success: true,

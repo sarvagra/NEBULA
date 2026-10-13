@@ -10,6 +10,8 @@ export interface IRoomParticipant {
   avatarUrl?: string;
   joinedAt: Date;
   isHost: boolean;
+  isMuted?: boolean;
+  isCameraOff?: boolean;
 }
 
 export interface IRoomMediaState {
@@ -32,6 +34,7 @@ export interface IRoom extends Document {
   isEnded: boolean;
   mediaState: IRoomMediaState;
   participants: IRoomParticipant[];
+  kickedUserIds: string[];
   maxParticipants: number;
   isMicAllowed: boolean;
   isVideoAllowed: boolean;
@@ -67,8 +70,12 @@ const RoomSchema = new Schema<IRoom>(
         avatarUrl: { type: String },
         joinedAt: { type: Date, default: Date.now },
         isHost: { type: Boolean, default: false },
+        isMuted: { type: Boolean, default: false },
+        isCameraOff: { type: Boolean, default: false },
       },
     ],
+    // A host kick blocks re-entry until the room changes host or is removed.
+    kickedUserIds: { type: [String], default: [] },
     maxParticipants: { type: Number, default: 25 },
   },
   {

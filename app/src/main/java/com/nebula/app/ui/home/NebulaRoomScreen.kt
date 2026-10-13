@@ -58,6 +58,10 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import android.app.Activity
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
@@ -82,12 +86,17 @@ import androidx.compose.material3.Switch
 import com.nebula.app.ui.dialogs.InRoomMediaSearchSheet
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -110,6 +119,8 @@ import com.nebula.app.ui.components.PABottomSheet
 import com.nebula.app.ui.dialogs.AttachmentPickerSheet
 import com.nebula.app.ui.dialogs.FriendProfileSheet
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * NebulaRoomScreen:
@@ -127,15 +138,24 @@ fun NebulaRoomScreen(
     room: NebulaRoom,
     currentUser: UserProfile? = null,
     friends: List<NebulaUser> = emptyList(),
+    friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest> = emptyList(),
+    suggestedPeople: List<NebulaUser> = emptyList(),
+    onAcceptFriendRequest: (String) -> Unit = {},
+    onDeclineFriendRequest: (String) -> Unit = {},
+    onCancelFriendRequest: (NebulaUser) -> Unit = {},
+    onModerateParticipant: (String, Boolean?, Boolean?) -> Unit = { _, _, _ -> },
+    onKickParticipant: (String) -> Unit = {},
     onAddFriend: (NebulaUser) -> Unit = {},
     onMessageFriend: (NebulaUser) -> Unit = {},
     onLeaveRoom: (newHostId: String?) -> Unit,
+    onRefreshRoom: () -> Unit = {},
+    onHostPlaybackSample: (Long, Boolean) -> Unit = { _, _ -> },
     onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
     onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
     onTogglePlayPause: () -> Unit,
     onSendRoomMessage: (String) -> Unit,
     onSendReaction: (String) -> Unit,
-    onInviteFriendsClick: () -> Unit,
+    onInviteFriend: (NebulaUser) -> Unit = {},
     onVotePoll: (String) -> Unit = {},
     onSeekTo: (Long) -> Unit = {},
     onUpdateMedia: (String, String) -> Unit = { _, _ -> },
@@ -152,24 +172,23 @@ fun NebulaRoomScreen(
     var maxParticipants by remember(room.id, room.maxParticipants) { mutableIntStateOf(room.maxParticipants) }
     var isMicAllowed by remember(room.id, room.isMicAllowed) { mutableStateOf(room.isMicAllowed) }
     var isVideoAllowed by remember(room.id, room.isVideoAllowed) { mutableStateOf(room.isVideoAllowed) }
-    var roomTags by remember(room.id, room.tags) { mutableStateOf(if (room.tags.isNotEmpty()) room.tags else listOf("Cinema", "Chill")) }
+    var roomTags by remember(room.id, room.tags) { mutableStateOf(room.tags) }
 
-    // Admin authorization check (Room host or explorer)
-    val isCurrentUserAdmin = room.hostId.isBlank() ||
-        room.hostId == NebulaUser.CurrentUser.id ||
-        room.participants.any { it.user.id == NebulaUser.CurrentUser.id && it.isHost }
+    // Match server-issued identities; display names/usernames are not authorization keys.
+    val currentUserId = currentUser?.id.orEmpty()
+    val roomVideoId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
+        ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
+    var guestLocallyPaused by remember(room.id, roomVideoId) { mutableStateOf(false) }
+    val isCurrentUserAdmin = currentUserId.isNotBlank() && (
+        room.hostId == currentUserId ||
+            room.participants.any { it.user.id == currentUserId && it.isHost }
+        )
 
     // Room participants list - Deduplicate by user ID or displayName to guarantee 1 instance per user
     val participantsList = remember(room.id, room.participants) {
-        val list = if (room.participants.isNotEmpty()) {
-            room.participants
-        } else {
-            listOf(RoomParticipant(user = NebulaUser.CurrentUser, isHost = true))
-        }
-        list.distinctBy { it.user.id.ifBlank { it.user.displayName.lowercase() } }
+        room.participants.distinctBy { it.user.id }
     }
-    var mutedAudioUsers by remember { mutableStateOf(setOf<String>()) }
-    var mutedVideoUsers by remember { mutableStateOf(setOf<String>()) }
+    val hostDisplayName = room.hostName.trim().ifBlank { "Host unavailable" }
 
     // Dialog & Sheet States
     var showMembersSheet by remember { mutableStateOf(false) }
@@ -177,6 +196,8 @@ fun NebulaRoomScreen(
     var showMediaSearchSheet by remember { mutableStateOf(false) }
     var selectedMemberForProfile by remember { mutableStateOf<NebulaUser?>(null) }
     var showHostTransferDialog by remember { mutableStateOf(false) }
+    var showLeaveConfirmation by remember { mutableStateOf(false) }
+    var showInviteFriends by remember { mutableStateOf(false) }
 
     // Image/GIF Sharing Anti-Spam & Cooldown State
     var mediaSendTimestamps by remember { mutableStateOf(listOf<Long>()) }
@@ -285,7 +306,7 @@ fun NebulaRoomScreen(
         } else if (selectedMemberForProfile != null) {
             selectedMemberForProfile = null
         } else {
-            triggerLeaveFlow()
+            showLeaveConfirmation = true
         }
     }
 
@@ -325,105 +346,16 @@ fun NebulaRoomScreen(
                     )
                 }
             } else {
-                var currentLoadedId by remember { mutableStateOf<String?>(null) }
-
-                androidx.compose.ui.viewinterop.AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            layoutParams = android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                allowFileAccess = true
-                                allowContentAccess = true
-                                databaseEnabled = true
-                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            }
-                            android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                            webChromeClient = object : android.webkit.WebChromeClient() {}
-                            webViewClient = object : android.webkit.WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean = false
-
-                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    view?.evaluateJavascript(
-                                        if (room.isPlaying) {
-                                            "if (typeof playVideo === 'function') playVideo();"
-                                        } else {
-                                            "if (typeof pauseVideo === 'function') pauseVideo();"
-                                        },
-                                        null
-                                    )
-                                }
-                            }
-                            currentLoadedId = videoId
-                            val html = """
-                                <!DOCTYPE html>
-                                <html>
-                                <head>
-                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                                <meta name="referrer" content="strict-origin-when-cross-origin">
-                                <style>
-                                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                                  body, html { width: 100%; height: 100%; background: #000000; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-                                  iframe { width: 100%; height: 100%; border: none; display: block; }
-                                  .ytp-impression-link, .ytp-watermark, .ytp-youtube-button, .ytp-show-cards-title, .ytp-pause-overlay, .ytp-title-channel, .ytp-title, .ytp-large-play-button-bg, .annotation, .ytp-paid-content-overlay, .ytp-chrome-top, .ytp-button.ytp-open-in-app { display: none !important; }
-                                </style>
-                                </head>
-                                <body>
-                                <iframe id="player"
-                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com"
-                                  referrerpolicy="strict-origin-when-cross-origin"
-                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                                  allowfullscreen>
-                                </iframe>
-                                <script>
-                                  function playVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: '' }), '*'); }
-                                  function pauseVideo() { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }), '*'); }
-                                  function seekTo(s) { var f = document.getElementById('player'); if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*'); }
-                                  var syncPositionMs = 0;
-                                  var syncAtMs = Date.now();
-                                  var syncPlaying = false;
-                                  function syncTo(positionMs, shouldPlay) {
-                                    var now = Date.now();
-                                    var predicted = syncPositionMs + (syncPlaying ? now - syncAtMs : 0);
-                                    if (Math.abs(positionMs - predicted) > 1200) {
-                                      seekTo(positionMs / 1000.0);
-                                    }
-                                    syncPositionMs = positionMs;
-                                    syncAtMs = now;
-                                    syncPlaying = shouldPlay;
-                                    if (shouldPlay) playVideo(); else pauseVideo();
-                                  }
-                                  function loadVideo(id) { var f = document.getElementById('player'); if (f) f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com'; }
-                                </script>
-                                </body>
-                                </html>
-                            """.trimIndent()
-                            loadDataWithBaseURL("https://nebula-73kb.onrender.com/", html, "text/html", "UTF-8", null)
-                        }
-                    },
-                    update = { webView ->
-                        val targetId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
-                            ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
-                        if (!targetId.isNullOrBlank() && targetId != currentLoadedId) {
-                            currentLoadedId = targetId
-                            webView.evaluateJavascript("loadVideo('$targetId');", null)
-                        }
-                        webView.evaluateJavascript(
-                            "if (typeof syncTo === 'function') syncTo(${room.playbackPositionMs}, ${room.isPlaying});",
-                            null
-                        )
-                    }
+                NebulaYoutubePlayer(
+                    roomId = room.id,
+                    videoId = videoId,
+                    playbackPositionMs = room.playbackPositionMs,
+                    isPlaying = room.isPlaying,
+                    isHost = isCurrentUserAdmin,
+                    locallyPaused = guestLocallyPaused,
+                    onHostSample = onHostPlaybackSample,
+                    modifier = Modifier.fillMaxSize()
                 )
-            }
 
             // Exit Landscape button
             IconButton(
@@ -445,6 +377,7 @@ fun NebulaRoomScreen(
                     tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
+            }
             }
         }
         return
@@ -472,13 +405,13 @@ fun NebulaRoomScreen(
                 modifier = Modifier.weight(1f, fill = false)
             ) {
                 IconButton(
-                    onClick = { triggerLeaveFlow() },
+                    onClick = { showInviteFriends = true },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Leave room",
-                        tint = theme.colors.textPrimary,
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = "Invite friends to room",
+                        tint = theme.colors.primaryAccent,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -496,7 +429,7 @@ fun NebulaRoomScreen(
                     )
 
                     Text(
-                        text = "${participantsList.size} watching • Hosted by ${room.hostName.split(" ").first()}",
+                        text = "${participantsList.size} watching • Hosted by $hostDisplayName",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
                             fontSize = 11.5.sp
@@ -516,7 +449,10 @@ fun NebulaRoomScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .background(theme.colors.surface)
                         .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .clickable { showMembersSheet = true }
+                        .clickable {
+                            showMembersSheet = true
+                            onRefreshRoom()
+                        }
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -694,131 +630,15 @@ fun NebulaRoomScreen(
                     }
                 }
             } else {
-                // Persistent Real YouTube Webview Player
-                var currentLoadedId by remember { mutableStateOf<String?>(null) }
-
-                androidx.compose.ui.viewinterop.AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            layoutParams = android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                allowFileAccess = true
-                                allowContentAccess = true
-                                databaseEnabled = true
-                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            }
-                            android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                            webChromeClient = object : android.webkit.WebChromeClient() {
-                                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
-                                    android.util.Log.d("NebulaPlayer", "Player: ${consoleMessage?.message()}")
-                                    return true
-                                }
-                            }
-                            webViewClient = object : android.webkit.WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                                    return false
-                                }
-
-                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    view?.evaluateJavascript(
-                                        if (room.isPlaying) {
-                                            "if (typeof playVideo === 'function') playVideo();"
-                                        } else {
-                                            "if (typeof pauseVideo === 'function') pauseVideo();"
-                                        },
-                                        null
-                                    )
-                                }
-                            }
-                            currentLoadedId = videoId
-                            val html = """
-                                <!DOCTYPE html>
-                                <html>
-                                <head>
-                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                                <meta name="referrer" content="strict-origin-when-cross-origin">
-                                <style>
-                                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                                  body, html { width: 100%; height: 100%; background: #000000; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-                                  iframe { width: 100%; height: 100%; border: none; display: block; }
-                                  .ytp-impression-link, .ytp-watermark, .ytp-youtube-button, .ytp-show-cards-title, .ytp-pause-overlay, .ytp-title-channel, .ytp-title, .ytp-large-play-button-bg, .annotation, .ytp-paid-content-overlay, .ytp-chrome-top, .ytp-button.ytp-open-in-app { display: none !important; }
-                                </style>
-                                </head>
-                                <body>
-                                <iframe id="player"
-                                  src="https://www.youtube.com/embed/$videoId?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com"
-                                  referrerpolicy="strict-origin-when-cross-origin"
-                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                                  allowfullscreen>
-                                </iframe>
-                                <script>
-                                  function playVideo() {
-                                    var f = document.getElementById('player');
-                                    if (f && f.contentWindow) {
-                                      f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: '' }), '*');
-                                    }
-                                  }
-                                  function pauseVideo() {
-                                    var f = document.getElementById('player');
-                                    if (f && f.contentWindow) {
-                                      f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }), '*');
-                                    }
-                                  }
-                                  function seekTo(s) {
-                                    var f = document.getElementById('player');
-                                    if (f && f.contentWindow) {
-                                      f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [s, true] }), '*');
-                                    }
-                                    var syncPositionMs = 0;
-                                    var syncAtMs = Date.now();
-                                    var syncPlaying = false;
-                                    function syncTo(positionMs, shouldPlay) {
-                                      var now = Date.now();
-                                      var predicted = syncPositionMs + (syncPlaying ? now - syncAtMs : 0);
-                                      if (Math.abs(positionMs - predicted) > 1200) {
-                                        seekTo(positionMs / 1000.0);
-                                      }
-                                      syncPositionMs = positionMs;
-                                      syncAtMs = now;
-                                      syncPlaying = shouldPlay;
-                                      if (shouldPlay) playVideo(); else pauseVideo();
-                                    }
-                                  }
-                                  function loadVideo(id) {
-                                    var f = document.getElementById('player');
-                                    if (f) {
-                                      f.src = 'https://www.youtube.com/embed/' + id + '?enablejsapi=1&autoplay=1&playsinline=1&controls=1&rel=0&iv_load_policy=3&modestbranding=1&fs=1&disablekb=0&origin=https%3A%2F%2Fnebula-73kb.onrender.com';
-                                    }
-                                  }
-                                </script>
-                                </body>
-                                </html>
-                            """.trimIndent()
-                            loadDataWithBaseURL("https://nebula-73kb.onrender.com/", html, "text/html", "UTF-8", null)
-                        }
-                    },
-                    update = { webView ->
-                        val targetId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
-                            ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
-                        if (!targetId.isNullOrBlank() && targetId != currentLoadedId) {
-                            currentLoadedId = targetId
-                            webView.evaluateJavascript("loadVideo('$targetId');", null)
-                        }
-                        webView.evaluateJavascript(
-                            "if (typeof syncTo === 'function') syncTo(${room.playbackPositionMs}, ${room.isPlaying});",
-                            null
-                        )
-                    }
+                NebulaYoutubePlayer(
+                    roomId = room.id,
+                    videoId = videoId,
+                    playbackPositionMs = room.playbackPositionMs,
+                    isPlaying = room.isPlaying,
+                    isHost = isCurrentUserAdmin,
+                    locallyPaused = guestLocallyPaused,
+                    onHostSample = onHostPlaybackSample,
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 // Fullscreen / Landscape Toggle Button
@@ -991,9 +811,6 @@ fun NebulaRoomScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .background(theme.colors.surface.copy(alpha = 0.6f))
                         .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                        .clickable {
-                            Toast.makeText(context, "Playback is synchronized and controlled by host (${room.hostName.split(" ").first()})", Toast.LENGTH_SHORT).show()
-                        }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1005,12 +822,24 @@ fun NebulaRoomScreen(
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = if (hasVideo) "Synchronized with host (${room.hostName.split(" ").first()})" else "Waiting for host to pick video",
+                        text = if (hasVideo) "Synchronized with host ($hostDisplayName)" else "Waiting for host to pick video",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
                             fontSize = 11.5.sp
                         )
                     )
+                }
+                if (hasVideo) {
+                    IconButton(
+                        onClick = { guestLocallyPaused = !guestLocallyPaused },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (guestLocallyPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (guestLocallyPaused) "Resume for me at host position" else "Pause for me",
+                            tint = theme.colors.primaryAccent
+                        )
+                    }
                 }
             }
         }
@@ -1323,28 +1152,19 @@ fun NebulaRoomScreen(
             isVisible = showMembersSheet,
             participants = participantsList,
             friends = friends,
-            currentUserId = currentUser?.username?.removePrefix("@") ?: "current_user",
+            friendRequests = friendRequests,
+            suggestedPeople = suggestedPeople,
+            currentUserId = currentUserId,
             onAddFriend = onAddFriend,
+            onAcceptFriendRequest = onAcceptFriendRequest,
+            onDeclineFriendRequest = onDeclineFriendRequest,
+            onCancelFriendRequest = onCancelFriendRequest,
             onMessageFriend = onMessageFriend,
-            onInviteFriend = {
-                onInviteFriendsClick()
-            },
-            mutedAudioUsers = mutedAudioUsers,
-            mutedVideoUsers = mutedVideoUsers,
-            onToggleAudioMute = { userId ->
-                mutedAudioUsers = if (mutedAudioUsers.contains(userId)) {
-                    mutedAudioUsers - userId
-                } else {
-                    mutedAudioUsers + userId
-                }
-            },
-            onToggleVideoMute = { userId ->
-                mutedVideoUsers = if (mutedVideoUsers.contains(userId)) {
-                    mutedVideoUsers - userId
-                } else {
-                    mutedVideoUsers + userId
-                }
-            },
+                onInviteFriend = onInviteFriend,
+            onToggleAudioMute = { userId, muted -> onModerateParticipant(userId, muted, null) },
+            onToggleVideoMute = { userId, cameraOff -> onModerateParticipant(userId, null, cameraOff) },
+            onKickParticipant = onKickParticipant,
+            canModerate = isCurrentUserAdmin,
             onSelectParticipantProfile = { memberUser ->
                 showMembersSheet = false
                 selectedMemberForProfile = memberUser
@@ -1409,38 +1229,162 @@ fun NebulaRoomScreen(
     }
 
     pendingImageData?.let { imageData ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { pendingImageData = null },
-            title = { Text("Send photo?") },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val bytes = android.util.Base64.decode(imageData.substringAfter("base64,"), android.util.Base64.DEFAULT)
-                    val preview = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (preview != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = preview.asImageBitmap(),
-                            contentDescription = "Photo preview",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 240.dp)
-                                .clip(RoundedCornerShape(12.dp)),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                        )
+        val previewBitmap = remember(imageData) {
+            runCatching {
+                val bytes = android.util.Base64.decode(imageData.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }.getOrNull()
+        }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { pendingImageData = null }) {
+            androidx.compose.material3.Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                color = theme.colors.surfaceElevated
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Text("Share in this room", color = theme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(14.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 380.dp)
+                            .clip(RoundedCornerShape(16.dp)).background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (previewBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = previewBitmap.asImageBitmap(),
+                                contentDescription = "Image preview before sending",
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        } else {
+                            Text("Image preview unavailable", color = Color.White)
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Send this image to everyone in the room?")
+                    Spacer(Modifier.height(12.dp))
+                    Text("Everyone in the room can see this image.", color = theme.colors.textSecondary, fontSize = 13.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { pendingImageData = null }, modifier = Modifier.weight(1f)
+                        ) { Text("Cancel") }
+                        Button(
+                            onClick = {
+                                onSendRoomMessage("[IMG:$imageData]")
+                                pendingImageData = null
+                                Toast.makeText(context, "Photo sent", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = previewBitmap != null,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Send image") }
+                    }
                 }
-            },
+            }
+        }
+    }
+
+    if (showLeaveConfirmation) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showLeaveConfirmation = false },
+            title = { Text("Leave this room?") },
+            text = { Text("Your playback and chat will stop syncing. You can rejoin later.") },
             confirmButton = {
-                Button(onClick = {
-                    onSendRoomMessage("[IMG:$imageData]")
-                    pendingImageData = null
-                    Toast.makeText(context, "Photo sent", Toast.LENGTH_SHORT).show()
-                }) { Text("Send") }
+                androidx.compose.material3.TextButton(onClick = {
+                    showLeaveConfirmation = false
+                    triggerLeaveFlow()
+                }) { Text("Leave room", color = Color(0xFFEF4444)) }
             },
             dismissButton = {
-                Button(onClick = { pendingImageData = null }) { Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = { showLeaveConfirmation = false }) {
+                    Text("Stay in room")
+                }
+            },
+            containerColor = theme.colors.surfaceElevated
+        )
+    }
+
+    if (showInviteFriends) {
+        RoomInviteFriendsSheet(
+            friends = friends.filterNot { friend -> participantsList.any { it.user.id == friend.id } },
+            onInvite = { friend ->
+                onInviteFriend(friend)
+                showInviteFriends = false
+            },
+            onDismiss = { showInviteFriends = false }
+        )
+    }
+}
+
+@Composable
+private fun NebulaYoutubePlayer(
+    roomId: String,
+    videoId: String,
+    playbackPositionMs: Long,
+    isPlaying: Boolean,
+    isHost: Boolean,
+    locallyPaused: Boolean,
+    onHostSample: (Long, Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val player = remember(roomId, videoId) { mutableStateOf<WebView?>(null) }
+    val latestSample = remember { AtomicReference(onHostSample) }
+    val latestIsHost = remember { AtomicBoolean(isHost) }
+    SideEffect {
+        latestSample.set(onHostSample)
+        latestIsHost.set(isHost)
+    }
+    DisposableEffect(player.value) {
+        onDispose {
+            player.value?.apply {
+                stopLoading()
+                removeJavascriptInterface("Nebula")
+                destroy()
             }
+            player.value = null
+        }
+    }
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                webChromeClient = WebChromeClient()
+                webViewClient = WebViewClient()
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun sample(seconds: Double, state: Int) {
+                        if (latestIsHost.get() && (state == 1 || state == 3)) {
+                            latestSample.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L), true)
+                        } else if (latestIsHost.get() && state == 2) {
+                            latestSample.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L), false)
+                        }
+                    }
+                }, "Nebula")
+                player.value = this
+                val html = """
+                    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"></head>
+                    <body style="margin:0;background:#000"><div id="p"></div><script src="https://www.youtube.com/iframe_api"></script><script>
+                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false;
+                    function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1},events:{onReady:()=>{ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
+                    function applyPending(){if(!ready||!pending)return;let s=pending; if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
+                    function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;applyPending();}
+                    setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
+                    </script></body></html>
+                """.trimIndent()
+                loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+            }
+        },
+        update = { /* UI recompositions never issue playback commands. */ }
+    )
+    val syncPosition = if (isHost) 0L else playbackPositionMs
+    LaunchedEffect(player.value, videoId, syncPosition, isPlaying, locallyPaused) {
+        player.value?.evaluateJavascript(
+            "window.__nebulaCommand={position:$playbackPositionMs,playing:$isPlaying,timestamp:${System.currentTimeMillis()}};if(typeof sync==='function')sync($playbackPositionMs,$isPlaying,${System.currentTimeMillis()},$locallyPaused);",
+            null
         )
     }
 }
@@ -1458,20 +1402,26 @@ fun RoomMembersSheet(
     isVisible: Boolean,
     participants: List<RoomParticipant>,
     friends: List<NebulaUser>,
+    friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest>,
+    suggestedPeople: List<NebulaUser>,
     currentUserId: String,
     onAddFriend: (NebulaUser) -> Unit,
+    onAcceptFriendRequest: (String) -> Unit,
+    onDeclineFriendRequest: (String) -> Unit,
+    onCancelFriendRequest: (NebulaUser) -> Unit,
     onMessageFriend: (NebulaUser) -> Unit,
     onInviteFriend: (NebulaUser) -> Unit,
-    mutedAudioUsers: Set<String>,
-    mutedVideoUsers: Set<String>,
-    onToggleAudioMute: (String) -> Unit,
-    onToggleVideoMute: (String) -> Unit,
+    onToggleAudioMute: (String, Boolean) -> Unit,
+    onToggleVideoMute: (String, Boolean) -> Unit,
+    onKickParticipant: (String) -> Unit,
+    canModerate: Boolean,
     onSelectParticipantProfile: (NebulaUser) -> Unit,
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
     val context = LocalContext.current
     var menuOpenUserId by remember { mutableStateOf<String?>(null) }
+    var kickConfirmationUser by remember { mutableStateOf<NebulaUser?>(null) }
 
     PABottomSheet(
         isVisible = isVisible,
@@ -1501,15 +1451,12 @@ fun RoomMembersSheet(
             ) {
                 items(participants) { participant ->
                     val user = participant.user
-                    val isAudioMuted = mutedAudioUsers.contains(user.id)
-                    val isVideoMuted = mutedVideoUsers.contains(user.id)
-                    val isMe = user.id == currentUserId ||
-                        user.username.removePrefix("@").equals(currentUserId.removePrefix("@"), ignoreCase = true) ||
-                        user.id == "current_user"
-                    var isFriendState by remember(user.id, friends) {
-                        mutableStateOf(friends.any { it.id == user.id || it.username.equals(user.username, ignoreCase = true) })
-                    }
-                    val isInSameRoom = true
+                    val isAudioMuted = !participant.isAudioActive
+                    val isVideoMuted = !participant.isVideoActive
+                    val isMe = user.id.isNotBlank() && user.id == currentUserId
+                    val isFriend = friends.any { it.id == user.id }
+                    val outgoingRequest = suggestedPeople.any { it.id == user.id && it.friendRequestPending }
+                    val incomingRequest = friendRequests.firstOrNull { it.sender.id == user.id }
 
                     Row(
                         modifier = Modifier
@@ -1527,7 +1474,7 @@ fun RoomMembersSheet(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { onSelectParticipantProfile(user) }
+                                .clickable { if (!isMe) onSelectParticipantProfile(user) }
                         ) {
                             Box(contentAlignment = Alignment.BottomEnd) {
                                 Box(
@@ -1634,7 +1581,7 @@ fun RoomMembersSheet(
                             }
                         }
 
-                        // Action Buttons: Add Friend / Message + Invite / 3-dots
+                        // Friendship controls reflect server state; self is never actionable.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1655,14 +1602,20 @@ fun RoomMembersSheet(
                                         )
                                     )
                                 }
-                            } else if (!isMe && !isFriendState) {
-                                // Single Add Friend option
+                            } else if (incomingRequest != null) {
+                                TextButton(onClick = { onAcceptFriendRequest(incomingRequest.id) }) {
+                                    Text("Accept", color = theme.colors.primaryAccent)
+                                }
+                                TextButton(onClick = { onDeclineFriendRequest(incomingRequest.id) }) {
+                                    Text("Decline", color = theme.colors.textSecondary)
+                                }
+                            } else if (outgoingRequest) {
+                                TextButton(onClick = { onCancelFriendRequest(user) }) {
+                                    Text("Cancel request", color = theme.colors.textSecondary)
+                                }
+                            } else if (!isFriend) {
                                 Button(
-                                    onClick = {
-                                        onAddFriend(user)
-                                        isFriendState = true
-                                        Toast.makeText(context, "Added ${user.displayName} as friend", Toast.LENGTH_SHORT).show()
-                                    },
+                                    onClick = { onAddFriend(user) },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = theme.colors.primaryAccent,
                                         contentColor = Color.White
@@ -1688,78 +1641,11 @@ fun RoomMembersSheet(
                                     }
                                 }
                             } else {
-                                // Two options: Message and Invite (both unavailable/disabled when in same room)
-                                Button(
-                                    onClick = {
-                                        if (!isInSameRoom) {
-                                            onDismiss()
-                                            onMessageFriend(user)
-                                        }
-                                    },
-                                    enabled = !isInSameRoom,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = theme.colors.surfaceElevated,
-                                        contentColor = theme.colors.textPrimary,
-                                        disabledContainerColor = theme.colors.surfaceElevated.copy(alpha = 0.45f),
-                                        disabledContentColor = theme.colors.textSecondary.copy(alpha = 0.45f)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(29.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ChatBubbleOutline,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isInSameRoom) "In Room" else "Message",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-
-                                Button(
-                                    onClick = {
-                                        if (!isInSameRoom) {
-                                            onInviteFriend(user)
-                                        }
-                                    },
-                                    enabled = !isInSameRoom,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = theme.colors.primaryAccent.copy(alpha = 0.15f),
-                                        contentColor = theme.colors.primaryAccent,
-                                        disabledContainerColor = theme.colors.surfaceElevated.copy(alpha = 0.45f),
-                                        disabledContentColor = theme.colors.textSecondary.copy(alpha = 0.45f)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(29.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isInSameRoom) "In Room" else "Invite",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
+                                Text("Friend", color = theme.colors.successColor, fontSize = 11.sp)
                             }
 
-                            // 3-dots Menu for Admin controls
+                            // Only the host can change another participant's room state.
+                            if (canModerate && !isMe && !participant.isHost) {
                             Box {
                                 IconButton(
                                     onClick = { menuOpenUserId = user.id },
@@ -1793,7 +1679,7 @@ fun RoomMembersSheet(
                                             )
                                         },
                                         onClick = {
-                                            onToggleAudioMute(user.id)
+                                            onToggleAudioMute(user.id, !isAudioMuted)
                                             menuOpenUserId = null
                                         }
                                     )
@@ -1813,11 +1699,20 @@ fun RoomMembersSheet(
                                             )
                                         },
                                         onClick = {
-                                            onToggleVideoMute(user.id)
+                                            onToggleVideoMute(user.id, !isVideoMuted)
+                                            menuOpenUserId = null
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("Remove from room", color = Color(0xFFEF4444)) },
+                                        onClick = {
+                                            kickConfirmationUser = user
                                             menuOpenUserId = null
                                         }
                                     )
                                 }
+                            }
                             }
                         }
                     }
@@ -1826,6 +1721,62 @@ fun RoomMembersSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
         }
+    }
+
+    kickConfirmationUser?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { kickConfirmationUser = null },
+            title = { Text("Remove ${target.displayName}?") },
+            text = { Text("They will be removed from this room and cannot rejoin until they join again.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    onKickParticipant(target.id)
+                    kickConfirmationUser = null
+                }) { Text("Remove", color = Color(0xFFEF4444)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { kickConfirmationUser = null }) { Text("Cancel") }
+            },
+            containerColor = theme.colors.surfaceElevated
+        )
+    }
+}
+
+@Composable
+private fun RoomInviteFriendsSheet(
+    friends: List<NebulaUser>,
+    onInvite: (NebulaUser) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val theme = Theme.current
+    PABottomSheet(isVisible = true, onDismissRequest = onDismiss, title = "Invite a friend") {
+        if (friends.isEmpty()) {
+            Text(
+                "All your friends are already here",
+                color = theme.colors.textSecondary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(friends, key = { it.id }) { friend ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(theme.colors.surface).padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(38.dp))
+                        Text(friend.displayName, color = theme.colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1)
+                        Button(onClick = { onInvite(friend) }) { Text("Invite") }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
     }
 }
 

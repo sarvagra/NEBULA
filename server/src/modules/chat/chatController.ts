@@ -48,10 +48,23 @@ export async function getConversationMessages(req: Request, res: Response): Prom
     const { conversationId } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 50);
 
-    // Verify conversation access: conversationId must involve req.user.id
+    const friendship = await FriendshipModel.findOne({
+      $or: [
+        { requesterId: req.user.id, recipientId: conversationId },
+        { requesterId: conversationId, recipientId: req.user.id },
+      ],
+      status: 'accepted',
+    });
+    if (!friendship && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, error: 'You can only view conversations with accepted friends' });
+      return;
+    }
+
     const messages = await MessageModel.find({
-      conversationId,
-      $or: [{ senderId: req.user.id }, { conversationId: req.user.id }],
+      $or: [
+        { senderId: req.user.id, conversationId },
+        { senderId: conversationId, conversationId: req.user.id },
+      ],
     })
       .sort({ createdAt: -1 })
       .limit(limit);

@@ -9,7 +9,7 @@ import { profileRateLimiter } from '../../middlewares/rateLimiter';
 export const userRouter = Router();
 
 userRouter.put('/profile', authMiddleware, profileRateLimiter, validateBody(UpdateProfileSchema), updateProfile);
-userRouter.get('/check-username/:username', profileRateLimiter, checkUsername);
+userRouter.get('/check-username/:username', authMiddleware, profileRateLimiter, checkUsername);
 userRouter.get('/public/:username', optionalAuthMiddleware, getPublicProfile);
 
 // Profile Asset History / Media Management

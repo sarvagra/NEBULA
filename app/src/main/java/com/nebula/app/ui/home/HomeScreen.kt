@@ -225,6 +225,15 @@ fun HomeScreen(
                 room = uiState.activeRoom!!,
                 currentUser = uiState.userProfile,
                 friends = uiState.friends,
+                friendRequests = uiState.friendRequests,
+                suggestedPeople = uiState.suggestedPeople,
+                onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
+                onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
+                onCancelFriendRequest = { viewModel.onCancelFriendRequest(it) },
+                onModerateParticipant = { userId, isMuted, isCameraOff ->
+                    viewModel.onModerateRoomParticipant(userId, isMuted, isCameraOff)
+                },
+                onKickParticipant = { viewModel.onKickRoomParticipant(it) },
                 onAddFriend = { viewModel.onAddFriend(it) },
                 onMessageFriend = { friend ->
                     val conv = uiState.socialConversations.firstOrNull { it.partnerUser?.id == friend.id }
@@ -233,6 +242,8 @@ fun HomeScreen(
                     }
                 },
                 onLeaveRoom = { newHostId -> viewModel.onLeaveRoom(newHostId) },
+                onRefreshRoom = { viewModel.refreshActiveRoom() },
+                onHostPlaybackSample = { positionMs, playing -> viewModel.onHostPlaybackSample(positionMs, playing) },
                 onUpdateRoomSettings = { name, max, mic, vid, tags ->
                     viewModel.onUpdateRoomSettings(name, max, mic, vid, tags)
                 },
@@ -245,11 +256,7 @@ fun HomeScreen(
                 onVotePoll = { viewModel.onVotePoll(it) },
                 onSeekTo = { viewModel.onSeekTo(it) },
                 onUpdateMedia = { title, url -> viewModel.onUpdateRoomMedia(title, url) },
-                onInviteFriendsClick = {
-                    uiState.friends.firstOrNull()?.let {
-                        viewModel.onInviteFriendToActiveRoom(it)
-                    }
-                }
+                onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) }
             )
         } else if (uiState.activeSocialConversation != null) {
             NebulaChatDetailScreen(

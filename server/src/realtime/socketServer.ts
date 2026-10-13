@@ -14,10 +14,57 @@ interface AuthenticatedSocketUser {
   username: string;
   displayName: string;
   tier: SubscriptionTier;
+  activeRoomId: string | null;
+}
+
+let roomIo: Server | null = null;
+type LivePlayback = { positionMs: number; isPlaying: boolean; timestamp: number };
+const livePlaybackByRoom = new Map<string, LivePlayback>();
+const liveHostByRoom = new Map<string, string>();
+
+function playbackPositionAtNow(state: LivePlayback, now = Date.now()): number {
+  return Math.max(0, state.positionMs + (state.isPlaying ? Math.max(0, now - state.timestamp) : 0));
+}
+
+export function notifyRoomParticipantKicked(roomId: string, userId: string): void {
+  if (!roomIo) return;
+  const roomChannel = `room:${roomId}`;
+  const userChannel = `user:${userId}`;
+  roomIo.to(roomChannel).emit('participant:left', { userId });
+  void roomIo.in(userChannel).fetchSockets().then((sockets) => {
+    for (const socket of sockets) {
+      socket.leave(roomChannel);
+      socket.emit('room:removed', { roomId, reason: 'kicked' });
+    }
+  });
+}
+
+export function notifyRoomParticipantUpdated(roomId: string, participant: { userId: string; isMuted: boolean; isCameraOff: boolean }): void {
+  roomIo?.to(`room:${roomId}`).emit('participant:updated', participant);
+}
+
+export function notifyUserSocialChanged(userIds: string[]): void {
+  for (const userId of new Set(userIds)) {
+    roomIo?.to(`user:${userId}`).emit('friendship:changed');
+  }
+}
+
+export function notifyRoomHostChanged(roomId: string, newHostId: string): void {
+  liveHostByRoom.set(roomId, newHostId);
+  roomIo?.to(`room:${roomId}`).emit('room:host_changed', { newHostId });
+}
+
+export function notifyRoomParticipantLeft(roomId: string, userId: string): void {
+  roomIo?.to(`room:${roomId}`).emit('participant:left', { userId });
+}
+
+export function notifyRoomDissolved(roomId: string): void {
+  livePlaybackByRoom.delete(roomId);
+  liveHostByRoom.delete(roomId);
+  roomIo?.to(`room:${roomId}`).emit('room:removed', { roomId, reason: 'dissolved' });
 }
 
 export function initSocketServer(httpServer: HttpServer): Server {
-  const disconnectGraceTimers = new Map<string, NodeJS.Timeout>();
   const io = new Server(httpServer, {
     cors: {
       origin: config.server.isProduction ? config.server.corsAllowedOrigins : '*',
@@ -27,6 +74,61 @@ export function initSocketServer(httpServer: HttpServer): Server {
     pingTimeout: 20000,
     pingInterval: 25000,
   });
+  roomIo = io;
+  livePlaybackByRoom.clear();
+  liveHostByRoom.clear();
+  const inactivityTimers = new Map<string, NodeJS.Timeout>();
+  const inactivityGraceMs = 60_000;
+  const mediaCheckpointAt = new Map<string, number>();
+  const timerKey = (roomId: string, userId: string) => `${roomId}:${userId}`;
+  const cancelInactivityRemoval = (roomId: string, userId: string) => {
+    const key = timerKey(roomId, userId);
+    const timer = inactivityTimers.get(key);
+    if (timer) clearTimeout(timer);
+    inactivityTimers.delete(key);
+  };
+  const scheduleInactivityRemoval = (roomId: string, user: AuthenticatedSocketUser) => {
+    const key = timerKey(roomId, user.id);
+    cancelInactivityRemoval(roomId, user.id);
+    const timer = setTimeout(async () => {
+      inactivityTimers.delete(key);
+      try {
+        const room = await RoomModel.findById(roomId);
+        if (!room || !room.participants.some((participant) => participant.userId === user.id)) return;
+        room.participants = room.participants.filter((participant) => participant.userId !== user.id);
+        if (room.hostId === user.id && room.participants.length > 0) {
+          room.hostId = room.participants[0].userId;
+          room.kickedUserIds = [];
+          room.participants.forEach((participant) => { participant.isHost = participant.userId === room.hostId; });
+        }
+        const dissolved = room.participants.length === 0;
+        if (dissolved) {
+          await RoomModel.deleteOne({ _id: roomId });
+          mediaCheckpointAt.delete(roomId);
+          livePlaybackByRoom.delete(roomId);
+          liveHostByRoom.delete(roomId);
+          io.to(`room:${roomId}`).emit('room:removed', { roomId, reason: 'dissolved' });
+          for (const roomSocket of await io.in(`room:${roomId}`).fetchSockets()) roomSocket.leave(`room:${roomId}`);
+        } else {
+          await room.save();
+          liveHostByRoom.set(roomId, room.hostId);
+        }
+        if (!dissolved && room.hostId !== user.id && room.participants.length > 0) {
+          io.to(`room:${roomId}`).emit('room:host_changed', { newHostId: room.hostId });
+        }
+        await UserModel.updateOne({ _id: user.id, activeRoomId: roomId }, { $set: { activeRoomId: null, status: 'online' } });
+        io.to(`room:${roomId}`).emit('participant:left', { userId: user.id, displayName: user.displayName });
+        for (const activeSocket of await io.in(`user:${user.id}`).fetchSockets()) {
+          activeSocket.leave(`room:${roomId}`);
+          activeSocket.emit('room:removed', { roomId, reason: 'inactive' });
+        }
+      } catch {
+        // A failed cleanup is retried by the next authenticated room join or leave.
+      }
+    }, inactivityGraceMs);
+    timer.unref();
+    inactivityTimers.set(key, timer);
+  };
 
   // STRICT AUTHENTICATION: Zero anonymous or guest fallback
   io.use(async (socket: Socket, next) => {
@@ -44,7 +146,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
       let user: any = null;
       if (mongoose.connection.readyState === 1) {
-        user = await UserModel.findById(decoded.id).select('_id username displayName tier isBanned');
+        user = await UserModel.findById(decoded.id).select('_id username displayName tier isBanned activeRoomId');
         if (!user) {
           return next(new Error('Authentication failed: User no longer exists'));
         }
@@ -61,6 +163,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         username: user.username,
         displayName: user.displayName,
         tier: user.tier,
+        activeRoomId: user.activeRoomId?.toString() ?? null,
       };
 
       next();
@@ -76,9 +179,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Rate limiting tracking for this socket
     let messageCount = 0;
-    setInterval(() => {
+    const rateLimitReset = setInterval(() => {
       messageCount = 0;
-    }, 5000).unref();
+    }, 5000);
+    rateLimitReset.unref();
 
     // Join user's private channel for direct alerts/messages
     socket.join(`user:${user.id}`);
@@ -97,6 +201,24 @@ export function initSocketServer(httpServer: HttpServer): Server {
           return;
         }
 
+        if (user.activeRoomId !== room._id.toString()) {
+          socket.emit('error', { message: 'Join this room through Nebula before opening its realtime connection' });
+          return;
+        }
+        if (!room.participants.some((participant) => participant.userId === user.id)) {
+          socket.emit('error', { message: 'You are no longer a participant in this room' });
+          return;
+        }
+
+        // A socket may subscribe only to its one current room. This keeps room
+        // broadcasts isolated even if a client reuses a socket after navigation.
+        for (const previousRoomId of joinedRooms) {
+          if (previousRoomId !== room._id.toString()) {
+            socket.leave(`room:${previousRoomId}`);
+            joinedRooms.delete(previousRoomId);
+          }
+        }
+
         if (room.privacy === 'invite_only' && room.hostId !== user.id) {
           const isInvited = room.participants.some((p) => p.userId === user.id);
           if (!isInvited) {
@@ -105,47 +227,39 @@ export function initSocketServer(httpServer: HttpServer): Server {
           }
         }
 
-        // Add to participants if not present
-        if (!room.participants.some((p) => p.userId === user.id)) {
-          if (room.participants.length >= room.maxParticipants) {
-            socket.emit('error', { message: 'Room has reached maximum capacity' });
-            return;
-          }
-          room.participants.push({
-            userId: user.id,
-            displayName: user.displayName,
-            avatarLetter: user.displayName.charAt(0).toUpperCase(),
-            joinedAt: new Date(),
-            isHost: room.hostId === user.id,
-          });
-          await room.save();
-        }
-
         socket.join(`room:${room._id.toString()}`);
         joinedRooms.add(room._id.toString());
-        const graceKey = `${room._id.toString()}:${user.id}`;
-        const pendingCleanup = disconnectGraceTimers.get(graceKey);
-        if (pendingCleanup) {
-          clearTimeout(pendingCleanup);
-          disconnectGraceTimers.delete(graceKey);
-        }
+        liveHostByRoom.set(room._id.toString(), room.hostId);
+        cancelInactivityRemoval(room._id.toString(), user.id);
 
-        io.to(`room:${room._id.toString()}`).emit('participant:joined', {
-          userId: user.id,
-          displayName: user.displayName,
-          avatarLetter: user.displayName.charAt(0).toUpperCase(),
-          timestamp: Date.now(),
+        socket.to(`room:${room._id.toString()}`).emit('participant:joined', {
+          userId: user.id, displayName: user.displayName,
+          avatarLetter: user.displayName.charAt(0).toUpperCase(), timestamp: Date.now(),
         });
+        const livePlayback = livePlaybackByRoom.get(room._id.toString());
+        const currentPositionMs = livePlayback
+          ? playbackPositionAtNow(livePlayback)
+          : room.mediaState.playbackPosition * 1000;
         socket.emit('media:sync', {
-          position: room.mediaState.playbackPosition,
-          positionMs: room.mediaState.playbackPosition * 1000,
-          isPlaying: room.mediaState.isPlaying,
+          position: currentPositionMs / 1000,
+          positionMs: currentPositionMs,
+          isPlaying: livePlayback?.isPlaying ?? room.mediaState.isPlaying,
           timestamp: Date.now(),
           senderId: room.hostId,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Failed to join room' });
       }
+    });
+
+    socket.on('room:background', (data: { roomId?: string }) => {
+      const roomId = data?.roomId;
+      if (roomId && joinedRooms.has(roomId)) scheduleInactivityRemoval(roomId, user);
+    });
+
+    socket.on('room:foreground', (data: { roomId?: string }) => {
+      const roomId = data?.roomId;
+      if (roomId && joinedRooms.has(roomId)) cancelInactivityRemoval(roomId, user.id);
     });
 
     socket.on('room:leave', async (data: { roomId: string }) => {
@@ -156,13 +270,18 @@ export function initSocketServer(httpServer: HttpServer): Server {
         if (room) {
           room.participants = room.participants.filter((p) => p.userId !== user.id);
           if (room.participants.length === 0) {
-            // Rooms are durable. An empty room is inactive, not destroyed, so
-            // members can return without losing the room and its media state.
-            await room.save();
+            await RoomModel.deleteOne({ _id: room._id });
+            mediaCheckpointAt.delete(data.roomId);
+            livePlaybackByRoom.delete(data.roomId);
+            liveHostByRoom.delete(data.roomId);
+            io.to(`room:${data.roomId}`).emit('room:removed', { roomId: data.roomId, reason: 'dissolved' });
+            for (const roomSocket of await io.in(`room:${data.roomId}`).fetchSockets()) roomSocket.leave(`room:${data.roomId}`);
           } else {
             if (room.hostId === user.id) {
               room.hostId = room.participants[0].userId;
+              room.kickedUserIds = [];
               room.participants[0].isHost = true;
+              liveHostByRoom.set(data.roomId, room.hostId);
               io.to(`room:${data.roomId}`).emit('room:host_changed', { newHostId: room.hostId });
             }
             await room.save();
@@ -176,6 +295,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
         socket.leave(`room:${data.roomId}`);
         joinedRooms.delete(data.roomId);
+        cancelInactivityRemoval(data.roomId, user.id);
+        await UserModel.updateOne({ _id: user.id, activeRoomId: data.roomId }, { $set: { activeRoomId: null, status: 'online' } });
+        if (room?.participants.length === 0) {
+          mediaCheckpointAt.delete(data.roomId);
+          livePlaybackByRoom.delete(data.roomId);
+          liveHostByRoom.delete(data.roomId);
+        }
       } catch (err: any) {
         // Ignored on leave
       }
@@ -188,7 +314,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id) {
+        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
           socket.emit('error', { message: 'Forbidden: Only the room host can switch media' });
           return;
         }
@@ -200,6 +326,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         room.mediaState.playbackPosition = 0;
         room.mediaState.isPlaying = true;
         await room.save();
+        livePlaybackByRoom.set(data.roomId, { positionMs: 0, isPlaying: true, timestamp: Date.now() });
 
         io.to(`room:${data.roomId}`).emit('media:switch', {
           mediaState: {
@@ -228,12 +355,14 @@ export function initSocketServer(httpServer: HttpServer): Server {
         if (!room) return;
 
         // SERVER AUTHORIZATION CHECK
-        if (room.hostId !== user.id) {
+        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
+        const timestamp = Date.now();
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: true, timestamp });
         room.mediaState.isPlaying = true;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
@@ -242,7 +371,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
-          timestamp: Date.now(),
+          timestamp,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback synchronization failed' });
@@ -256,12 +385,14 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id) {
+        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
+        const timestamp = Date.now();
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: false, timestamp });
         room.mediaState.isPlaying = false;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
@@ -270,7 +401,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
-          timestamp: Date.now(),
+          timestamp,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback synchronization failed' });
@@ -284,12 +415,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id) {
+        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
+        const timestamp = Date.now();
+        const prior = livePlaybackByRoom.get(data.roomId);
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: prior?.isPlaying ?? room.mediaState.isPlaying, timestamp });
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
 
@@ -297,7 +431,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
-          timestamp: Date.now(),
+          timestamp,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback seek failed' });
@@ -309,22 +443,30 @@ export function initSocketServer(httpServer: HttpServer): Server {
       async (data: { roomId: string; positionMs?: number; position?: number; isPlaying: boolean; timestamp: number }) => {
         try {
           if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
-          const room = await RoomModel.findById(data.roomId);
-          if (!room || room.hostId !== user.id) {
+          // room:join already verified membership against Mongo. Keep the active host
+          // in memory so each high-frequency playhead sample avoids a database read.
+          if (liveHostByRoom.get(data.roomId) !== user.id || !joinedRooms.has(data.roomId) || user.activeRoomId !== data.roomId) {
             socket.emit('error', { message: 'Forbidden: Only the room host can synchronize playback' });
             return;
           }
 
           const positionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
           const isPlaying = data.isPlaying === true;
-          room.mediaState.playbackPosition = positionMs / 1000;
-          room.mediaState.isPlaying = isPlaying;
-          await room.save();
-          io.to(`room:${data.roomId}`).emit('media:sync', {
+          const now = Date.now();
+          livePlaybackByRoom.set(data.roomId, { positionMs, isPlaying, timestamp: now });
+          if (now - (mediaCheckpointAt.get(data.roomId) ?? 0) >= 5_000) {
+            const room = await RoomModel.findById(data.roomId);
+            if (!room || room.hostId !== user.id) return;
+            room.mediaState.playbackPosition = positionMs / 1000;
+            room.mediaState.isPlaying = isPlaying;
+            await room.save();
+            mediaCheckpointAt.set(data.roomId, now);
+          }
+          io.to(`room:${data.roomId}`).except(socket.id).emit('media:sync', {
             position: positionMs / 1000,
             positionMs,
             isPlaying,
-            timestamp: Date.now(),
+            timestamp: now,
             senderId: user.id,
           });
         } catch {
@@ -449,31 +591,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
     });
 
     socket.on('disconnect', async () => {
+      clearInterval(rateLimitReset);
       console.log(`[Socket Disconnected] ${user.displayName} (${socket.id})`);
-      for (const roomId of joinedRooms) {
-        const graceKey = `${roomId}:${user.id}`;
-        const timer = setTimeout(async () => {
-          disconnectGraceTimers.delete(graceKey);
-          try {
-            const room = await RoomModel.findById(roomId);
-            if (!room || !room.participants.some((p) => p.userId === user.id)) return;
-            room.participants = room.participants.filter((p) => p.userId !== user.id);
-            if (room.hostId === user.id && room.participants.length > 0) {
-              room.hostId = room.participants[0].userId;
-              room.participants[0].isHost = true;
-            }
-            await room.save();
-            io.to(`room:${roomId}`).emit('participant:left', {
-              userId: user.id,
-              displayName: user.displayName,
-            });
-          } catch {
-            // Disconnect cleanup is best-effort; room data remains durable.
-          }
-        }, 15000);
-        timer.unref();
-        disconnectGraceTimers.set(graceKey, timer);
-      }
+      for (const roomId of joinedRooms) scheduleInactivityRemoval(roomId, user);
     });
   });
 

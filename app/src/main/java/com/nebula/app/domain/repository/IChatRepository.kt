@@ -20,4 +20,5 @@ interface IChatRepository {
     suspend fun toggleSaveToMemory(messageId: String)
     suspend fun deleteConversation(id: String)
     suspend fun clearCurrentChat()
+    suspend fun clearAllLocalData()
 }

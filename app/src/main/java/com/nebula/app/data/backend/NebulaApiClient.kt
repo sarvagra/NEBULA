@@ -26,6 +26,8 @@ object NebulaApiClient {
             sessionManager?.saveBackendUrl(value)
         }
 
+    fun socketBaseUrl(): String = baseUrl.substringBefore("/api/v1").trimEnd('/')
+
     var authToken: String? = null
         get() = field ?: sessionManager?.getAuthToken()
         set(value) {
@@ -43,7 +45,8 @@ object NebulaApiClient {
     private suspend fun request(
         endpoint: String,
         method: String = "GET",
-        jsonBody: JSONObject? = null
+        jsonBody: JSONObject? = null,
+        allowRefresh: Boolean = true
     ): ApiResponse<JSONObject> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
@@ -77,6 +80,12 @@ object NebulaApiClient {
             val responseText = BufferedReader(InputStreamReader(inputStream)).use { it.readText() }
             val json = JSONObject(responseText)
 
+            if (statusCode == 401 && allowRefresh && endpoint != "/auth/refresh" && refreshAccessToken()) {
+                connection.disconnect()
+                connection = null
+                return@withContext request(endpoint, method, jsonBody, allowRefresh = false)
+            }
+
             if (isSuccess && json.optBoolean("success", true)) {
                 ApiResponse.Success(json)
             } else {
@@ -90,6 +99,20 @@ object NebulaApiClient {
         }
     }
 
+    private suspend fun refreshAccessToken(): Boolean {
+        val refreshToken = sessionManager?.getRefreshToken()?.takeIf { it.isNotBlank() } ?: return false
+        val response = request(
+            "/auth/refresh",
+            "POST",
+            JSONObject().put("refreshToken", refreshToken),
+            allowRefresh = false
+        )
+        if (response !is ApiResponse.Success) return false
+        val token = response.data.optJSONObject("data")?.optString("token")?.takeIf { it.isNotBlank() } ?: return false
+        authToken = token
+        return true
+    }
+
     // ==========================================
     // AUTHENTICATION
     // ==========================================
@@ -99,6 +122,7 @@ object NebulaApiClient {
         if (res is ApiResponse.Success) {
             val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
             tokens?.optString("token")?.let { authToken = it }
+            tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
         }
         return res
     }
@@ -123,6 +147,7 @@ object NebulaApiClient {
         if (res is ApiResponse.Success) {
             val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
             tokens?.optString("token")?.let { authToken = it }
+            tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
         }
         return res
     }
@@ -137,6 +162,7 @@ object NebulaApiClient {
             val token = tokens?.optString("token")
             if (!token.isNullOrBlank()) {
                 authToken = token
+                tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
             }
         }
         return res
@@ -156,6 +182,7 @@ object NebulaApiClient {
             val token = tokens?.optString("token")
             if (!token.isNullOrBlank()) {
                 authToken = token
+                tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
             }
         }
         return res
@@ -188,6 +215,27 @@ object NebulaApiClient {
     suspend fun getMe(): ApiResponse<JSONObject> {
         return request("/auth/me", "GET")
     }
+
+    suspend fun logout(): ApiResponse<JSONObject> {
+        val body = JSONObject().apply {
+            sessionManager?.getRefreshToken()?.takeIf { it.isNotBlank() }?.let { put("refreshToken", it) }
+        }
+        return request("/auth/logout", "POST", body)
+    }
+
+    suspend fun getNotifications(): ApiResponse<JSONArray> {
+        val res = request("/notifications?limit=50", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun markNotificationRead(id: String): ApiResponse<JSONObject> =
+        request("/notifications/$id/read", "PUT")
+
+    suspend fun deleteNotification(id: String): ApiResponse<JSONObject> =
+        request("/notifications/$id", "DELETE")
 
     // ==========================================
     // ROOMS
@@ -245,6 +293,12 @@ object NebulaApiClient {
         }
     }
 
+    suspend fun getRoomPoll(roomId: String): ApiResponse<JSONObject> =
+        request("/polls/room/$roomId", "GET")
+
+    suspend fun votePoll(pollId: String, optionId: String): ApiResponse<JSONObject> =
+        request("/polls/$pollId/vote", "POST", JSONObject().put("optionId", optionId))
+
     suspend fun joinRoom(roomId: String): ApiResponse<JSONObject> {
         return request("/rooms/$roomId/join", "POST")
     }
@@ -280,6 +334,27 @@ object NebulaApiClient {
             put("random", random)
         }
         return request("/rooms/$roomId/transfer-host", "POST", body)
+    }
+
+    suspend fun inviteToRoom(roomId: String, userId: String): ApiResponse<JSONObject> {
+        val body = JSONObject().put("userId", userId)
+        return request("/rooms/$roomId/invite", "POST", body)
+    }
+
+    suspend fun kickRoomParticipant(roomId: String, userId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/participants/$userId", "DELETE")
+
+    suspend fun moderateRoomParticipant(
+        roomId: String,
+        userId: String,
+        isMuted: Boolean? = null,
+        isCameraOff: Boolean? = null
+    ): ApiResponse<JSONObject> {
+        val body = JSONObject().apply {
+            isMuted?.let { put("isMuted", it) }
+            isCameraOff?.let { put("isCameraOff", it) }
+        }
+        return request("/rooms/$roomId/participants/$userId/moderation", "PUT", body)
     }
 
     suspend fun updateMedia(

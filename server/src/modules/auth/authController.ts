@@ -53,14 +53,11 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
         role: isSpecialAdmin ? 'admin' : 'user',
         status: 'online',
         bio: 'Building ambient systems & shared spaces on Android.',
-        isOnboardingCompleted: true,
+        isOnboardingCompleted: isSpecialAdmin,
       });
     } else {
       if (!user.firebaseUid) {
         user.firebaseUid = verified.uid;
-      }
-      if (!user.isOnboardingCompleted) {
-        user.isOnboardingCompleted = true;
       }
       await user.save();
     }

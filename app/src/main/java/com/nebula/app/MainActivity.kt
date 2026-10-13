@@ -69,6 +69,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         homeViewModel.onAppForegrounded()
+        roomRepository.setAppForegrounded(true)
+    }
+
+    override fun onStop() {
+        homeViewModel.onAppBackgrounded()
+        roomRepository.setAppForegrounded(false)
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,16 +88,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val activeTheme by themeRepository.activeTheme.collectAsState()
             val uiState by homeViewModel.uiState.collectAsState()
+            val showWelcomeBack by homeViewModel.showWelcomeBack.collectAsState()
             var isSplashVisible by remember { mutableStateOf(true) }
-            var showWelcomeBack by remember { mutableStateOf(false) }
-            var wasLoggedIn by remember { mutableStateOf(false) }
-
-            LaunchedEffect(uiState.userProfile.isLoggedIn) {
-                if (uiState.userProfile.isLoggedIn && !wasLoggedIn && uiState.userProfile.isOnboardingCompleted) {
-                    showWelcomeBack = true
-                }
-                wasLoggedIn = uiState.userProfile.isLoggedIn
-            }
 
             ProvideAppTheme(theme = activeTheme) {
                 Crossfade(
@@ -121,7 +120,7 @@ class MainActivity : ComponentActivity() {
                         } else if (showWelcomeBack) {
                             WelcomeBackScreen(
                                 displayName = uiState.userProfile.displayName,
-                                onContinue = { showWelcomeBack = false },
+                                onContinue = { homeViewModel.dismissWelcomeBack() },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else if (!uiState.userProfile.isOnboardingCompleted) {

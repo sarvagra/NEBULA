@@ -26,6 +26,7 @@ export interface IUser extends Document {
   isFriendCountPublic: boolean;
   isBanned: boolean;
   role: 'user' | 'moderator' | 'admin';
+  activeRoomId?: string | null;
   stats: {
     roomsJoinedCount: number;
     roomsHostedCount: number;
@@ -59,6 +60,7 @@ const UserSchema = new Schema<IUser>(
     isFriendCountPublic: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false, index: true },
     role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
+    activeRoomId: { type: String, default: null, index: true },
     stats: {
       roomsJoinedCount: { type: Number, default: 0 },
       roomsHostedCount: { type: Number, default: 0 },
