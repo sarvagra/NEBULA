@@ -2,7 +2,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 // Load environment variables from .env
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Render Secret Files are mounted at /etc/secrets. Keep the local file as a
+// development fallback and never allow it to override deployment secrets.
+dotenv.config({ path: '/etc/secrets/.env' });
+dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: false });
 
 function requireSecret(name: string): string {
   const value = process.env[name]?.trim();
