@@ -44,6 +44,9 @@ class RoomRepositoryImpl(
         },
         onMediaSwitch = {
             realtimeScope.launch { syncActiveRoom() }
+        },
+        onChatMessage = { message ->
+            applyRealtimeChatMessage(message)
         }
     )
 
@@ -107,6 +110,7 @@ class RoomRepositoryImpl(
         val updated = listOf(newRoom) + _rooms.value.filter { it.id != newRoom.id }
         _rooms.value = updated
         _activeRoom.value = newRoom
+        socketClient.connect(newRoom.id, newRoom.hostId)
         return newRoom
     }
 
@@ -286,17 +290,25 @@ class RoomRepositoryImpl(
 
     override suspend fun sendRoomMessage(content: String) {
         if (content.isBlank()) return
+        socketClient.sendChat(content.trim())
+    }
+
+    private fun applyRealtimeChatMessage(json: JSONObject) {
         val current = _activeRoom.value ?: return
-        val newMsg = RoomChatMessage(
-            id = "msg_${System.currentTimeMillis()}",
-            roomId = current.id,
-            senderId = NebulaUser.CurrentUser.id,
-            senderName = NebulaUser.CurrentUser.displayName.split(" ").first(),
-            senderAvatar = NebulaUser.CurrentUser.avatarLetter,
-            content = content.trim(),
-            timeLabel = "Just now"
+        val messageId = json.optString("id").ifBlank { json.optString("_id") }
+        if (messageId.isBlank() || current.recentMessages.any { it.id == messageId }) return
+        val createdAt = json.optString("createdAt")
+        val message = RoomChatMessage(
+            id = messageId,
+            roomId = json.optString("roomId", current.id),
+            senderId = json.optString("senderId"),
+            senderName = json.optString("senderName", "Nebula User"),
+            senderAvatar = json.optString("senderAvatarLetter", "U"),
+            content = json.optString("text", ""),
+            timeLabel = createdAt.takeIf { it.isNotBlank() }?.let { "Just now" } ?: "Just now",
+            isSystemMessage = json.optString("messageType") == "system"
         )
-        val updated = current.copy(recentMessages = current.recentMessages + newMsg)
+        val updated = current.copy(recentMessages = current.recentMessages + message)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
     }

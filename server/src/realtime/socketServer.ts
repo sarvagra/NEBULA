@@ -22,7 +22,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       origin: config.server.isProduction ? config.server.corsAllowedOrigins : '*',
       methods: ['GET', 'POST'],
     },
-    maxHttpBufferSize: 1e5, // 100 KB max payload size
+    maxHttpBufferSize: 8e6, // bounded room media/chat payload limit
     pingTimeout: 20000,
     pingInterval: 25000,
   });

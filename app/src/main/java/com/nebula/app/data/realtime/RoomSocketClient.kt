@@ -12,7 +12,8 @@ import java.util.concurrent.TimeUnit
 class RoomSocketClient(
     private val tokenProvider: () -> String?,
     private val onMediaState: (positionSeconds: Long, isPlaying: Boolean) -> Unit,
-    private val onMediaSwitch: (JSONObject) -> Unit
+    private val onMediaSwitch: (JSONObject) -> Unit,
+    private val onChatMessage: (JSONObject) -> Unit
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
@@ -57,6 +58,10 @@ class RoomSocketClient(
                 playing = mediaState.optBoolean("isPlaying", false)
                 onMediaSwitch(mediaState)
             }
+            on("chat:message") { args ->
+                val message = args.firstOrNull() as? JSONObject ?: return@on
+                onChatMessage(message)
+            }
             connect()
         }
         startHeartbeat()
@@ -89,6 +94,16 @@ class RoomSocketClient(
                 .put("mediaUrl", mediaUrl)
                 .put("durationSeconds", durationSeconds)
         )
+    }
+
+    fun sendChat(text: String, mediaUrl: String? = null) {
+        val currentRoom = roomId ?: return
+        if (text.isBlank() && mediaUrl.isNullOrBlank()) return
+        val payload = JSONObject()
+            .put("roomId", currentRoom)
+            .put("text", text)
+        if (!mediaUrl.isNullOrBlank()) payload.put("mediaUrl", mediaUrl)
+        socket?.emit("chat:message", payload)
     }
 
     fun disconnect() {
