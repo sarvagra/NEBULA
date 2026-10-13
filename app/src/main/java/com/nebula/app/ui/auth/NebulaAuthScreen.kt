@@ -330,7 +330,7 @@ fun NebulaAuthScreen(
                     modifier = Modifier.size(13.dp)
                 )
                 Text(
-                    text = "en-to-end encryption",
+                    text = "Encrypted in transit",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textTertiary,
                         fontSize = 11.5.sp

@@ -50,8 +50,9 @@ object NebulaApiClient {
             val url = URL("$baseUrl$endpoint")
             connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = method
-                connectTimeout = 8000
-                readTimeout = 8000
+                // Render's free instance can cold-start; do not fail auth while it wakes.
+                connectTimeout = 15000
+                readTimeout = 60000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
                 authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
