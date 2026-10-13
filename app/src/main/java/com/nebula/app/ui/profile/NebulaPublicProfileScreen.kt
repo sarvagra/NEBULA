@@ -70,6 +70,8 @@ fun NebulaPublicProfileScreen(
     isCurrentUser: Boolean,
     onBack: () -> Unit,
     onMessage: (NebulaUser) -> Unit,
+    onAddFriend: (NebulaUser) -> Unit = {},
+    onCancelRequest: (NebulaUser) -> Unit = {},
     onInviteToRoom: (NebulaUser) -> Unit,
     onOpenEditProfile: () -> Unit,
     modifier: Modifier = Modifier
@@ -346,6 +348,10 @@ fun NebulaPublicProfileScreen(
                                     .clickable {
                                         if (!isFriendState && !isRequestPending) {
                                             isRequestPending = true
+                                            onAddFriend(user)
+                                        } else if (isRequestPending) {
+                                            isRequestPending = false
+                                            onCancelRequest(user)
                                         }
                                     },
                                 contentAlignment = Alignment.Center
@@ -363,7 +369,7 @@ fun NebulaPublicProfileScreen(
                                     Text(
                                         text = when {
                                             isFriendState -> "Friends"
-                                            isRequestPending -> "Request Sent"
+                                            isRequestPending -> "Withdraw Request"
                                             else -> "Add Friend"
                                         },
                                         style = theme.typography.bodyMedium.copy(

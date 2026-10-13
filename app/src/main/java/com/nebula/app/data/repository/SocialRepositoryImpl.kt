@@ -102,6 +102,14 @@ class SocialRepositoryImpl(
         _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
     }
 
+    suspend fun withdrawFriendRequest(userId: String) {
+        if (apiClient.withdrawFriendRequest(userId) is ApiResponse.Success) {
+            _suggestedPeople.value = _suggestedPeople.value.map {
+                if (it.id == userId) it.copy(friendRequestPending = false) else it
+            }
+        }
+    }
+
     override suspend fun addFriend(user: NebulaUser) {
         if (apiClient.sendFriendRequest(user.id) is ApiResponse.Success) {
             _suggestedPeople.value = _suggestedPeople.value.filter { it.id != user.id }

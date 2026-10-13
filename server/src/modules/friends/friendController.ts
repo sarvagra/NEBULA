@@ -221,6 +221,27 @@ export async function declineFriendRequest(req: Request, res: Response): Promise
   }
 }
 
+export async function withdrawFriendRequest(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const friendship = await FriendshipModel.findOneAndDelete({
+      requesterId: req.user.id,
+      recipientId: req.params.id,
+      status: 'pending',
+    });
+    if (!friendship) {
+      res.status(404).json({ success: false, error: 'Pending friend request not found' });
+      return;
+    }
+    res.json({ success: true, message: 'Friend request withdrawn' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to withdraw friend request' });
+  }
+}
+
 export async function listSuggestedPeople(req: Request, res: Response): Promise<void> {
   try {
     const currentUserId = req.user?.id;

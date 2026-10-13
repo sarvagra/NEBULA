@@ -417,6 +417,9 @@ object NebulaApiClient {
     suspend fun declineFriendRequest(requestId: String): ApiResponse<JSONObject> =
         request("/friends/request/$requestId/decline", "POST")
 
+    suspend fun withdrawFriendRequest(userId: String): ApiResponse<JSONObject> =
+        request("/friends/request/withdraw/$userId", "DELETE")
+
     suspend fun sendDirectMessage(conversationId: String, text: String): ApiResponse<JSONObject> =
         request(
             "/chat",

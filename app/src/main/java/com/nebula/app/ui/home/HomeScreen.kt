@@ -136,6 +136,8 @@ fun HomeScreen(
                                 viewModel.onSelectSocialConversation(conv.id)
                             }
                         },
+                        onAddFriend = { friend -> viewModel.onAddFriend(friend) },
+                        onCancelRequest = { friend -> viewModel.onCancelFriendRequest(friend) },
                         onInviteToRoom = { friend ->
                             viewModel.onInviteFriendToActiveRoom(friend)
                         },

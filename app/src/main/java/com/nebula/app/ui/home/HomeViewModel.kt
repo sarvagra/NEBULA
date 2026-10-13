@@ -599,6 +599,12 @@ class HomeViewModel(
         onAddSuggestedFriend(user)
     }
 
+    fun onCancelFriendRequest(user: NebulaUser) {
+        viewModelScope.launch {
+            (socialRepository as? SocialRepositoryImpl)?.withdrawFriendRequest(user.id)
+        }
+    }
+
     // --- AI SETTINGS ---
     fun onToggleInlineSuggestions(enabled: Boolean) {
         _uiState.value = _uiState.value.copy(showInlineSuggestions = enabled)
