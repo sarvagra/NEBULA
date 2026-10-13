@@ -2,6 +2,7 @@ package com.nebula.app.data.repository
 
 import com.nebula.app.data.backend.NebulaApiClient
 import com.nebula.app.data.backend.NebulaApiClient.ApiResponse
+import com.nebula.app.data.realtime.RoomSocketClient
 import com.nebula.app.domain.model.NebulaRoom
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.domain.model.PlayMode
@@ -14,6 +15,9 @@ import com.nebula.app.domain.repository.IRoomRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -31,6 +35,17 @@ class RoomRepositoryImpl(
 
     private val _lastReaction = MutableStateFlow<String?>(null)
     override val lastReaction: StateFlow<String?> = _lastReaction.asStateFlow()
+
+    private val realtimeScope = CoroutineScope(Dispatchers.IO)
+    private val socketClient = RoomSocketClient(
+        tokenProvider = { apiClient.authToken },
+        onMediaState = { positionSeconds, isPlaying ->
+            applyRealtimeMediaState(positionSeconds, isPlaying)
+        },
+        onMediaSwitch = {
+            realtimeScope.launch { syncActiveRoom() }
+        }
+    )
 
     /**
      * Refreshes the active room list from the authoritative Nebula backend server.
@@ -101,6 +116,7 @@ class RoomRepositoryImpl(
             val room = parseRoomFromJson(apiRes.data.optJSONObject("data") ?: apiRes.data)
             _activeRoom.value = room
             _rooms.value = _rooms.value.map { if (it.id == room.id) room else it }
+            socketClient.connect(room.id, room.hostId)
             return room
         }
 
@@ -125,6 +141,7 @@ class RoomRepositoryImpl(
     override suspend fun leaveRoom(newHostId: String?) {
         val current = _activeRoom.value
         if (current != null) {
+            socketClient.leave()
             val res = apiClient.leaveRoom(current.id, newHostId)
             val isDissolved = if (res is ApiResponse.Success) {
                 res.data.optBoolean("dissolved", current.participants.size <= 1)
@@ -209,15 +226,11 @@ class RoomRepositoryImpl(
     override suspend fun togglePlayPause() {
         val current = _activeRoom.value ?: return
         val newPlay = !current.isPlaying
+        val positionSeconds = current.playbackPositionMs / 1000L
         val updated = current.copy(isPlaying = newPlay)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        apiClient.updateMedia(
-            roomId = current.id,
-            title = current.mediaItem?.title,
-            isPlaying = newPlay,
-            playbackPosition = current.playbackPositionMs / 1000L
-        )
+        if (newPlay) socketClient.play(positionSeconds) else socketClient.pause(positionSeconds)
     }
 
     override suspend fun seekTo(positionMs: Long, positionLabel: String) {
@@ -228,12 +241,7 @@ class RoomRepositoryImpl(
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        apiClient.updateMedia(
-            roomId = current.id,
-            title = current.mediaItem?.title,
-            isPlaying = current.isPlaying,
-            playbackPosition = positionMs / 1000L
-        )
+        socketClient.seek(positionMs / 1000L)
     }
 
     override suspend fun updateMedia(title: String, mediaUrl: String, durationSeconds: Long): NebulaRoom? {
@@ -256,14 +264,24 @@ class RoomRepositoryImpl(
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        apiClient.updateMedia(
-            roomId = current.id,
-            title = title,
-            isPlaying = true,
-            playbackPosition = 0L,
-            mediaUrl = mediaUrl
-        )
+        socketClient.switchMedia(title, mediaUrl, durationSeconds)
         return updated
+    }
+
+    private fun applyRealtimeMediaState(positionSeconds: Long, isPlaying: Boolean) {
+        val current = _activeRoom.value ?: return
+        val positionMs = positionSeconds.coerceAtLeast(0L) * 1000L
+        val updated = current.copy(
+            isPlaying = isPlaying,
+            playbackPositionMs = positionMs,
+            playbackPositionLabel = String.format(
+                "%02d:%02d",
+                positionSeconds / 60L,
+                positionSeconds % 60L
+            )
+        )
+        _activeRoom.value = updated
+        _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
     }
 
     override suspend fun sendRoomMessage(content: String) {

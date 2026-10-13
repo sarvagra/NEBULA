@@ -129,6 +129,12 @@ export function initSocketServer(httpServer: HttpServer): Server {
           avatarLetter: user.displayName.charAt(0).toUpperCase(),
           timestamp: Date.now(),
         });
+        socket.emit('media:sync', {
+          position: room.mediaState.playbackPosition,
+          isPlaying: room.mediaState.isPlaying,
+          timestamp: Date.now(),
+          senderId: room.hostId,
+        });
       } catch (err: any) {
         socket.emit('error', { message: 'Failed to join room' });
       }
@@ -278,6 +284,34 @@ export function initSocketServer(httpServer: HttpServer): Server {
         socket.emit('error', { message: 'Playback seek failed' });
       }
     });
+
+    socket.on(
+      'media:sync',
+      async (data: { roomId: string; position: number; isPlaying: boolean; timestamp: number }) => {
+        try {
+          if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
+          const room = await RoomModel.findById(data.roomId);
+          if (!room || room.hostId !== user.id) {
+            socket.emit('error', { message: 'Forbidden: Only the room host can synchronize playback' });
+            return;
+          }
+
+          const position = Math.max(0, Number(data.position) || 0);
+          const isPlaying = data.isPlaying === true;
+          room.mediaState.playbackPosition = position;
+          room.mediaState.isPlaying = isPlaying;
+          await room.save();
+          io.to(`room:${data.roomId}`).emit('media:sync', {
+            position,
+            isPlaying,
+            timestamp: Date.now(),
+            senderId: user.id,
+          });
+        } catch {
+          socket.emit('error', { message: 'Playback synchronization failed' });
+        }
+      }
+    );
 
     // 3. REALTIME CHAT (MEMBERSHIP & RATE LIMITING)
     socket.on('chat:message', async (data: { roomId?: string; conversationId?: string; text: string; mediaUrl?: string }) => {

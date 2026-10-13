@@ -89,6 +89,7 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.google.identity.googleid)
     implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.socket.io.client)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

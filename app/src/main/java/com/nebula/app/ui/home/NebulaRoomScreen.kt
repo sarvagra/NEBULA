@@ -403,7 +403,7 @@ fun NebulaRoomScreen(
                             webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
                         }
                         val currentSec = room.playbackPositionMs / 1000L
-                        if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 3) {
+                        if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 1) {
                             lastSyncedSec = currentSec
                             webView.evaluateJavascript("seekTo($currentSec);", null)
                         }
@@ -682,6 +682,7 @@ fun NebulaRoomScreen(
             } else {
                 // Persistent Real YouTube Webview Player
                 var currentLoadedId by remember { mutableStateOf<String?>(null) }
+                var lastSyncedSec by remember { mutableLongStateOf(-1L) }
 
                 androidx.compose.ui.viewinterop.AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -783,6 +784,11 @@ fun NebulaRoomScreen(
                             webView.evaluateJavascript("if (typeof playVideo === 'function') playVideo();", null)
                         } else {
                             webView.evaluateJavascript("if (typeof pauseVideo === 'function') pauseVideo();", null)
+                        }
+                        val currentSec = room.playbackPositionMs / 1000L
+                        if (lastSyncedSec == -1L || kotlin.math.abs(currentSec - lastSyncedSec) > 1) {
+                            lastSyncedSec = currentSec
+                            webView.evaluateJavascript("seekTo($currentSec);", null)
                         }
                     }
                 )
