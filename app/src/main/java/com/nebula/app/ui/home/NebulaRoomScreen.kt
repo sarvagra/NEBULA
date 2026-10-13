@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import android.app.Activity
 import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.content.pm.ActivityInfo
@@ -179,10 +178,16 @@ fun NebulaRoomScreen(
     val roomVideoId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
         ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
     var guestLocallyPaused by remember(room.id, roomVideoId) { mutableStateOf(false) }
+    var hostSeekCommand by remember(room.id, roomVideoId) { mutableStateOf<Pair<Long, Long>?>(null) }
+    var seekCommandId by remember(room.id, roomVideoId) { mutableLongStateOf(0L) }
     val isCurrentUserAdmin = currentUserId.isNotBlank() && (
         room.hostId == currentUserId ||
             room.participants.any { it.user.id == currentUserId && it.isHost }
         )
+    val seekTo = { positionMs: Long ->
+        if (isCurrentUserAdmin) hostSeekCommand = (++seekCommandId) to positionMs
+        onSeekTo(positionMs)
+    }
 
     // Room participants list - Deduplicate by user ID or displayName to guarantee 1 instance per user
     val participantsList = remember(room.id, room.participants) {
@@ -353,6 +358,7 @@ fun NebulaRoomScreen(
                     isPlaying = room.isPlaying,
                     isHost = isCurrentUserAdmin,
                     locallyPaused = guestLocallyPaused,
+                    hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -637,6 +643,7 @@ fun NebulaRoomScreen(
                     isPlaying = room.isPlaying,
                     isHost = isCurrentUserAdmin,
                     locallyPaused = guestLocallyPaused,
+                    hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -684,7 +691,7 @@ fun NebulaRoomScreen(
                     ) {
                         // Rewind 10s
                         IconButton(
-                            onClick = { onSeekTo(maxOf(0L, room.playbackPositionMs - 10000L)) },
+                            onClick = { seekTo(maxOf(0L, room.playbackPositionMs - 10000L)) },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
@@ -710,7 +717,7 @@ fun NebulaRoomScreen(
 
                         // Forward 10s
                         IconButton(
-                            onClick = { onSeekTo(room.playbackPositionMs + 10000L) },
+                            onClick = { seekTo(room.playbackPositionMs + 10000L) },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
@@ -725,7 +732,7 @@ fun NebulaRoomScreen(
                         IconButton(
                             onClick = {
                                 if (room.isPlaying) onTogglePlayPause()
-                                onSeekTo(0L)
+                                seekTo(0L)
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -1322,6 +1329,7 @@ private fun NebulaYoutubePlayer(
     isPlaying: Boolean,
     isHost: Boolean,
     locallyPaused: Boolean,
+    hostSeekCommand: Pair<Long, Long>?,
     onHostSample: (Long, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1333,7 +1341,7 @@ private fun NebulaYoutubePlayer(
         latestSample.set(onHostSample)
         latestIsHost.set(isHost)
     }
-    DisposableEffect(player.value) {
+    DisposableEffect(roomId, videoId) {
         onDispose {
             player.value?.apply {
                 stopLoading()
@@ -1352,7 +1360,6 @@ private fun NebulaYoutubePlayer(
                 settings.mediaPlaybackRequiresUserGesture = false
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
-                webChromeClient = WebChromeClient()
                 webViewClient = WebViewClient()
                 addJavascriptInterface(object {
                     @JavascriptInterface
@@ -1366,16 +1373,17 @@ private fun NebulaYoutubePlayer(
                 }, "Nebula")
                 player.value = this
                 val html = """
-                    <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body,#p{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}</style></head>
-                    <body><div id="p"></div><script src="https://www.youtube.com/iframe_api"></script><script>
+                    <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}body{position:fixed;inset:0}#p{position:absolute;top:0;left:0}</style></head>
+                    <body><div id="p"></div><script>
                     let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false;
-                    function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1},events:{onReady:()=>{ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
+                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
                     function applyPending(){if(!ready||!pending)return;let s=pending; if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
                     function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;applyPending();}
                     setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
+                    let apiScript=document.createElement('script');apiScript.src='https://www.youtube.com/iframe_api';document.head.appendChild(apiScript);
                     </script></body></html>
                 """.trimIndent()
-                loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://com.nebula.app/", html, "text/html", "UTF-8", null)
             }
         },
         update = { /* UI recompositions never issue playback commands. */ }
@@ -1386,6 +1394,10 @@ private fun NebulaYoutubePlayer(
             "window.__nebulaCommand={position:$playbackPositionMs,playing:$isPlaying,timestamp:${System.currentTimeMillis()}};if(typeof sync==='function')sync($playbackPositionMs,$isPlaying,${System.currentTimeMillis()},$locallyPaused);",
             null
         )
+    }
+    LaunchedEffect(player.value, hostSeekCommand?.first) {
+        val positionMs = hostSeekCommand?.second ?: return@LaunchedEffect
+        player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player&&typeof player.seekTo==='function'){player.seekTo(${positionMs.coerceAtLeast(0L) / 1000.0},true);}", null)
     }
 }
 
