@@ -1,0 +1,33 @@
+# Gradle & Android Build
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+
+# Local Android SDK configuration
+local.properties
+.cxx/
+captures/
+
+# Secrets & Credentials
+.env
+.env.*
+*.jks
+*.keystore
+*google-services.json
+*service-account*.json
+*firebase-adminsdk*.json
+*.pem
+*.key
+
+# Server
+server/node_modules/
+server/dist/
+server/.env
+server/*.log
+
+# OS & IDE
+.DS_Store
+.idea/
+*.iml

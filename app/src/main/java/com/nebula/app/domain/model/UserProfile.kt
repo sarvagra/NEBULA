@@ -1,0 +1,31 @@
+package com.nebula.app.domain.model
+
+data class UserProfile(
+    val id: String = "",
+    val displayName: String = "Nebula Explorer",
+    val email: String = "",
+    val phoneNumber: String = "",
+    val username: String? = null,
+    val bio: String = "Building ambient systems & shared spaces on Android.",
+    val status: String = "Online",
+    val avatarUri: String? = null,
+    val avatarFallbackLetter: String = "N",
+    val bannerIndex: Int = 0,
+    val isCustomAvatar: Boolean = false,
+    val isPremium: Boolean = false,
+    val isTrial: Boolean = false,
+    val subscriptionTier: NebulaSubscriptionTier = NebulaSubscriptionTier.FREE,
+    val interests: List<String> = listOf("🎬 Sci-Fi", "🎧 Lo-Fi", "🍿 Watch Parties", "🌌 Ambient"),
+    val customInstructions: String = "",
+    val referralCount: Int = 0,
+    val referralCode: String = "",
+    val isLoggedIn: Boolean = false,
+    val roomsHostedCount: Int = 0,
+    val roomsJoinedCount: Int = 0,
+    val timeInSyncHours: Double = 0.0,
+    val isFriendCountPublic: Boolean = true,
+    val isOnboardingCompleted: Boolean = true,
+    val dateOfBirth: String? = null,
+    val gender: String? = null,
+    val bannerUrl: String? = null
+)

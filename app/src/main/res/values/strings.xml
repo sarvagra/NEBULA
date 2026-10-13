@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">NEBULA</string>
+    <string name="ask_anything_placeholder">Ask anything…</string>
+    <string name="profile_avatar_desc">Profile Avatar and Settings Menu</string>
+    <string name="send_message_desc">Send message</string>
+    <string name="voice_input_desc">Voice input</string>
+    <string name="camera_input_desc">Attach photo or visual context</string>
+</resources>

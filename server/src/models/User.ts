@@ -1,0 +1,82 @@
+import mongoose, { Schema, Document } from 'mongoose';
+
+export type SubscriptionTier = 'free' | 'premium' | 'premium_plus';
+export type UserPresenceStatus = 'online' | 'in_a_room' | 'private_chat' | 'offline';
+
+export interface IUser extends Document {
+  email?: string;
+  phone?: string;
+  googleId?: string;
+  firebaseUid?: string;
+  username: string;
+  displayName: string;
+  bio: string;
+  avatarUrl?: string;
+  avatarLetter: string;
+  bannerIndex: number;
+  bannerUrl?: string;
+  isOnboardingCompleted?: boolean;
+  dateOfBirth?: string;
+  gender?: string;
+  tier: SubscriptionTier;
+  isTrial?: boolean;
+  trialExpiresAt?: Date;
+  status: UserPresenceStatus;
+  interests: string[];
+  isFriendCountPublic: boolean;
+  isBanned: boolean;
+  role: 'user' | 'moderator' | 'admin';
+  stats: {
+    roomsJoinedCount: number;
+    roomsHostedCount: number;
+    timeInSyncMinutes: number;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const UserSchema = new Schema<IUser>(
+  {
+    email: { type: String, sparse: true, index: true },
+    phone: { type: String, sparse: true, index: true },
+    googleId: { type: String, sparse: true, index: true },
+    firebaseUid: { type: String, sparse: true, index: true },
+    username: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
+    displayName: { type: String, default: '', trim: true },
+    bio: { type: String, default: 'Building ambient systems & shared spaces on Android.' },
+    avatarUrl: { type: String },
+    avatarLetter: { type: String, default: 'N' },
+    bannerIndex: { type: Number, default: 0 },
+    bannerUrl: { type: String },
+    isOnboardingCompleted: { type: Boolean, default: false },
+    dateOfBirth: { type: String },
+    gender: { type: String },
+    tier: { type: String, enum: ['free', 'premium', 'premium_plus'], default: 'free' },
+    isTrial: { type: Boolean, default: false },
+    trialExpiresAt: { type: Date },
+    status: { type: String, default: 'online' },
+    interests: { type: [String], default: ['🎬 Sci-Fi', '🎧 Lo-Fi', '🍿 Watch Parties', '🌌 Ambient'] },
+    isFriendCountPublic: { type: Boolean, default: true },
+    isBanned: { type: Boolean, default: false, index: true },
+    role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
+    stats: {
+      roomsJoinedCount: { type: Number, default: 0 },
+      roomsHostedCount: { type: Number, default: 0 },
+      timeInSyncMinutes: { type: Number, default: 0 },
+    },
+  },
+  {
+    timestamps: true,
+    toJSON: {
+      virtuals: true,
+      transform: (_, ret: any) => {
+        ret.id = ret._id.toString();
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
+);
+
+export const UserModel = mongoose.model<IUser>('User', UserSchema);
