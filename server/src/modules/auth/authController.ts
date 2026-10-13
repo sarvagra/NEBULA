@@ -109,15 +109,20 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     otpStore.set(rawTarget, { code, expiresAt, attempts: (existing?.attempts || 0) + 1 });
 
     const emailResult = await sendOtpEmail(rawTarget, code);
-    const emailSent = emailResult.sent;
+    if (!emailResult.sent) {
+      otpStore.delete(rawTarget);
+      res.status(503).json({
+        success: false,
+        error: 'Verification email could not be delivered. Please try again later.',
+      });
+      return;
+    }
 
     res.json({
       success: true,
-      message: emailSent
-        ? 'Verification code sent to your email'
-        : 'Verification code sent successfully',
+      message: 'Verification code sent to your email',
       isNewUser: !existingUser,
-      emailSent,
+      emailSent: true,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to dispatch verification code' });
