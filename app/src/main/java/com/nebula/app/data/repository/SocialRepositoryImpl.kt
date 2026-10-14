@@ -48,18 +48,32 @@ class SocialRepositoryImpl(
     override suspend fun selectConversation(id: String) {
         val target = _conversations.value.firstOrNull { it.id == id }
         if (target != null) {
+            // Refresh the public profile at conversation entry so the header and
+            // old messages reflect the partner's current avatar/name.
+            val freshPartner = apiClient.getPublicProfileById(id).let { response ->
+                if (response is ApiResponse.Success) {
+                    response.data.optJSONObject("data")?.let { parseUsers(JSONArray().put(it)).firstOrNull() }
+                } else null
+            } ?: target.partnerUser
             val history = apiClient.getConversationMessages(id)
             val messages = if (history is ApiResponse.Success) {
                 buildList {
                     for (index in 0 until history.data.length()) {
                         val item = history.data.optJSONObject(index) ?: continue
-                        add(messageFromJson(item, id))
+                        val parsed = messageFromJson(item, id)
+                        val senderIsPartner = parsed.role == MessageRole.ASSISTANT
+                        add(if (senderIsPartner && freshPartner != null) parsed.copy(
+                            senderName = parsed.senderName?.takeIf { it.isNotBlank() } ?: freshPartner.displayName,
+                            senderAvatarUrl = parsed.senderAvatarUrl?.takeIf { it.isNotBlank() } ?: freshPartner.avatarUrl,
+                            senderAvatarLetter = freshPartner.avatarLetter
+                        ) else parsed)
                     }
                 }
             } else target.messages
-            _activeConversation.value = target.copy(unreadCount = 0, messages = messages)
+            val updatedTarget = target.copy(title = freshPartner?.displayName ?: target.title, partnerUser = freshPartner ?: target.partnerUser, unreadCount = 0, messages = messages)
+            _activeConversation.value = updatedTarget
             _conversations.value = _conversations.value.map {
-                if (it.id == id) it.copy(unreadCount = 0, messages = messages) else it
+                if (it.id == id) updatedTarget else it
             }
             // Opening a conversation is the only point at which messages become seen.
             apiClient.markConversationRead(id)
