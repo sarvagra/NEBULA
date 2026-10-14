@@ -7,9 +7,30 @@ import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 import { notifyUser } from '../notifications/notificationController';
 import { NotificationModel } from '../../models/Notification';
+import { dmRetentionCutoff, dmRetentionCutoffForDays, entitlementsForTier, messageEditLimitForTier } from '../../utils/entitlements';
 
 const UNSEND_WINDOW_MS = 2 * 60 * 1000;
-const editLimitForTier = (tier?: string) => (tier === 'premium' || tier === 'premium_plus') ? 2 : 1;
+
+/**
+ * Retention for a two-party conversation. A thread is only as long-lived as the
+ * shorter of the two participants' entitlement windows, so a Basic participant
+ * never inherits Premium history depth (and vice versa).
+ */
+async function retentionContext(userId: string, otherUserId?: string) {
+  const ids = otherUserId ? [userId, otherUserId] : [userId];
+  const users = await UserModel.find({ _id: { $in: ids } }).select('tier');
+  const tiers = users.length ? users.map((user) => user.tier) : ['free'];
+  const shortestDays = tiers.reduce(
+    (min, tier) => Math.min(min, entitlementsForTier(tier).dmRetentionDays),
+    Number.POSITIVE_INFINITY,
+  );
+  const effectiveTier = tiers.find((tier) => entitlementsForTier(tier).dmRetentionDays === shortestDays) || 'free';
+  return {
+    tier: effectiveTier,
+    cutoff: dmRetentionCutoffForDays(shortestDays),
+    retention: entitlementsForTier(effectiveTier),
+  };
+}
 
 async function authorizedDirectMessage(req: Request, messageId: string) {
   const message = await MessageModel.findById(messageId);
@@ -74,11 +95,16 @@ export async function getConversationMessages(req: Request, res: Response): Prom
       return;
     }
 
+    // Tier retention: Basic 4 weeks, Premium 6 weeks, Premium Plus 12 months.
+    // History outside the window is no longer returned to either participant.
+    const { cutoff, retention } = await retentionContext(req.user.id, conversationId);
+
     const messages = await MessageModel.find({
       $or: [
         { senderId: req.user.id, conversationId },
         { senderId: conversationId, conversationId: req.user.id },
       ],
+      createdAt: { $gte: cutoff },
     })
       .sort({ createdAt: -1 })
       .limit(limit);
@@ -88,6 +114,7 @@ export async function getConversationMessages(req: Request, res: Response): Prom
     res.json({
       success: true,
       data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
+      meta: { retentionDays: retention.dmRetentionDays, retentionLabel: retention.dmRetentionLabel, historyFrom: cutoff.toISOString() },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve direct conversation' });
@@ -110,8 +137,16 @@ export async function markConversationRead(req: Request, res: Response): Promise
       res.status(403).json({ success: false, error: 'You can only mark an accepted friend conversation as read' });
       return;
     }
+    const { cutoff } = await retentionContext(req.user.id);
     const result = await MessageModel.updateMany(
-      { senderId: conversationId, conversationId: req.user.id, roomId: { $exists: false }, readAt: { $exists: false }, deletedAt: { $exists: false } },
+      {
+        senderId: conversationId,
+        conversationId: req.user.id,
+        roomId: { $exists: false },
+        readAt: { $exists: false },
+        deletedAt: { $exists: false },
+        createdAt: { $gte: cutoff },
+      },
       { $set: { readAt: new Date() } },
     );
     res.json({ success: true, data: { readCount: result.modifiedCount } });
@@ -127,7 +162,7 @@ export async function editDirectMessage(req: Request, res: Response): Promise<vo
     if (message.deletedAt) { res.status(409).json({ success: false, error: 'This message was unsent' }); return; }
     const sender = await UserModel.findById(req.user!.id).select('tier');
     const editsUsed = (message.editHistory || []).length;
-    if (editsUsed >= editLimitForTier(sender?.tier)) { res.status(403).json({ success: false, error: 'Your edit limit for this message has been reached' }); return; }
+    if (editsUsed >= messageEditLimitForTier(sender?.tier)) { res.status(403).json({ success: false, error: 'Your edit limit for this message has been reached' }); return; }
     const nextText = String(req.body.text || '').trim();
     if (nextText === message.text) { res.json({ success: true, data: toMessageDTO(message) }); return; }
     message.editHistory.push({ text: message.text, editedAt: new Date() });

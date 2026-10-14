@@ -5,6 +5,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toPrivateUserDTO, toPublicUserDTO } from '../../utils/dto';
 import { RoomModel } from '../../models/Room';
 import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
+import { entitlementsForTier } from '../../utils/entitlements';
 
 function addCalendarMonths(date: Date, months: number): Date {
   const result = new Date(date);
@@ -149,7 +150,10 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     if (bannerUrl !== undefined) {
       updateFields.bannerUrl = bannerUrl;
     }
-    if (interests) updateFields.interests = interests.slice(0, 5);
+    if (interests) {
+      // Tag allowance is server-authoritative per tier (Basic 5, Premium 8, Premium Plus 12).
+      updateFields.interests = (Array.isArray(interests) ? interests : []).slice(0, entitlementsForTier(req.user.tier).maxProfileTags);
+    }
     if (avatarUrl !== undefined) updateFields.avatarUrl = avatarUrl;
     if (isFriendCountPublic !== undefined) updateFields.isFriendCountPublic = isFriendCountPublic;
     if (isOnboardingCompleted !== undefined) {

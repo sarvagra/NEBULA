@@ -5,9 +5,40 @@ import { UserModel } from '../../models/User';
 import { uploadObject } from '../../services/objectStorage';
 import { RoomModel } from '../../models/Room';
 import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
+import { profileAssetHistoryLimitForTier } from '../../utils/entitlements';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'];
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
+
+/**
+ * Keep only the newest `limit` assets of one type for a user.
+ * Basic keeps 1, Premium 3, Premium Plus 5.
+ */
+async function trimAssetHistory(userId: string, assetType: string, limit: number): Promise<void> {
+  const stale = await ProfileAssetModel.find({ userId, assetType })
+    .sort({ createdAt: -1 })
+    .skip(limit)
+    .select('_id');
+  if (stale.length) {
+    await ProfileAssetModel.deleteMany({ _id: { $in: stale.map((asset) => asset._id) } });
+  }
+}
+
+/** Mirror an applied or cleared asset into the user record and live rooms. */
+async function syncAppliedAsset(userId: string, fields: Record<string, any>): Promise<void> {
+  // Explicit null removes the stored URL; `undefined` would be dropped by Mongoose.
+  const patch: Record<string, any> = {};
+  for (const [key, value] of Object.entries(fields)) patch[key] = value === undefined ? null : value;
+  const updatedUser = await UserModel.findByIdAndUpdate(userId, patch, { new: true });
+  if (!updatedUser) return;
+  const participantUpdate: Record<string, any> = {};
+  if ('avatarUrl' in patch) participantUpdate['participants.$.avatarUrl'] = updatedUser.avatarUrl ?? null;
+  if ('bannerUrl' in patch) participantUpdate['participants.$.bannerUrl'] = updatedUser.bannerUrl ?? null;
+  if (!Object.keys(participantUpdate).length) return;
+  const rooms = await RoomModel.find({ 'participants.userId': userId }).select('_id');
+  await RoomModel.updateMany({ 'participants.userId': userId }, { $set: participantUpdate });
+  notifyRoomsParticipantProfileUpdated(rooms.map((room) => room._id.toString()), userId);
+}
 
 export async function listAssets(req: Request, res: Response): Promise<void> {
   try {
@@ -83,7 +114,12 @@ export async function uploadAsset(req: Request, res: Response): Promise<void> {
         sizeBytes: resolvedSize,
       });
 
-      res.status(201).json({
+    // Tier policy: Basic keeps the newest 1 per type, Premium 3, Premium Plus 5.
+    const uploader = await UserModel.findById(req.user.id).select('tier');
+    const historyLimit = profileAssetHistoryLimitForTier(uploader?.tier);
+    await trimAssetHistory(req.user.id, assetType, historyLimit);
+
+    res.status(201).json({
         success: true,
         data: {
           id: asset._id.toString(),
@@ -93,6 +129,7 @@ export async function uploadAsset(req: Request, res: Response): Promise<void> {
           mimeType: asset.mimeType,
           sizeBytes: asset.sizeBytes,
           createdAt: asset.createdAt,
+          historyLimit,
         },
       });
   } catch (err: any) {
@@ -131,15 +168,7 @@ export async function applyAsset(req: Request, res: Response): Promise<void> {
         updateFields.bannerUrl = asset.url;
       }
 
-      const updatedUser = await UserModel.findByIdAndUpdate(req.user.id, updateFields, { new: true });
-      if (updatedUser) {
-        const rooms = await RoomModel.find({ 'participants.userId': req.user.id }).select('_id');
-        await RoomModel.updateMany({ 'participants.userId': req.user.id }, { $set: {
-          'participants.$.avatarUrl': updatedUser.avatarUrl,
-          'participants.$.bannerUrl': updatedUser.bannerUrl,
-        } });
-        notifyRoomsParticipantProfileUpdated(rooms.map((room) => room._id.toString()), req.user.id);
-      }
+      await syncAppliedAsset(req.user.id, updateFields);
 
       res.json({
         success: true,
@@ -179,15 +208,24 @@ export async function deleteAsset(req: Request, res: Response): Promise<void> {
         return;
       }
 
-      // Fall back to default if deleted
+      // Removing an asset also removes it from user-visible selection: when the
+      // deleted object is the currently applied one, the profile falls back to
+      // default rather than continuing to advertise a deleted URL.
+      const appliedFields: Record<string, any> = {};
       if (asset.assetType === 'avatar') {
-        await UserModel.findByIdAndUpdate(req.user.id, { avatarUrl: undefined });
+        const owner = await UserModel.findById(req.user.id).select('avatarUrl');
+        if (!owner?.avatarUrl || owner.avatarUrl === asset.url) appliedFields.avatarUrl = null;
       } else if (asset.assetType === 'banner') {
-        await UserModel.findByIdAndUpdate(req.user.id, { bannerIndex: 0 });
+        const owner = await UserModel.findById(req.user.id).select('bannerUrl');
+        if (!owner?.bannerUrl || owner.bannerUrl === asset.url) {
+          appliedFields.bannerUrl = null;
+          appliedFields.bannerIndex = 0;
+        }
       }
 
       await ProfileAssetModel.findByIdAndDelete(id);
-      res.json({ success: true, message: 'Profile asset deleted from server storage' });
+      if (Object.keys(appliedFields).length) await syncAppliedAsset(req.user.id, appliedFields);
+      res.json({ success: true, message: 'Profile asset removed from history and selection' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to delete profile asset' });
   }

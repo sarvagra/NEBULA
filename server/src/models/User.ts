@@ -33,6 +33,11 @@ export interface IUser extends Document {
   isFriendCountPublic: boolean;
   isBanned: boolean;
   role: 'user' | 'moderator' | 'admin';
+  /** Account deletion lifecycle: scheduled grace period plus audit trail. */
+  deletionRequestedAt?: Date;
+  deletionScheduledFor?: Date;
+  deletionSuspendedAt?: Date;
+  deletionEvents: { action: 'requested' | 'suspended' | 'cancelled' | 'completed'; at: Date; scheduledFor?: Date; eventId: string }[];
   activeRoomId?: string | null;
   fcmTokens: string[];
   stats: {
@@ -80,6 +85,15 @@ const UserSchema = new Schema<IUser>(
     isFriendCountPublic: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false, index: true },
     role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
+    deletionRequestedAt: { type: Date },
+    deletionScheduledFor: { type: Date, index: true },
+    deletionSuspendedAt: { type: Date },
+    deletionEvents: [{
+      action: { type: String, enum: ['requested', 'suspended', 'cancelled', 'completed'], required: true },
+      at: { type: Date, required: true },
+      scheduledFor: { type: Date },
+      eventId: { type: String, required: true },
+    }],
     activeRoomId: { type: String, default: null, index: true },
     fcmTokens: { type: [String], default: [] },
     stats: {

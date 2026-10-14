@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { UserModel, SubscriptionTier } from '../../models/User';
 import { config } from '../../config/env';
+import { entitlementsDTO } from '../../utils/entitlements';
 
 export const MEMBERSHIP_PLANS = [
   {
@@ -66,18 +67,14 @@ export async function getEntitlement(req: Request, res: Response): Promise<void>
     }
 
     // SERVER-AUTHORITATIVE ENTITLEMENT
-    const tier = user.tier;
-    const isPremium = tier === 'premium' || tier === 'premium_plus';
-    const isPremiumPlus = tier === 'premium_plus';
+    const limits = entitlementsDTO(user.tier);
 
     res.json({
       success: true,
       data: {
-        tier,
-        isPremium,
-        isPremiumPlus,
-        maxRoomCapacity: isPremiumPlus ? 50 : 25,
-        allowedBannerStyles: isPremium ? 4 : 1,
+        ...limits,
+        maxRoomCapacity: limits.maxRoomParticipants,
+        allowedBannerStyles: limits.tier === 'free' ? 1 : 4,
       },
     });
   } catch (err: any) {

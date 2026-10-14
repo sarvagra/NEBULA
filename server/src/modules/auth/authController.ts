@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthService } from '../../services/authService';
 import { UserModel } from '../../models/User';
 import { toPrivateUserDTO } from '../../utils/dto';
@@ -6,7 +7,68 @@ import { config } from '../../config/env';
 import { sendOtpEmail } from '../../services/emailService';
 
 // Temporary in-memory OTP verification store (scoped to dev / OTP provider integration)
-const otpStore = new Map<string, { code: string; expiresAt: number; attempts: number }>();
+export type OtpPurpose = 'login' | 'account_deletion';
+export interface OtpRecord {
+  code: string;
+  expiresAt: number;
+  attempts: number;
+  purpose: OtpPurpose;
+}
+const otpStore = new Map<string, OtpRecord>();
+
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+function otpKey(target: string, purpose: OtpPurpose): string {
+  return `${purpose}:${target}`;
+}
+
+/** Issue a purpose-scoped 6-digit code. Exported so lifecycle flows can reuse it. */
+export function issueOtp(target: string, purpose: OtpPurpose = 'login'): string {
+  const key = otpKey(target, purpose);
+  const existing = otpStore.get(key);
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  otpStore.set(key, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: (existing?.attempts || 0) + 1, purpose });
+  return code;
+}
+
+export function peekOtpRequest(target: string, purpose: OtpPurpose = 'login') {
+  return otpStore.get(otpKey(target, purpose));
+}
+
+export function clearOtp(target: string, purpose: OtpPurpose = 'login'): void {
+  otpStore.delete(otpKey(target, purpose));
+}
+
+/**
+ * Any successful sign-in cancels a deletion that is still inside its grace
+ * period. The caller passes the outcome back in the response so the app can
+ * tell the user their account was saved.
+ */
+async function applyLoginDeletionGrace(user: any): Promise<{ deletionSuspended: boolean; deletionScheduledFor: Date | null }> {
+  if (!user?.deletionScheduledFor || user.deletionSuspendedAt) {
+    return { deletionSuspended: false, deletionScheduledFor: null };
+  }
+  const scheduledFor = new Date(user.deletionScheduledFor);
+  const now = new Date();
+  await UserModel.updateOne({ _id: user._id }, {
+    $set: { deletionSuspendedAt: now },
+    $unset: { deletionScheduledFor: 1 },
+    $push: { deletionEvents: { action: 'suspended', at: now, eventId: new mongoose.Types.ObjectId().toString() } },
+  });
+  user.deletionScheduledFor = undefined;
+  user.deletionSuspendedAt = now;
+  return { deletionSuspended: true, deletionScheduledFor: scheduledFor };
+}
+
+/** Consume a code, enforcing expiry. Returns false for wrong or expired codes. */
+export function consumeOtp(target: string, code: string, purpose: OtpPurpose = 'login'): boolean {
+  const key = otpKey(target, purpose);
+  const record = otpStore.get(key);
+  if (!record || record.code !== code || Date.now() > record.expiresAt) return false;
+  otpStore.delete(key);
+  return true;
+}
 
 export async function googleSignIn(req: Request, res: Response): Promise<void> {
   try {
@@ -71,12 +133,15 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
     const ip = req.ip || req.socket.remoteAddress;
     const deviceInfo = req.headers['user-agent'] || 'Android Client';
     const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const grace = await applyLoginDeletionGrace(user);
 
     res.json({
       success: true,
       data: {
         user: toPrivateUserDTO(user),
         tokens,
+        deletionSuspended: grace.deletionSuspended,
+        deletionWasScheduledFor: grace.deletionScheduledFor,
       },
     });
   } catch (err: any) {
@@ -93,8 +158,8 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     }
 
     // Check rate limit on OTP store attempts
-    const existing = otpStore.get(rawTarget);
-    if (existing && Date.now() < existing.expiresAt && existing.attempts >= 5) {
+    const existing = peekOtpRequest(rawTarget, 'login');
+    if (existing && Date.now() < existing.expiresAt && existing.attempts >= OTP_MAX_ATTEMPTS) {
       res.status(429).json({ success: false, error: 'Too many OTP requests. Please wait before retrying.' });
       return;
     }
@@ -102,13 +167,11 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     const existingUser = await UserModel.findOne({ email: rawTarget });
 
     // Generate random 6-digit verification code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min expiry
-    otpStore.set(rawTarget, { code, expiresAt, attempts: (existing?.attempts || 0) + 1 });
+    const code = issueOtp(rawTarget, 'login');
 
     const emailResult = await sendOtpEmail(rawTarget, code);
     if (!emailResult.sent) {
-      otpStore.delete(rawTarget);
+      clearOtp(rawTarget, 'login');
       res.status(503).json({
         success: false,
         error: 'Verification email could not be delivered. Please try again later.',
@@ -137,15 +200,10 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const record = otpStore.get(rawTarget);
-    const isCodeMatch = record && record.code === otp;
-
-    if (!record || Date.now() > record.expiresAt || !isCodeMatch) {
+    if (!consumeOtp(rawTarget, otp, 'login')) {
       res.status(400).json({ success: false, error: 'Invalid or expired verification code' });
       return;
     }
-
-    otpStore.delete(rawTarget);
 
     const query = { email: rawTarget };
     let user = await UserModel.findOne(query);
@@ -201,6 +259,7 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     const ip = req.ip || req.socket.remoteAddress;
     const deviceInfo = req.headers['user-agent'] || 'Android Client';
     const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const grace = await applyLoginDeletionGrace(user);
 
     res.json({
       success: true,
@@ -208,6 +267,8 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
         user: toPrivateUserDTO(user),
         tokens,
         isNewUser,
+        deletionSuspended: grace.deletionSuspended,
+        deletionWasScheduledFor: grace.deletionScheduledFor,
       },
     });
   } catch (err: any) {
@@ -308,12 +369,15 @@ export async function devLogin(req: Request, res: Response): Promise<void> {
     const ip = req.ip || req.socket.remoteAddress;
     const deviceInfo = req.headers['user-agent'] || 'Android Client Emulator';
     const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const grace = await applyLoginDeletionGrace(user);
 
     res.json({
       success: true,
       data: {
         user: toPrivateUserDTO(user),
         tokens,
+        deletionSuspended: grace.deletionSuspended,
+        deletionWasScheduledFor: grace.deletionScheduledFor,
       },
     });
   } catch (err: any) {

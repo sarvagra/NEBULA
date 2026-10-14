@@ -8,6 +8,8 @@ import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { NotificationModel } from '../../models/Notification';
 import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated } from '../../realtime/socketServer';
+import { entitlementsForTier } from '../../utils/entitlements';
+import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
 
 async function claimActiveRoom(userId: string, roomId: string): Promise<boolean> {
   const otherMembership = await RoomModel.findOne({
@@ -115,8 +117,20 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
     const safeTags = Array.isArray(tags) ? tags.slice(0, 3).map((t: any) => String(t).trim()) : [];
 
     // Server-enforced max participants based on authenticated user tier, respecting client preference
-    const tierLimit = req.user.tier === 'premium_plus' ? 50 : 25;
-    const maxParticipants = requestedMax ? Math.min(Math.max(parseInt(String(requestedMax), 10) || 20, 2), tierLimit) : (req.user.tier === 'premium_plus' ? 50 : 20);
+    const tierLimit = entitlementsForTier(req.user.tier).maxRoomParticipants;
+    const defaultParticipants = req.user.tier === 'premium_plus' ? 50 : 20;
+    const maxParticipants = requestedMax ? Math.min(Math.max(parseInt(String(requestedMax), 10) || 20, 2), tierLimit) : defaultParticipants;
+
+    // A room may only open onto a verified playable video source.
+    let verifiedMediaUrl = '';
+    if (mediaUrl) {
+      const verification = await tryVerifyPlayableLink(String(mediaUrl));
+      if (!verification.ok) {
+        res.status(422).json({ success: false, code: verification.code, error: verification.error });
+        return;
+      }
+      verifiedMediaUrl = verification.link.sourceUrl;
+    }
 
     const roomId = new mongoose.Types.ObjectId().toString();
     const creatorProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
@@ -143,7 +157,7 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
         durationSeconds: 3600,
         playbackPosition: 0,
         isPlaying: true,
-        mediaUrl: mediaUrl || '',
+        mediaUrl: verifiedMediaUrl,
       },
       participants: [
         {
@@ -518,7 +532,23 @@ export async function updateMedia(req: Request, res: Response): Promise<void> {
     if (durationSeconds !== undefined) room.mediaState.durationSeconds = durationSeconds;
     if (playbackPosition !== undefined) room.mediaState.playbackPosition = playbackPosition;
     if (isPlaying !== undefined) room.mediaState.isPlaying = isPlaying;
-    if (mediaUrl !== undefined) room.mediaState.mediaUrl = mediaUrl;
+    if (mediaUrl !== undefined) {
+      if (String(mediaUrl).trim() === '') {
+        room.mediaState.mediaUrl = '';
+      } else {
+        // Reject image pages, unavailable files, and unsupported hosts outright.
+        const verification = await tryVerifyPlayableLink(String(mediaUrl));
+        if (!verification.ok) {
+          res.status(422).json({ success: false, code: verification.code, error: verification.error });
+          return;
+        }
+        room.mediaState.mediaUrl = verification.link.sourceUrl;
+        if (title === undefined) room.mediaState.title = verification.link.title;
+        if (verification.link.thumbnailUrl === undefined && !room.mediaState.subtitle) {
+          room.mediaState.subtitle = 'Synchronized Session';
+        }
+      }
+    }
 
     if (mediaUrl !== undefined || title !== undefined) {
       room.mediaState.playbackPosition = 0;
