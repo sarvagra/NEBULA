@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { FriendshipModel } from '../../models/Friendship';
 import { UserModel } from '../../models/User';
 import { NotificationModel } from '../../models/Notification';
@@ -6,6 +7,30 @@ import { toPublicUserDTO } from '../../utils/dto';
 import { notifyUserSocialChanged } from '../../realtime/socketServer';
 import { RoomModel } from '../../models/Room';
 import { notifyUser } from '../notifications/notificationController';
+
+/**
+ * A pending friend request is represented by a `friend_request` notification the
+ * recipient can act on. The moment the request is accepted, declined, withdrawn
+ * or blocked, that notification must stop being actionable, so it is removed
+ * rather than left behind as a stale pending card.
+ */
+async function clearFriendRequestNotification(friendshipId: string): Promise<void> {
+  await NotificationModel.deleteMany({
+    type: 'friend_request',
+    'actionData.friendshipId': friendshipId,
+  });
+}
+
+/** Same cleanup keyed by the two participants, for flows without a friendship id. */
+async function clearFriendRequestNotificationsBetween(userA: string, userB: string): Promise<void> {
+  await NotificationModel.deleteMany({
+    type: 'friend_request',
+    $or: [
+      { userId: userA, 'actionData.requesterId': userB },
+      { userId: userB, 'actionData.requesterId': userA },
+    ],
+  });
+}
 
 export async function listFriends(req: Request, res: Response): Promise<void> {
   try {
@@ -174,6 +199,8 @@ export async function blockUser(req: Request, res: Response): Promise<void> {
       { $set: { status: 'blocked' } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+    // Blocking invalidates any pending friend request between the pair.
+    await clearFriendRequestNotificationsBetween(req.user.id, targetUserId);
     notifyUserSocialChanged([req.user.id, targetUserId]);
 
     res.json({ success: true, message: 'User blocked successfully' });
@@ -203,6 +230,8 @@ export async function acceptFriendRequest(req: Request, res: Response): Promise<
 
     friendship.status = 'accepted';
     await friendship.save();
+    // The pending card is gone the instant it is acted on.
+    await clearFriendRequestNotification(friendship._id.toString());
     const acceptedBy = await UserModel.findById(req.user.id).select('displayName');
     await NotificationModel.create({
       userId: friendship.requesterId,
@@ -215,7 +244,17 @@ export async function acceptFriendRequest(req: Request, res: Response): Promise<
     void notifyUser(friendship.requesterId, 'Friend request accepted', `${acceptedBy?.displayName || 'Your friend'} accepted your friend request.`, { type: 'friend_accepted', userId: req.user.id });
     notifyUserSocialChanged([friendship.requesterId, friendship.recipientId]);
 
-    res.json({ success: true, message: 'Friend request accepted' });
+    // The client needs the original request's friendshipId to clear its card
+    // even when the notification was created before this response existed.
+    res.json({
+      success: true,
+      message: 'Friend request accepted',
+      data: {
+        friendshipId: friendship._id.toString(),
+        requesterId: friendship.requesterId,
+        status: 'accepted',
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to accept friend request' });
   }
@@ -238,6 +277,7 @@ export async function declineFriendRequest(req: Request, res: Response): Promise
     const requesterId = friendship.requesterId;
     const recipientId = friendship.recipientId;
     await FriendshipModel.findByIdAndDelete(id);
+    await clearFriendRequestNotification(id);
     notifyUserSocialChanged([requesterId, recipientId]);
     res.json({ success: true, message: 'Friend request removed' });
   } catch (err: any) {
@@ -260,10 +300,65 @@ export async function withdrawFriendRequest(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'Pending friend request not found' });
       return;
     }
+    await clearFriendRequestNotification(friendship._id.toString());
     notifyUserSocialChanged([friendship.requesterId, friendship.recipientId]);
     res.json({ success: true, message: 'Friend request withdrawn' });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to withdraw friend request' });
+  }
+}
+
+/**
+ * DELETE /friends/request/:id
+ *
+ * Removes a pending friend request that the caller is part of. `:id` may be the
+ * friendship id or the other participant's user id, because the in-app
+ * notification only carries one relatedId and older clients sent the user id.
+ */
+export async function deleteFriendRequest(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ success: false, error: 'Invalid friend request identifier' });
+      return;
+    }
+
+    const byFriendship = await FriendshipModel.findOne({
+      _id: id,
+      status: 'pending',
+      $or: [{ requesterId: req.user.id }, { recipientId: req.user.id }],
+    });
+    const byParticipant = byFriendship
+      ? null
+      : await FriendshipModel.findOne({
+          status: 'pending',
+          $or: [
+            { requesterId: req.user.id, recipientId: id },
+            { requesterId: id, recipientId: req.user.id },
+          ],
+        });
+
+    const pending = byFriendship || byParticipant;
+    if (!pending) {
+      res.status(404).json({ success: false, error: 'Pending friend request not found' });
+      return;
+    }
+
+    await FriendshipModel.findByIdAndDelete(pending._id);
+    await clearFriendRequestNotificationsBetween(pending.requesterId, pending.recipientId);
+    notifyUserSocialChanged([pending.requesterId, pending.recipientId]);
+    res.json({
+      success: true,
+      message: 'Friend request removed',
+      data: { friendshipId: pending._id.toString(), status: 'pending_removed' },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to remove friend request' });
   }
 }
 
@@ -283,8 +378,13 @@ export async function removeFriend(req: Request, res: Response): Promise<void> {
     res.status(404).json({ success: false, error: 'Friendship not found' });
     return;
   }
+  await clearFriendRequestNotificationsBetween(req.user.id, req.params.id);
   notifyUserSocialChanged([req.user.id, req.params.id]);
-  res.json({ success: true, message: 'Friend removed' });
+  res.json({
+    success: true,
+    message: 'Friend removed',
+    data: { friendshipId: removed._id.toString(), status: 'removed' },
+  });
 }
 
 export async function listSuggestedPeople(req: Request, res: Response): Promise<void> {

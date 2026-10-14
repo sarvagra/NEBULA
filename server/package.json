@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "npm run test:security",
-    "test:security": "ts-node-dev --transpile-only src/tests/securityTests.ts",
+    "test:security": "NEBULA_TEST_GLOBAL_LIMIT_MAX=2000 ts-node-dev --transpile-only src/tests/securityTests.ts",
     "test:db": "ts-node-dev --transpile-only src/tests/connectivityTest.ts",
     "test:firebase": "ts-node-dev --transpile-only src/tests/firebaseAuthFlowTest.ts",
     "test:sync": "ts-node-dev --transpile-only src/tests/multiClientSyncTest.ts"

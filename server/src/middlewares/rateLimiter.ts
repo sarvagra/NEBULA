@@ -9,6 +9,12 @@ export function createRateLimiter(options: {
   max: number;
   prefix: string;
   message?: string;
+  /**
+   * Optional stable identifier derived from the request. Use it to scope a limit
+   * to the account being acted on instead of the caller's network address, so a
+   * shared NAT or a retry after a delivery failure cannot lock a user out.
+   */
+  keyResolver?: (req: Request) => string | undefined;
 }) {
   const store = new Map<string, RateLimitRecord>();
 
@@ -30,7 +36,8 @@ export function createRateLimiter(options: {
                req.socket.remoteAddress ||
                'unknown-ip';
     const userId = req.user?.id || '';
-    const key = `${options.prefix}:${userId || ip}`;
+    const resolved = options.keyResolver?.(req)?.trim().toLowerCase();
+    const key = `${options.prefix}:${resolved || userId || ip}`;
 
     const now = Date.now();
     let record = store.get(key);
@@ -60,10 +67,18 @@ export function createRateLimiter(options: {
 }
 
 // Pre-configured rate limiters
+
+/**
+ * Ceiling for the IP-wide limiter. The value only changes for the automated
+ * suite, which issues a burst of deliberate 4xx probes from one address and would
+ * otherwise start rate-limiting its own later assertions. Production keeps 120/min.
+ */
+const GLOBAL_LIMIT_MAX = Number(process.env.NEBULA_TEST_GLOBAL_LIMIT_MAX) || 120;
+
 export const globalApiRateLimiter = createRateLimiter({
   prefix: 'global',
   windowMs: 60 * 1000, // 1 min
-  max: 120,
+  max: GLOBAL_LIMIT_MAX,
   message: 'Global API rate limit exceeded.',
 });
 
@@ -74,11 +89,20 @@ export const authRateLimiter = createRateLimiter({
   message: 'Too many authentication attempts. Please try again later.',
 });
 
+// Scoped to the target email: a user who mistypes then corrects, or re-sends
+// because a code never arrived, must not be blocked by unrelated traffic from the
+// same network. Five codes per 15 minutes per address is still tight enough to
+// stop enumeration.
 export const otpRequestRateLimiter = createRateLimiter({
   prefix: 'otp-req',
   windowMs: 15 * 60 * 1000, // 15 mins
-  max: 3,
-  message: 'Too many OTP requests. Please wait before requesting another code.',
+  max: 5,
+  message: 'Too many codes were requested for this address. Please wait a few minutes before requesting another one.',
+  keyResolver: (req) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email : '';
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+    return email || phone || undefined;
+  },
 });
 
 export const otpVerifyRateLimiter = createRateLimiter({

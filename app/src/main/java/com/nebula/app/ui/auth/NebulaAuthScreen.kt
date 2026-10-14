@@ -272,8 +272,16 @@ fun NebulaAuthScreen(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                val isGmsError = errorMessage?.contains("Credential", ignoreCase = true) == true ||
-                        errorMessage?.contains("Google Play", ignoreCase = true) == true
+                // Google sign-in can fail for two very different reasons: this
+                // build's signing key is not registered with the Google project
+                // (typical after a re-sign), or Play Services is genuinely absent.
+                // Both leave email/OTP as the working path, so say that plainly
+                // instead of blaming an emulator that may not exist.
+                val rawError = errorMessage ?: ""
+                val isGmsError = rawError.contains("Credential", ignoreCase = true) ||
+                        rawError.contains("Google Play", ignoreCase = true) ||
+                        rawError.contains("OAuth2.0", ignoreCase = true) ||
+                        rawError.contains("not registered", ignoreCase = true)
 
                 Column(
                     modifier = Modifier
@@ -287,9 +295,10 @@ fun NebulaAuthScreen(
                 ) {
                     Text(
                         text = if (isGmsError) {
-                            "Google Play Services not found on this emulator.\nTap below to sign in directly with your Gmail account:"
+                            "Google sign-in is unavailable for this build.\n" +
+                                "Use \"Sign In with Email / OTP\" below — it works right now."
                         } else {
-                            errorMessage ?: ""
+                            rawError
                         },
                         style = theme.typography.caption.copy(
                             color = theme.colors.errorColor,
@@ -313,7 +322,7 @@ fun NebulaAuthScreen(
                             modifier = Modifier.height(34.dp)
                         ) {
                             Text(
-                                text = "Enter Gmail Account",
+                                text = "Sign In with Email / OTP",
                                 style = theme.typography.caption.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp

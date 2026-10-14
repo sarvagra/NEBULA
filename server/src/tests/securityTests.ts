@@ -541,6 +541,156 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Friend request notifications clear on accept, decline and withdraw', async () => {
+    const alice = '507f1f77bcf86cd799439101';
+    const bob = '507f1f77bcf86cd799439102';
+    const carol = '507f1f77bcf86cd799439103';
+    const dave = '507f1f77bcf86cd799439104';
+    const aliceToken = jwt.sign({ ...validUserPayload, id: alice, username: 'ff_alice' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const bobToken = jwt.sign({ ...validUserPayload, id: bob, username: 'ff_bob' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const carolToken = jwt.sign({ ...validUserPayload, id: carol, username: 'ff_carol' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const daveToken = jwt.sign({ ...validUserPayload, id: dave, username: 'ff_dave' }, config.auth.jwtSecret, { expiresIn: '1h' });
+
+    const listFor = async (token: string) => {
+      const res = await makeRequest('/api/v1/notifications', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status !== 200) throw new Error(`Notification list failed with ${res.status}`);
+      return ((await res.json()) as any).data as any[];
+    };
+    const pendingRequests = async (token: string) => {
+      const res = await makeRequest('/api/v1/friends/requests', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status !== 200) throw new Error(`Friend request list failed with ${res.status}`);
+      return ((await res.json()) as any).data as any[];
+    };
+
+    try {
+      await UserModel.insertMany([
+        { _id: alice, username: 'ff_alice', displayName: 'Alice FF', tier: 'free' },
+        { _id: bob, username: 'ff_bob', displayName: 'Bob FF', tier: 'free' },
+        { _id: carol, username: 'ff_carol', displayName: 'Carol FF', tier: 'free' },
+        { _id: dave, username: 'ff_dave', displayName: 'Dave FF', tier: 'free' },
+      ]);
+
+      // --- accept path: Alice requests Bob, Bob accepts.
+      const sent = await makeRequest('/api/v1/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aliceToken}` },
+        body: JSON.stringify({ recipientId: bob }),
+      });
+      if (sent.status !== 201) throw new Error(`Friend request send failed with ${sent.status}`);
+      const friendshipId = ((await sent.json()) as any).data.id;
+
+      const bobBefore = await listFor(bobToken);
+      const pendingCard = bobBefore.find((n) => n.type === 'friend_request' && n.actionData?.friendshipId === friendshipId);
+      if (!pendingCard) throw new Error('Recipient never saw an actionable friend request notification');
+      if ((await pendingRequests(bobToken)).length !== 1) throw new Error('Pending request was not listed for the recipient');
+
+      const accepted = await makeRequest(`/api/v1/friends/request/${friendshipId}/accept`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bobToken}` },
+      });
+      if (accepted.status !== 200) throw new Error(`Accept failed with ${accepted.status}`);
+      const bobAfter = await listFor(bobToken);
+      if (bobAfter.some((n) => n.type === 'friend_request' && n.actionData?.friendshipId === friendshipId)) {
+        throw new Error('Accepted friend request left its pending notification behind');
+      }
+      if ((await pendingRequests(bobToken)).length !== 0) throw new Error('Accepted request still appears as pending');
+      const aliceAfterAccept = await listFor(aliceToken);
+      if (!aliceAfterAccept.some((n) => n.title === 'Friend request accepted')) {
+        throw new Error('Accepting a request did not notify the original requester');
+      }
+      const acceptJson = (await accepted.json()) as any;
+      if (acceptJson.data?.friendshipId !== friendshipId) {
+        throw new Error('Accept response did not return the resolved friendshipId for card cleanup');
+      }
+
+      // DELETE /friends/request/:id clears a stale card whether it is given the
+      // friendship id or the other participant's user id.
+      const sent5 = await makeRequest('/api/v1/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${daveToken}` },
+        body: JSON.stringify({ recipientId: alice }),
+      });
+      if (sent5.status !== 201) throw new Error(`Delete-route request failed with ${sent5.status}`);
+      const deleteByParticipant = await makeRequest(`/api/v1/friends/request/${dave}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      if (deleteByParticipant.status !== 200) {
+        throw new Error(`DELETE /friends/request/:participantId failed with ${deleteByParticipant.status}`);
+      }
+      const aliceAfterDelete = await listFor(aliceToken);
+      if (aliceAfterDelete.some((n) => n.type === 'friend_request' && n.actionData?.requesterId === dave)) {
+        throw new Error('Deleted pending request left its notification behind');
+      }
+      if ((await pendingRequests(aliceToken)).length !== 0) {
+        throw new Error('Deleted pending request is still listed');
+      }
+      const deleteUnknown = await makeRequest('/api/v1/friends/request/507f1f77bcf86cd7994391ff', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      if (deleteUnknown.status !== 404) {
+        throw new Error(`Deleting an unknown request should be 404, got ${deleteUnknown.status}`);
+      }
+
+      // --- decline path: Carol requests Dave, Dave declines.
+      const sent2 = await makeRequest('/api/v1/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${carolToken}` },
+        body: JSON.stringify({ recipientId: dave }),
+      });
+      const friendship2 = ((await sent2.json()) as any).data.id;
+      const declined = await makeRequest(`/api/v1/friends/request/${friendship2}/decline`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${daveToken}` },
+      });
+      if (declined.status !== 200) throw new Error(`Decline failed with ${declined.status}`);
+      const daveAfter = await listFor(daveToken);
+      if (daveAfter.some((n) => n.type === 'friend_request' && n.actionData?.friendshipId === friendship2)) {
+        throw new Error('Declined friend request left its pending notification behind');
+      }
+
+      // --- withdraw path: Alice requests Carol, then withdraws.
+      const sent3 = await makeRequest('/api/v1/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aliceToken}` },
+        body: JSON.stringify({ recipientId: carol }),
+      });
+      if (sent3.status !== 201) throw new Error(`Second friend request failed with ${sent3.status}`);
+      const withdrawn = await makeRequest(`/api/v1/friends/request/withdraw/${carol}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      if (withdrawn.status !== 200) throw new Error(`Withdraw failed with ${withdrawn.status}`);
+      const carolAfter = await listFor(carolToken);
+      if (carolAfter.some((n) => n.type === 'friend_request' && n.actionData?.requesterId === alice)) {
+        throw new Error('Withdrawn friend request left its pending notification behind');
+      }
+      if ((await pendingRequests(carolToken)).length !== 0) throw new Error('Withdrawn request still appears as pending');
+
+      // --- block path: a pending request cannot survive a block.
+      const sent4 = await makeRequest('/api/v1/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${carolToken}` },
+        body: JSON.stringify({ recipientId: bob }),
+      });
+      if (sent4.status !== 201) throw new Error(`Block-path request failed with ${sent4.status}`);
+      const blocked = await makeRequest(`/api/v1/friends/${carol}/block`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bobToken}` },
+      });
+      if (blocked.status !== 200) throw new Error(`Block failed with ${blocked.status}`);
+      const bobAfterBlock = await listFor(bobToken);
+      if (bobAfterBlock.some((n) => n.type === 'friend_request' && n.actionData?.requesterId === carol)) {
+        throw new Error('Blocking left the pending friend request notification behind');
+      }
+    } finally {
+      await FriendshipModel.deleteMany({ $or: [{ requesterId: { $in: [alice, bob, carol, dave] } }, { recipientId: { $in: [alice, bob, carol, dave] } }] });
+      await NotificationModel.deleteMany({ userId: { $in: [alice, bob, carol, dave] } });
+      await UserModel.deleteMany({ _id: { $in: [alice, bob, carol, dave] } });
+    }
+  });
+
   await assertTest('Direct message retention follows the tier window (4 weeks / 6 weeks / 12 months)', async () => {
     const now = Date.now();
     const daysAgo = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000);

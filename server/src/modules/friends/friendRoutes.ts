@@ -13,6 +13,7 @@ import {
   refreshSuggestedPeople,
   searchUsers,
   removeFriend,
+  deleteFriendRequest,
 } from './friendController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody, validateObjectIdParam } from '../../middlewares/validation';
@@ -31,6 +32,8 @@ friendRouter.post('/request/:id/accept', validateObjectIdParam('id'), authMiddle
 friendRouter.post('/request/:id/decline', validateObjectIdParam('id'), authMiddleware, declineFriendRequest);
 friendRouter.delete('/request/withdraw/:id', validateObjectIdParam('id'), authMiddleware, withdrawFriendRequest);
 friendRouter.delete('/:id', validateObjectIdParam('id'), authMiddleware, removeFriend);
+// Clear a pending request by friendship id or by the other participant's user id.
+friendRouter.delete('/request/:id', validateObjectIdParam('id'), authMiddleware, deleteFriendRequest);
 friendRouter.post('/:id/block', validateObjectIdParam('id'), authMiddleware, blockUser);
 friendRouter.get('/suggested', optionalAuthMiddleware, listSuggestedPeople);
 friendRouter.post('/suggested/refresh', authMiddleware, refreshSuggestedPeople);
