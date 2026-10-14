@@ -55,14 +55,18 @@ data class NebulaUser(
     val presenceStatus: NebulaPresenceStatus = NebulaPresenceStatus.ONLINE,
     val isOnline: Boolean = presenceStatus != NebulaPresenceStatus.OFFLINE,
     val bannerIndex: Int = 0,
-    val interests: List<String> = listOf("Sci-Fi", "Lo-Fi", "Watch Parties", "Ambient"),
+    val interests: List<String> = emptyList(),
     val mutualFriendsCount: Int = 0,
     val currentRoomId: String? = null,
     val roomsHostedCount: Int = 0,
     val roomsJoinedCount: Int = 0,
     val timeInSyncHours: Double = 0.0,
+    val friendsCount: Int? = 0,
+    val tier: String = "free",
     val isFriend: Boolean = false,
-    val friendRequestPending: Boolean = false
+    val friendRequestPending: Boolean = false,
+    val friendRequestReceived: Boolean = false,
+    val friendRequestId: String? = null
 ) {
     companion object {
         val CurrentUser = NebulaUser(
@@ -71,8 +75,8 @@ data class NebulaUser(
             displayName = "Nebula User",
             email = "user@nebula.local",
             avatarLetter = "N",
-            bio = "Building ambient systems & shared spaces on Android.",
-            status = "Online",
+            bio = "",
+            status = "Dynamic",
             presenceStatus = NebulaPresenceStatus.ONLINE,
             bannerIndex = 0,
             roomsHostedCount = 0,

@@ -17,7 +17,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -42,26 +41,6 @@ fun PAAvatar(
     val theme = Theme.current
     val isPremium = profile.isPremium
 
-    val borderModifier = if (isPremium) {
-        Modifier.border(
-            width = 2.dp,
-            brush = Brush.sweepGradient(
-                listOf(
-                    theme.colors.primaryAccent,
-                    theme.colors.secondaryAccent,
-                    theme.colors.primaryAccent
-                )
-            ),
-            shape = CircleShape
-        )
-    } else {
-        Modifier.border(
-            width = 1.dp,
-            color = theme.colors.surfaceBorder,
-            shape = CircleShape
-        )
-    }
-
     Box(
         modifier = modifier
             .size(size)
@@ -79,7 +58,7 @@ fun PAAvatar(
         Box(
             modifier = Modifier
                 .size(size)
-                .then(borderModifier)
+                .border(1.dp, Color.Black, CircleShape)
                 .clip(CircleShape)
                 .background(theme.colors.surfaceElevated),
             contentAlignment = Alignment.Center

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
@@ -39,7 +40,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,7 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.NebulaFriendRequest
 import com.nebula.app.domain.model.NebulaUser
+import com.nebula.app.ui.components.NebulaAvatarImage
 import com.nebula.app.theme.Theme
+import kotlinx.coroutines.delay
 
 /**
  * NebulaFriendsScreen:
@@ -71,6 +76,9 @@ fun NebulaFriendsScreen(
     friends: List<NebulaUser>,
     friendRequests: List<NebulaFriendRequest>,
     suggestedPeople: List<NebulaUser>,
+    searchResults: List<NebulaUser> = emptyList(),
+    onSearchQuery: (String) -> Unit = {},
+    onRefreshSuggestions: () -> Unit = {},
     onMessageFriend: (NebulaUser) -> Unit,
     onInviteToRoom: (NebulaUser) -> Unit,
     onFriendClick: (NebulaUser) -> Unit,
@@ -82,13 +90,18 @@ fun NebulaFriendsScreen(
     val theme = Theme.current
     var searchQuery by remember { mutableStateOf("") }
 
+    LaunchedEffect(searchQuery) {
+        delay(250)
+        onSearchQuery(searchQuery)
+    }
+
     var showNewChatDialog by remember { mutableStateOf(false) }
 
-    val filteredFriends = remember(searchQuery, friends) {
-        if (searchQuery.isBlank()) friends
+    val filteredFriends = remember(searchQuery, friends, searchResults) {
+        if (searchQuery.length >= 2) searchResults
+        else if (searchQuery.isBlank()) friends
         else friends.filter {
-            it.displayName.contains(searchQuery, ignoreCase = true) ||
-            it.username.contains(searchQuery, ignoreCase = true)
+            it.displayName.contains(searchQuery, ignoreCase = true) || it.username.contains(searchQuery, ignoreCase = true)
         }
     }
 
@@ -581,12 +594,22 @@ fun NebulaFriendsScreen(
                             .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
                     ) {
                         filteredFriends.forEachIndexed { index, friend ->
-                            FriendListItem(
-                                user = friend,
-                                onMessage = { onMessageFriend(friend) },
-                                onInvite = { onInviteToRoom(friend) },
-                                onProfileClick = { onFriendClick(friend) }
-                            )
+                            if (searchQuery.length >= 2 && !friend.isFriend) {
+                                SearchPersonItem(
+                                    user = friend,
+                                    onProfileClick = { onFriendClick(friend) },
+                                    onAdd = { onAddSuggested(friend) },
+                                    onAccept = { friend.friendRequestId?.let(onAcceptRequest) },
+                                    onWithdraw = { friend.friendRequestId?.let(onDeclineRequest) }
+                                )
+                            } else {
+                                FriendListItem(
+                                    user = friend,
+                                    onMessage = { onMessageFriend(friend) },
+                                    onInvite = { onInviteToRoom(friend) },
+                                    onProfileClick = { onFriendClick(friend) }
+                                )
+                            }
                             if (index < filteredFriends.lastIndex) {
                                 Box(
                                     modifier = Modifier
@@ -605,15 +628,15 @@ fun NebulaFriendsScreen(
         if (suggestedPeople.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "SUGGESTED PEOPLE",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            fontSize = 11.5.sp
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            text = "SUGGESTED PEOPLE",
+                            style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, fontSize = 11.5.sp)
                         )
-                    )
+                        IconButton(onClick = onRefreshSuggestions, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh suggestions", tint = theme.colors.primaryAccent, modifier = Modifier.size(18.dp))
+                        }
+                    }
 
                     Column(
                         modifier = Modifier
@@ -716,6 +739,46 @@ fun NebulaFriendsScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchPersonItem(
+    user: NebulaUser,
+    onProfileClick: () -> Unit,
+    onAdd: () -> Unit,
+    onAccept: () -> Unit,
+    onWithdraw: () -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.weight(1f).clickable(onClick = onProfileClick),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            NebulaAvatarImage(avatarUrl = user.avatarUrl, fallbackLetter = user.avatarLetter, modifier = Modifier.size(42.dp))
+            Column {
+                Text(user.displayName, style = theme.typography.bodyMedium.copy(color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold))
+                Text("${user.username} · ${user.status}", style = theme.typography.caption.copy(color = theme.colors.textSecondary), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        val label = when {
+            user.friendRequestReceived -> "Accept"
+            user.friendRequestPending -> "Requested"
+            else -> "Add"
+        }
+        TextButton(onClick = when {
+            user.friendRequestReceived -> onAccept
+            user.friendRequestPending -> onWithdraw
+            else -> onAdd
+        }) {
+            Text(label, color = theme.colors.primaryAccent, fontWeight = FontWeight.SemiBold)
         }
     }
 }

@@ -18,7 +18,7 @@ async function claimActiveRoom(userId: string, roomId: string): Promise<boolean>
 
   const result = await UserModel.updateOne(
     { _id: userId, $or: [{ activeRoomId: null }, { activeRoomId: roomId }, { activeRoomId: { $exists: false } }] },
-    { $set: { activeRoomId: roomId, status: 'in_a_room' } }
+    { $set: { activeRoomId: roomId, presenceStatus: 'in_a_room' } }
   );
   return result.matchedCount > 0;
 }
@@ -26,7 +26,7 @@ async function claimActiveRoom(userId: string, roomId: string): Promise<boolean>
 async function releaseActiveRoom(userId: string, roomId: string): Promise<void> {
   await UserModel.updateOne(
     { _id: userId, activeRoomId: roomId },
-    { $set: { activeRoomId: null, status: 'online' } }
+    { $set: { activeRoomId: null, presenceStatus: 'online' } }
   );
 }
 

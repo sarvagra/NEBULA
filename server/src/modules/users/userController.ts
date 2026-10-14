@@ -11,7 +11,7 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const { displayName, username, bio, status, bannerIndex, bannerUrl, interests, avatarUrl, isFriendCountPublic, isOnboardingCompleted, dateOfBirth, gender } = req.body;
+    const { displayName, username, bio, status, customStatus, bannerIndex, bannerUrl, interests, avatarUrl, isFriendCountPublic, isOnboardingCompleted, dateOfBirth, gender } = req.body;
 
     // STRICT SERVER AUTHORIZATION: Only mutate user-permitted properties.
     // NEVER accept tier, role, isBanned, or stats from client!
@@ -67,12 +67,30 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       updateFields.gender = trimmed;
     }
     if (bio !== undefined) updateFields.bio = String(bio).slice(0, 500);
-    if (status) updateFields.status = status;
+    if (status) {
+      const tier = req.user.tier || 'free';
+      if (status === 'offline' && tier === 'free') {
+        res.status(403).json({ success: false, error: 'Offline status requires Premium.' });
+        return;
+      }
+      if (status === 'custom' && tier !== 'premium_plus') {
+        res.status(403).json({ success: false, error: 'Custom status requires Premium Plus.' });
+        return;
+      }
+      updateFields.status = status;
+    }
+    if (customStatus !== undefined) {
+      if ((req.user.tier || 'free') !== 'premium_plus') {
+        res.status(403).json({ success: false, error: 'Custom status requires Premium Plus.' });
+        return;
+      }
+      updateFields.customStatus = String(customStatus).trim().slice(0, 80);
+    }
     if (bannerIndex !== undefined) updateFields.bannerIndex = bannerIndex;
     if (bannerUrl !== undefined) {
       updateFields.bannerUrl = bannerUrl;
     }
-    if (interests) updateFields.interests = interests;
+    if (interests) updateFields.interests = interests.slice(0, 5);
     if (avatarUrl !== undefined) updateFields.avatarUrl = avatarUrl;
     if (isFriendCountPublic !== undefined) updateFields.isFriendCountPublic = isFriendCountPublic;
     if (isOnboardingCompleted !== undefined) {
@@ -142,6 +160,20 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
       return;
     }
 
+    if (req.user && req.user.id !== user._id.toString()) {
+      const blocked = await FriendshipModel.exists({
+        status: 'blocked',
+        $or: [
+          { requesterId: req.user.id, recipientId: user._id.toString() },
+          { requesterId: user._id.toString(), recipientId: req.user.id },
+        ],
+      });
+      if (blocked) {
+        res.status(404).json({ success: false, error: 'User not found' });
+        return;
+      }
+    }
+
     // Determine relationship context
     let relationship = 'none';
     if (req.user && req.user.id !== user._id.toString()) {
@@ -161,7 +193,21 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
     }
 
     // Return sanitized public DTO (zero sensitive data leaked)
-    res.json({ success: true, data: toPublicUserDTO(user, relationship) });
+    const profile = toPublicUserDTO(user, relationship);
+    if (req.user && req.user.id !== user._id.toString() && relationship === 'request_received') {
+      const incoming = await FriendshipModel.findOne({ requesterId: user._id.toString(), recipientId: req.user.id, status: 'pending' }).select('_id');
+      profile.friendRequestId = incoming?._id.toString();
+    }
+    if (user.isFriendCountPublic) {
+      profile.stats.friendsCount = await FriendshipModel.countDocuments({
+        status: 'accepted',
+        $or: [
+          { requesterId: user._id.toString() },
+          { recipientId: user._id.toString() },
+        ],
+      });
+    }
+    res.json({ success: true, data: profile });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve public profile' });
   }

@@ -148,6 +148,9 @@ fun HomeScreen(
                         },
                         onAddFriend = { friend -> viewModel.onAddFriend(friend) },
                         onCancelRequest = { friend -> viewModel.onCancelFriendRequest(friend) },
+                        onRemoveFriend = { friend -> viewModel.onRemoveFriend(friend) },
+                        onAcceptRequest = { friend -> viewModel.onAcceptProfileRequest(friend) },
+                        onBlockUser = { friend -> viewModel.onBlockUser(friend) },
                         onInviteToRoom = { friend ->
                             viewModel.onInviteFriendToActiveRoom(friend)
                         },
@@ -160,8 +163,8 @@ fun HomeScreen(
                 is FullScreenDestination.EditProfile -> {
                     NebulaEditProfileScreen(
                         userProfile = uiState.userProfile,
-                        onSave = { dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl ->
-                            viewModel.onSaveProfile(dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl)
+                        onSave = { dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus ->
+                            viewModel.onSaveProfile(dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus)
                         },
                         onBack = { viewModel.onNavigateBack() },
                         onOpenMembership = { viewModel.onOpenMembership() }
@@ -235,12 +238,7 @@ fun HomeScreen(
                 },
                 onKickParticipant = { viewModel.onKickRoomParticipant(it) },
                 onAddFriend = { viewModel.onAddFriend(it) },
-                onMessageFriend = { friend ->
-                    val conv = uiState.socialConversations.firstOrNull { it.partnerUser?.id == friend.id }
-                    if (conv != null) {
-                        viewModel.onSelectSocialConversation(conv.id)
-                    }
-                },
+                onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
                 onLeaveRoom = { newHostId -> viewModel.onLeaveRoom(newHostId) },
                 onRefreshRoom = { viewModel.refreshActiveRoom() },
                 onHostPlaybackSample = { positionMs, playing -> viewModel.onHostPlaybackSample(positionMs, playing) },
@@ -424,14 +422,10 @@ fun HomeScreen(
                                 friends = uiState.friends,
                                 friendRequests = uiState.friendRequests,
                                 suggestedPeople = uiState.suggestedPeople,
-                                onMessageFriend = { friend ->
-                                    val conv = uiState.socialConversations.firstOrNull { it.partnerUser?.id == friend.id }
-                                    if (conv != null) {
-                                        viewModel.onSelectSocialConversation(conv.id)
-                                    } else {
-                                        viewModel.onJoinRoom("room_cinema")
-                                    }
-                                },
+                                searchResults = uiState.searchResults,
+                                onSearchQuery = { viewModel.onSearchPeople(it) },
+                                onRefreshSuggestions = { viewModel.onRefreshSuggestions() },
+                                onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
                                 onInviteToRoom = { friend ->
                                     viewModel.onInviteFriendToActiveRoom(friend)
                                 },
@@ -463,6 +457,9 @@ fun HomeScreen(
                                     status = uiState.userProfile.status,
                                     bannerIndex = uiState.userProfile.bannerIndex,
                                     interests = uiState.userProfile.interests,
+                                    bannerUrl = uiState.userProfile.bannerUrl,
+                                    friendsCount = uiState.friends.size,
+                                    tier = uiState.userProfile.subscriptionTier.name.lowercase(),
                                     roomsHostedCount = uiState.userProfile.roomsHostedCount,
                                     roomsJoinedCount = uiState.userProfile.roomsJoinedCount,
                                     timeInSyncHours = uiState.userProfile.timeInSyncHours
@@ -480,7 +477,17 @@ fun HomeScreen(
                                             id = uiState.userProfile.id,
                                             username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
                                             displayName = uiState.userProfile.displayName,
-                                            email = uiState.userProfile.email
+                                            email = uiState.userProfile.email,
+                                            avatarLetter = uiState.userProfile.avatarFallbackLetter,
+                                            avatarUrl = uiState.userProfile.avatarUri,
+                                            bannerUrl = uiState.userProfile.bannerUrl,
+                                            bannerIndex = uiState.userProfile.bannerIndex,
+                                            bio = uiState.userProfile.bio,
+                                            status = uiState.userProfile.status,
+                                            interests = uiState.userProfile.interests,
+                                            friendsCount = uiState.friends.size,
+                                            roomsHostedCount = uiState.userProfile.roomsHostedCount,
+                                            roomsJoinedCount = uiState.userProfile.roomsJoinedCount
                                         )
                                     )
                                 },

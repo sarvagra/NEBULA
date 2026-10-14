@@ -380,7 +380,8 @@ object NebulaApiClient {
         displayName: String,
         username: String? = null,
         bio: String = "",
-        status: String = "Online",
+        status: String = "dynamic",
+        customStatus: String? = null,
         bannerIndex: Int = 0,
         interests: List<String> = emptyList(),
         avatarUrl: String? = null,
@@ -397,7 +398,13 @@ object NebulaApiClient {
                 put("username", clean)
             }
             put("bio", bio)
-            put("status", status)
+            put("status", when (status.trim().lowercase()) {
+                "online", "dynamic" -> "dynamic"
+                "offline" -> "offline"
+                "custom" -> "custom"
+                else -> "dynamic"
+            })
+            customStatus?.let { put("customStatus", it) }
             put("bannerIndex", bannerIndex)
             put("interests", JSONArray(interests))
             if (avatarUrl != null) {
@@ -491,6 +498,34 @@ object NebulaApiClient {
         }
     }
 
+    suspend fun refreshSuggestedPeople(excludeIds: List<String> = emptyList()): ApiResponse<JSONArray> {
+        val body = JSONObject().put("excludeIds", JSONArray(excludeIds))
+        val res = request("/friends/suggested/refresh", "POST", body)
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun searchUsers(query: String): ApiResponse<JSONArray> {
+        val encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val res = request("/friends/search?q=$encoded", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun blockUser(userId: String): ApiResponse<JSONObject> = request("/friends/$userId/block", "POST")
+    suspend fun unblockUser(userId: String): ApiResponse<JSONObject> = request("/friends/$userId/block", "DELETE")
+    suspend fun getBlockedUsers(): ApiResponse<JSONArray> {
+        val res = request("/friends/blocked", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
     suspend fun sendFriendRequest(userId: String): ApiResponse<JSONObject> =
         request("/friends/request", "POST", JSONObject().put("recipientId", userId))
 
@@ -502,6 +537,7 @@ object NebulaApiClient {
 
     suspend fun withdrawFriendRequest(userId: String): ApiResponse<JSONObject> =
         request("/friends/request/withdraw/$userId", "DELETE")
+    suspend fun removeFriend(userId: String): ApiResponse<JSONObject> = request("/friends/$userId", "DELETE")
 
     suspend fun sendDirectMessage(conversationId: String, text: String): ApiResponse<JSONObject> =
         request(

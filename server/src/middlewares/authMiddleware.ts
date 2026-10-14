@@ -73,7 +73,8 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
                 avatarLetter: (firebaseVerified.name || 'N').charAt(0).toUpperCase(),
                 avatarUrl: firebaseVerified.picture,
                 tier: 'free',
-                status: 'online',
+                status: 'dynamic',
+                presenceStatus: 'online',
               });
             }
           }

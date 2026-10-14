@@ -28,9 +28,15 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,6 +78,9 @@ fun NebulaPublicProfileScreen(
     onMessage: (NebulaUser) -> Unit,
     onAddFriend: (NebulaUser) -> Unit = {},
     onCancelRequest: (NebulaUser) -> Unit = {},
+    onRemoveFriend: (NebulaUser) -> Unit = {},
+    onAcceptRequest: (NebulaUser) -> Unit = {},
+    onBlockUser: (NebulaUser) -> Unit = {},
     onInviteToRoom: (NebulaUser) -> Unit,
     onOpenEditProfile: () -> Unit,
     modifier: Modifier = Modifier
@@ -79,6 +88,9 @@ fun NebulaPublicProfileScreen(
     val theme = Theme.current
     var isFriendState by remember(user.id) { mutableStateOf(user.isFriend) }
     var isRequestPending by remember(user.id) { mutableStateOf(user.friendRequestPending) }
+    var isRequestReceived by remember(user.id) { mutableStateOf(user.friendRequestReceived) }
+    var showProfileMenu by remember { mutableStateOf(false) }
+    var showBlockConfirmation by remember { mutableStateOf(false) }
 
     val bannerGradient = remember(user.bannerIndex) {
         val safeIndex = (user.bannerIndex).coerceIn(0, BANNER_PALETTES.lastIndex)
@@ -120,16 +132,21 @@ fun NebulaPublicProfileScreen(
                 )
             )
 
-            IconButton(
-                onClick = { /* Share profile link */ },
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Share Profile",
-                    tint = theme.colors.textSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box {
+                IconButton(onClick = { showProfileMenu = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Settings, contentDescription = "Profile settings", tint = theme.colors.textSecondary, modifier = Modifier.size(20.dp))
+                }
+                DropdownMenu(expanded = showProfileMenu, onDismissRequest = { showProfileMenu = false }) {
+                    if (isCurrentUser) DropdownMenuItem(
+                        text = { Text("Edit profile") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = { showProfileMenu = false; onOpenEditProfile() }
+                    ) else DropdownMenuItem(
+                        text = { Text("Block user") },
+                        leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
+                        onClick = { showProfileMenu = false; showBlockConfirmation = true }
+                    )
+                }
             }
         }
 
@@ -256,13 +273,17 @@ fun NebulaPublicProfileScreen(
                                     fontSize = 14.sp
                                 )
                             )
+                            Text(
+                                text = "Friends ${user.friendsCount?.toString() ?: "Private"} · Joined ${user.roomsJoinedCount} · Hosted ${user.roomsHostedCount}",
+                                style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp)
+                            )
                         }
 
                         // Presence Badge Pill (supports custom text up to 8 chars for premium, defaults like online/offline)
                         val rawStatus = user.status.trim()
                         val isUserOffline = rawStatus.equals("offline", ignoreCase = true) || user.presenceStatus == NebulaPresenceStatus.OFFLINE
                         val displayStatus = when {
-                            rawStatus.isNotBlank() -> rawStatus.take(8)
+                            rawStatus.isNotBlank() -> rawStatus.take(80)
                             else -> user.presenceStatus.label
                         }
                         val statusColor = when {
@@ -291,13 +312,9 @@ fun NebulaPublicProfileScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(
+                    if (user.bio.isNotBlank()) Text(
                         text = user.bio,
-                        style = theme.typography.bodyMedium.copy(
-                            color = theme.colors.textSecondary,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp
-                        )
+                        style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary, fontSize = 14.sp, lineHeight = 20.sp)
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -346,7 +363,14 @@ fun NebulaPublicProfileScreen(
                                     .background(if (isFriendState) theme.colors.surfaceElevated else theme.colors.primaryAccent)
                                     .border(1.dp, if (isFriendState) theme.colors.surfaceBorder else Color.Transparent, RoundedCornerShape(12.dp))
                                     .clickable {
-                                        if (!isFriendState && !isRequestPending) {
+                                        if (isFriendState) {
+                                            isFriendState = false
+                                            onRemoveFriend(user)
+                                        } else if (isRequestReceived) {
+                                            isRequestReceived = false
+                                            isFriendState = true
+                                            onAcceptRequest(user)
+                                        } else if (!isRequestPending) {
                                             isRequestPending = true
                                             onAddFriend(user)
                                         } else if (isRequestPending) {
@@ -368,7 +392,8 @@ fun NebulaPublicProfileScreen(
                                     )
                                     Text(
                                         text = when {
-                                            isFriendState -> "Friends"
+                                            isFriendState -> "Remove Friend"
+                                            isRequestReceived -> "Accept Request"
                                             isRequestPending -> "Withdraw Request"
                                             else -> "Add Friend"
                                         },
@@ -380,6 +405,7 @@ fun NebulaPublicProfileScreen(
                                 }
                             }
 
+                            if (isFriendState) {
                             // Message button
                             Box(
                                 modifier = Modifier
@@ -432,9 +458,11 @@ fun NebulaPublicProfileScreen(
                     }
                 }
             }
+            }
 
             // INTERESTS & ROOM CATEGORY BADGES
-            item {
+            if (user.interests.isNotEmpty()) {
+                item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -454,7 +482,7 @@ fun NebulaPublicProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        user.interests.forEach { interest ->
+                        user.interests.take(5).forEach { interest ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
@@ -474,6 +502,7 @@ fun NebulaPublicProfileScreen(
                         }
                     }
                 }
+            }
             }
 
             // PUBLIC STATS (Derived from user activity)
@@ -498,7 +527,7 @@ fun NebulaPublicProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Rooms Hosted
+                        // Friends
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -509,14 +538,14 @@ fun NebulaPublicProfileScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "Hosted",
+                                    text = "Friends",
                                     style = theme.typography.caption.copy(
                                         color = theme.colors.textSecondary,
                                         fontSize = 11.sp
                                     )
                                 )
                                 Text(
-                                    text = "${user.roomsHostedCount}",
+                                    text = user.friendsCount?.toString() ?: "—",
                                     style = theme.typography.titleLarge.copy(
                                         color = theme.colors.textPrimary,
                                         fontWeight = FontWeight.Bold,
@@ -524,7 +553,7 @@ fun NebulaPublicProfileScreen(
                                     )
                                 )
                                 Text(
-                                    text = "Rooms",
+                                    text = if (user.friendsCount == null) "Private" else "People",
                                     style = theme.typography.caption.copy(
                                         color = theme.colors.textTertiary,
                                         fontSize = 10.sp
@@ -624,7 +653,7 @@ fun NebulaPublicProfileScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val hasActivity = user.roomsHostedCount > 0
+                    val hasActivity = false
                     if (!hasActivity) {
                         Box(
                             modifier = Modifier
@@ -636,7 +665,7 @@ fun NebulaPublicProfileScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "No watch sessions or top content recorded yet",
+                                text = "Top content will appear here when viewing history is available.",
                                 style = theme.typography.caption.copy(
                                     color = theme.colors.textSecondary,
                                     fontSize = 12.sp
@@ -685,6 +714,7 @@ fun NebulaPublicProfileScreen(
                                                 )
                                             )
                                         }
+                            }
                                     }
                                 }
 
@@ -735,5 +765,16 @@ fun NebulaPublicProfileScreen(
                 }
             }
         }
-    }
+
+    if (showBlockConfirmation) AlertDialog(
+        onDismissRequest = { showBlockConfirmation = false },
+        title = { Text("Block ${user.displayName}?") },
+        text = { Text("They will no longer be able to find or contact you. You can unblock them from your blocked users list in settings.") },
+        confirmButton = {
+            TextButton(onClick = { showBlockConfirmation = false; onBlockUser(user) }) { Text("Block") }
+        },
+        dismissButton = {
+            TextButton(onClick = { showBlockConfirmation = false }) { Text("Cancel") }
+        }
+    )
 }

@@ -9,11 +9,14 @@ export interface PublicUserDTO {
   avatarLetter: string;
   avatarUrl?: string;
   bannerIndex: number;
+  bannerUrl?: string;
   tier: string;
   status: string;
   bio: string;
   interests: string[];
+  customStatus?: string;
   relationship?: string;
+  friendRequestId?: string;
   stats: {
     roomsJoinedCount: number;
     roomsHostedCount: number;
@@ -33,6 +36,8 @@ export interface PrivateUserDTO {
   isTrial?: boolean;
   trialExpiresAt?: Date;
   status: string;
+  customStatus?: string;
+  presenceStatus?: string;
   bio: string;
   interests: string[];
   isFriendCountPublic: boolean;
@@ -57,10 +62,12 @@ export function toPublicUserDTO(user: IUser, relationship: string = 'none'): Pub
     avatarLetter: user.avatarLetter,
     avatarUrl: user.avatarUrl,
     bannerIndex: user.bannerIndex,
+    bannerUrl: user.bannerUrl,
     tier: user.tier,
-    status: user.status,
+    status: user.status === 'custom' ? (user.customStatus || 'Custom') : user.status === 'offline' || user.presenceStatus === 'offline' ? 'Offline' : user.presenceStatus === 'in_a_room' ? 'In a room' : 'Online',
+    customStatus: user.customStatus,
     bio: user.bio,
-    interests: user.interests,
+    interests: (user.interests || []).slice(0, 5),
     relationship,
     stats: {
       roomsJoinedCount: user.stats?.roomsJoinedCount || 0,
@@ -82,7 +89,9 @@ export function toPrivateUserDTO(user: IUser): PrivateUserDTO {
     tier: user.tier,
     isTrial: user.isTrial || false,
     trialExpiresAt: user.trialExpiresAt,
-    status: user.status,
+    status: ['dynamic', 'offline', 'custom'].includes(user.status) ? user.status : 'dynamic',
+    customStatus: user.customStatus,
+    presenceStatus: user.presenceStatus || 'offline',
     bio: user.bio,
     interests: user.interests,
     isFriendCountPublic: user.isFriendCountPublic,

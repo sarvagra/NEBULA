@@ -51,8 +51,9 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
         avatarUrl: verified.picture,
         tier: isSpecialAdmin ? 'premium_plus' : 'free',
         role: isSpecialAdmin ? 'admin' : 'user',
-        status: 'online',
-        bio: 'Building ambient systems & shared spaces on Android.',
+        status: 'dynamic',
+        presenceStatus: 'online',
+        bio: '',
         isOnboardingCompleted: isSpecialAdmin,
       });
     } else {
@@ -172,8 +173,9 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
         avatarLetter: isSpecialAdmin ? 'S' : 'N',
         tier: isSpecialAdmin ? 'premium_plus' : 'free',
         role: isSpecialAdmin ? 'admin' : 'user',
-        status: 'online',
-        bio: 'Building ambient systems & shared spaces on Android.',
+        status: 'dynamic',
+        presenceStatus: 'online',
+        bio: '',
         isOnboardingCompleted: isSpecialAdmin,
       });
     } else {
@@ -182,10 +184,9 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
         user.tier = 'premium_plus';
         user.isOnboardingCompleted = true;
       }
-      // If user has completed onboarding or has a display name, they are NEVER a new user!
-      if (user.isOnboardingCompleted || (user.displayName && user.username)) {
+      // Completion is explicit; a generated internal handle is not a chosen identity.
+      if (user.isOnboardingCompleted) {
         isNewUser = false;
-        user.isOnboardingCompleted = true;
       } else {
         isNewUser = true;
       }
@@ -287,8 +288,9 @@ export async function devLogin(req: Request, res: Response): Promise<void> {
         username: requestedUsername,
         avatarLetter: (displayName || requestedUsername).charAt(0).toUpperCase() || 'N',
         tier: 'free',
-        status: 'online',
-        bio: 'Building ambient systems & shared spaces on Android.',
+        status: 'dynamic',
+        presenceStatus: 'online',
+        bio: '',
         isOnboardingCompleted: true,
       });
     } else {

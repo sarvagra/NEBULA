@@ -82,6 +82,7 @@ class SessionManager(context: Context) {
             put("username", profile.username ?: "")
             put("bio", profile.bio)
             put("status", profile.status)
+            put("customStatus", profile.customStatus)
             put("avatarUri", profile.avatarUri ?: "")
             put("avatarFallbackLetter", profile.avatarFallbackLetter)
             put("bannerIndex", profile.bannerIndex)
@@ -127,8 +128,6 @@ class SessionManager(context: Context) {
                 for (i in 0 until interestsArray.length()) {
                     interestsList.add(interestsArray.getString(i))
                 }
-            } else {
-                interestsList.addAll(listOf("🎬 Sci-Fi", "🎧 Lo-Fi", "🍿 Watch Parties", "🌌 Ambient"))
             }
 
             UserProfile(
@@ -137,8 +136,9 @@ class SessionManager(context: Context) {
                 email = json.optString("email", ""),
                 phoneNumber = json.optString("phoneNumber", ""),
                 username = json.optString("username", "").ifEmpty { null },
-                bio = json.optString("bio", "Building ambient systems & shared spaces on Android."),
-                status = json.optString("status", "Online"),
+                bio = json.optString("bio", ""),
+                status = json.optString("status", "dynamic").lowercase().let { if (it in setOf("dynamic", "offline", "custom")) it else "dynamic" },
+                customStatus = json.optString("customStatus", ""),
                 avatarUri = json.optString("avatarUri", "").ifEmpty { null },
                 avatarFallbackLetter = json.optString("avatarFallbackLetter", "N"),
                 bannerIndex = json.optInt("bannerIndex", 0),

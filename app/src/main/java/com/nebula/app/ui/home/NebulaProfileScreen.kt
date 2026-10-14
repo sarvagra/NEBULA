@@ -238,31 +238,14 @@ fun NebulaProfileScreen(
                             modifier = Modifier.size(72.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isPremiumUser) {
-                                // Multi-stop radiant aura ring
-                                val auraGradient = Brush.sweepGradient(
-                                    listOf(
-                                        Color(0xFF8B5CF6),
-                                        Color(0xFFEC4899),
-                                        Color(0xFF3B82F6),
-                                        Color(0xFF8B5CF6)
-                                    )
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .clip(CircleShape)
-                                        .background(auraGradient)
-                                )
-                            }
                             Box(
                                 modifier = Modifier
-                                    .size(if (isPremiumUser) 66.dp else 72.dp)
+                                    .size(72.dp)
                                     .clip(CircleShape)
                                     .background(theme.colors.surfaceElevated)
                                     .border(
-                                        width = if (isPremiumUser) 0.dp else 2.5.dp,
-                                        color = theme.colors.primaryAccent,
+                                        width = 1.dp,
+                                        color = Color.Black,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -409,7 +392,7 @@ fun NebulaProfileScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Interest tags with FlowRow for responsive wrapping
-                    val displayInterests = user.interests.ifEmpty { listOf("🎬 Sci-Fi", "🎧 Lo-Fi", "🍿 Watch Parties", "🌌 Ambient") }
+                    val displayInterests = user.interests.take(5)
                     androidx.compose.foundation.layout.FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -560,9 +543,8 @@ fun NebulaProfileScreen(
                                 .height(10.dp)
                                 .clip(RoundedCornerShape(5.dp))
                         ) {
-                            Box(modifier = Modifier.weight(0.64f).fillMaxSize().background(theme.colors.primaryAccent))
-                            Box(modifier = Modifier.weight(0.24f).fillMaxSize().background(Color(0xFF38BDF8)))
-                            Box(modifier = Modifier.weight(0.12f).fillMaxSize().background(Color(0xFFA855F7)))
+                            Box(modifier = Modifier.weight(user.roomsJoinedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(theme.colors.primaryAccent))
+                            Box(modifier = Modifier.weight(user.roomsHostedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(Color(0xFF38BDF8)))
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -570,15 +552,11 @@ fun NebulaProfileScreen(
                         ) {
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(theme.colors.primaryAccent))
-                                Text("Cinema 64%", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
+                                Text("Joined ${user.roomsJoinedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
-                                Text("Lo-Fi 24%", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFA855F7)))
-                                Text("Voice 12%", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
+                                Text("Hosted ${user.roomsHostedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
                             }
                         }
                     }
@@ -629,15 +607,15 @@ fun NebulaProfileScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Polls", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.sp))
+                                Text("Rooms", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.sp))
                                 PrivacyToggleBadge(
-                                    isPublic = isPollsVotedPublic,
-                                    onToggle = { isPollsVotedPublic = !isPollsVotedPublic },
+                                    isPublic = isActivityBreakdownPublic,
+                                    onToggle = { isActivityBreakdownPublic = !isActivityBreakdownPublic },
                                     compact = true
                                 )
                             }
-                            Text("0", style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary))
-                            Text("Voted", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 9.sp))
+                            Text("${user.roomsJoinedCount}", style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary))
+                            Text("Joined", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 9.sp))
                         }
                     }
 
@@ -655,15 +633,15 @@ fun NebulaProfileScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Reactions", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.sp))
+                                Text("Sync", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.sp))
                                 PrivacyToggleBadge(
-                                    isPublic = isReactionsPublic,
-                                    onToggle = { isReactionsPublic = !isReactionsPublic },
+                                    isPublic = isActivityBreakdownPublic,
+                                    onToggle = { isActivityBreakdownPublic = !isActivityBreakdownPublic },
                                     compact = true
                                 )
                             }
-                            Text("0", style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary))
-                            Text("Sent", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 9.sp))
+                            Text(String.format("%.1f", user.timeInSyncHours), style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary))
+                            Text("Hours", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 9.sp))
                         }
                     }
                 }
@@ -701,49 +679,7 @@ fun NebulaProfileScreen(
                     )
                 }
 
-                if (user.roomsHostedCount > 0) {
-                    listOf(
-                        Triple("01", "Ambient Space Odyssey", "Recent watchparty"),
-                        Triple("02", "Cyberpunk: Edgerunners", "Recent session")
-                    ).forEach { (rank, title, stat) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(theme.colors.surfaceElevated)
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                text = rank,
-                                style = theme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Black,
-                                    color = theme.colors.primaryAccent,
-                                    fontSize = 16.sp
-                                )
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = title,
-                                    style = theme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = theme.colors.textPrimary,
-                                        fontSize = 13.5.sp
-                                    )
-                                )
-                                Text(
-                                    text = stat,
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 11.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    Box(
+                Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
@@ -752,13 +688,12 @@ fun NebulaProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No shared watchparty history yet • Host a room to highlight your favorite media",
+                            text = "No top content yet. Your watched videos will appear here when available.",
                             style = theme.typography.bodySmall.copy(
                                 color = theme.colors.textSecondary,
                                 fontSize = 12.sp
                             )
                         )
-                    }
                 }
             }
         }

@@ -27,6 +27,7 @@ data class HomeUiState(
     val friends: List<NebulaUser> = emptyList(),
     val friendRequests: List<NebulaFriendRequest> = emptyList(),
     val suggestedPeople: List<NebulaUser> = emptyList(),
+    val searchResults: List<NebulaUser> = emptyList(),
     val activeFriendProfile: NebulaUser? = null,
 
     // Chats

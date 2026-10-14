@@ -8,6 +8,7 @@ import com.nebula.app.domain.model.ChatAttachment
 import com.nebula.app.domain.model.Conversation
 import com.nebula.app.domain.model.NebulaTab
 import com.nebula.app.domain.model.NebulaUser
+import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.domain.model.RoomActivityType
 import com.nebula.app.domain.model.RoomPrivacy
 import com.nebula.app.domain.model.SharedMediaItem
@@ -129,7 +130,8 @@ class HomeViewModel(
                                     username = user.optString("username", profile.username),
                                     email = user.optString("email", profile.email),
                                     bio = user.optString("bio", profile.bio),
-                                    status = user.optString("status", profile.status),
+                                    status = user.optString("status", profile.status).lowercase().let { if (it in setOf("dynamic", "offline", "custom")) it else "dynamic" },
+                                    customStatus = user.optString("customStatus", profile.customStatus),
                                     avatarUri = user.optString("avatarUrl").ifBlank { null },
                                     bannerUrl = user.optString("bannerUrl").ifBlank { null },
                                     bannerIndex = user.optInt("bannerIndex", profile.bannerIndex),
@@ -252,6 +254,11 @@ class HomeViewModel(
             }
         }
         viewModelScope.launch {
+            socialRepository.searchResults.collect { results ->
+                _uiState.value = _uiState.value.copy(searchResults = results)
+            }
+        }
+        viewModelScope.launch {
             socialRepository.conversations.collect { sConvs ->
                 _uiState.value = _uiState.value.copy(socialConversations = sConvs)
             }
@@ -317,7 +324,8 @@ class HomeViewModel(
                                 displayName = userObj.optString("displayName", savedProfile.displayName),
                                 username = "@" + userObj.optString("username", savedProfile.username?.replace("^@".toRegex(), "") ?: "").replace("^@".toRegex(), ""),
                                 bio = userObj.optString("bio", savedProfile.bio),
-                                status = userObj.optString("status", savedProfile.status),
+                                status = userObj.optString("status", savedProfile.status).lowercase().let { if (it in setOf("dynamic", "offline", "custom")) it else "dynamic" },
+                                customStatus = userObj.optString("customStatus", savedProfile.customStatus),
                                 bannerIndex = userObj.optInt("bannerIndex", savedProfile.bannerIndex),
                                 isFriendCountPublic = userObj.optBoolean("isFriendCountPublic", savedProfile.isFriendCountPublic),
                                 avatarUri = userObj.optString("avatarUrl", savedProfile.avatarUri ?: "").ifEmpty { savedProfile.avatarUri },
@@ -573,6 +581,28 @@ class HomeViewModel(
         }
     }
 
+    fun onMessageFriend(user: NebulaUser) {
+        val conversation = _uiState.value.socialConversations.firstOrNull { it.partnerUser?.id == user.id }
+            ?: NebulaConversation(
+                id = user.id,
+                title = user.displayName,
+                isGroup = false,
+                partnerUser = user,
+                participants = listOf(user),
+                lastMessageText = "",
+                lastMessageTime = ""
+            )
+        viewModelScope.launch {
+            if (_uiState.value.socialConversations.any { it.id == conversation.id }) {
+                socialRepository.selectConversation(conversation.id)
+            }
+            _uiState.value = _uiState.value.copy(
+                activeRoom = null,
+                activeSocialConversation = socialRepository.activeConversation.value ?: conversation
+            )
+        }
+    }
+
     fun onCloseSocialConversation() {
         viewModelScope.launch {
             socialRepository.closeConversation()
@@ -623,11 +653,42 @@ class HomeViewModel(
     fun onOpenFriendProfile(user: NebulaUser) {
         _uiState.value = _uiState.value.copy(activeFriendProfile = user)
         navigateTo(FullScreenDestination.PublicProfile(user))
+        if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
+            socialRepository.loadPublicProfile(user.username)?.let { loaded ->
+                _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
+            }
+        }
+    }
+
+    fun onSearchPeople(query: String) {
+        viewModelScope.launch { socialRepository.searchPeople(query) }
+    }
+
+    fun onRefreshSuggestions() {
+        viewModelScope.launch {
+            if (socialRepository.refreshSuggestions()) showToast("Suggestions refreshed")
+            else showToast("Daily refresh limit reached or suggestions are unavailable")
+        }
+    }
+
+    fun onBlockUser(user: NebulaUser) {
+        viewModelScope.launch {
+            if (socialRepository.blockUser(user.id)) {
+                refreshAll()
+                _uiState.value = _uiState.value.copy(activeFriendProfile = null, fullScreenDestination = null)
+                showToast("User blocked")
+            } else showToast("User could not be blocked. Try again.")
+        }
     }
 
     fun onOpenPublicProfile(user: NebulaUser) {
         _uiState.value = _uiState.value.copy(activeFriendProfile = user)
         navigateTo(FullScreenDestination.PublicProfile(user))
+        if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
+            socialRepository.loadPublicProfile(user.username)?.let { loaded ->
+                _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
+            }
+        }
     }
 
     fun onOpenEditProfile() {
@@ -676,7 +737,8 @@ class HomeViewModel(
         interests: List<String>,
         isFriendCountPublic: Boolean = true,
         avatarUrl: String? = null,
-        bannerUrl: String? = null
+        bannerUrl: String? = null,
+        customStatus: String = _uiState.value.userProfile.customStatus
     ) {
         viewModelScope.launch {
             val rawClean = username.trim().replace("^@".toRegex(), "").lowercase()
@@ -695,6 +757,7 @@ class HomeViewModel(
                 username = cleanUsername,
                 bio = bio,
                 status = status,
+                customStatus = customStatus,
                 bannerIndex = bannerIndex,
                 interests = interests,
                 avatarUrl = avatarUrl,
@@ -710,6 +773,7 @@ class HomeViewModel(
                         username = "@$cleanUsername",
                         bio = bio,
                         status = status,
+                        customStatus = customStatus,
                         bannerIndex = bannerIndex,
                         bannerUrl = bannerUrl ?: _uiState.value.userProfile.bannerUrl,
                         interests = interests,
@@ -783,6 +847,18 @@ class HomeViewModel(
                 showToast("Friend request could not be cancelled. Try again.")
             } else refreshAll()
         }
+    }
+
+    fun onRemoveFriend(user: NebulaUser) {
+        viewModelScope.launch {
+            if (socialRepository.removeFriend(user.id)) showToast("${user.displayName} removed from friends")
+            else showToast("Friend could not be removed. Try again.")
+        }
+    }
+
+    fun onAcceptProfileRequest(user: NebulaUser) {
+        val requestId = user.friendRequestId ?: return showToast("Request is no longer available")
+        onAcceptFriendRequest(requestId)
     }
 
     // --- AI SETTINGS ---

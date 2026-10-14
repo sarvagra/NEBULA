@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -42,6 +43,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import com.nebula.app.data.backend.NebulaApiClient
 import com.nebula.app.data.local.SessionManager
@@ -82,6 +86,10 @@ fun NebulaSettingsScreen(
     val theme = Theme.current
     val context = LocalContext.current
     val sessionManager = remember { SessionManager(context) }
+    val scope = rememberCoroutineScope()
+    var showBlockedUsers by remember { mutableStateOf(false) }
+    var blockedUsers by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var isLoadingBlocked by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -179,6 +187,29 @@ fun NebulaSettingsScreen(
 
                     SettingsDivider()
 
+                    SettingNavRow(
+                        icon = Icons.Default.Block,
+                        title = "Blocked users",
+                        onClick = {
+                            showBlockedUsers = true
+                            isLoadingBlocked = true
+                            scope.launch {
+                                val response = NebulaApiClient.getBlockedUsers()
+                                if (response is NebulaApiClient.ApiResponse.Success) {
+                                    blockedUsers = buildList {
+                                        for (index in 0 until response.data.length()) {
+                                            val user = response.data.optJSONObject(index) ?: continue
+                                            add(user.optString("id") to "${user.optString("displayName", "User")} (@${user.optString("username", "")})")
+                                        }
+                                    }
+                                }
+                                isLoadingBlocked = false
+                            }
+                        }
+                    )
+
+                    SettingsDivider()
+
                     // 6. About
                     SettingNavRow(
                         icon = Icons.Default.Info,
@@ -198,6 +229,30 @@ fun NebulaSettingsScreen(
             }
         }
     }
+
+    if (showBlockedUsers) AlertDialog(
+        onDismissRequest = { showBlockedUsers = false },
+        title = { Text("Blocked users") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isLoadingBlocked) Text("Loading…")
+                else if (blockedUsers.isEmpty()) Text("You have not blocked anyone.")
+                else blockedUsers.forEach { (id, label) ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(label, modifier = Modifier.weight(1f), maxLines = 1)
+                        TextButton(onClick = {
+                            scope.launch {
+                                if (NebulaApiClient.unblockUser(id) is NebulaApiClient.ApiResponse.Success) {
+                                    blockedUsers = blockedUsers.filterNot { it.first == id }
+                                }
+                            }
+                        }) { Text("Unblock") }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showBlockedUsers = false }) { Text("Done") } }
+    )
 }
 
 @Composable

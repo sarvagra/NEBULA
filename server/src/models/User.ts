@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type SubscriptionTier = 'free' | 'premium' | 'premium_plus';
-export type UserPresenceStatus = 'online' | 'in_a_room' | 'private_chat' | 'offline';
+export type UserPresenceStatus = 'dynamic' | 'offline' | 'custom';
 
 export interface IUser extends Document {
   email?: string;
@@ -22,7 +22,11 @@ export interface IUser extends Document {
   isTrial?: boolean;
   trialExpiresAt?: Date;
   status: UserPresenceStatus;
+  presenceStatus?: 'online' | 'in_a_room' | 'private_chat' | 'offline';
+  customStatus?: string;
   interests: string[];
+  suggestionRefreshDate?: string;
+  suggestionRefreshCount?: number;
   isFriendCountPublic: boolean;
   isBanned: boolean;
   role: 'user' | 'moderator' | 'admin';
@@ -44,7 +48,7 @@ const UserSchema = new Schema<IUser>(
     firebaseUid: { type: String, sparse: true, index: true },
     username: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
     displayName: { type: String, default: '', trim: true },
-    bio: { type: String, default: 'Building ambient systems & shared spaces on Android.' },
+    bio: { type: String, default: '' },
     avatarUrl: { type: String },
     avatarLetter: { type: String, default: 'N' },
     bannerIndex: { type: Number, default: 0 },
@@ -55,8 +59,12 @@ const UserSchema = new Schema<IUser>(
     tier: { type: String, enum: ['free', 'premium', 'premium_plus'], default: 'free' },
     isTrial: { type: Boolean, default: false },
     trialExpiresAt: { type: Date },
-    status: { type: String, default: 'online' },
-    interests: { type: [String], default: ['🎬 Sci-Fi', '🎧 Lo-Fi', '🍿 Watch Parties', '🌌 Ambient'] },
+    status: { type: String, default: 'dynamic' },
+    presenceStatus: { type: String, enum: ['online', 'in_a_room', 'private_chat', 'offline'], default: 'offline' },
+    customStatus: { type: String, default: '' },
+    interests: { type: [String], default: [] },
+    suggestionRefreshDate: { type: String, default: '' },
+    suggestionRefreshCount: { type: Number, default: 0 },
     isFriendCountPublic: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false, index: true },
     role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
@@ -80,5 +88,9 @@ const UserSchema = new Schema<IUser>(
     },
   }
 );
+
+// Indexed for username prefix lookup and name search. Username's unique index
+// above remains the primary path for exact lookups.
+UserSchema.index({ displayName: 'text', username: 'text' });
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);

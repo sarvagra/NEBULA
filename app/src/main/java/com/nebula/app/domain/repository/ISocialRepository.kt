@@ -9,6 +9,7 @@ interface ISocialRepository {
     val friends: StateFlow<List<NebulaUser>>
     val friendRequests: StateFlow<List<NebulaFriendRequest>>
     val suggestedPeople: StateFlow<List<NebulaUser>>
+    val searchResults: StateFlow<List<NebulaUser>>
     val conversations: StateFlow<List<NebulaConversation>>
     val activeConversation: StateFlow<NebulaConversation?>
 
@@ -20,4 +21,9 @@ interface ISocialRepository {
     suspend fun addFriend(user: NebulaUser): Boolean
     suspend fun withdrawFriendRequest(userId: String): Boolean
     suspend fun refresh()
+    suspend fun searchPeople(query: String)
+    suspend fun refreshSuggestions(): Boolean
+    suspend fun blockUser(userId: String): Boolean
+    suspend fun loadPublicProfile(username: String): NebulaUser?
+    suspend fun removeFriend(userId: String): Boolean
 }

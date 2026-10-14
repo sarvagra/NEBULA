@@ -243,7 +243,7 @@ class NebulaAuthManager(
         val timeInSync = statsObj?.optDouble("timeInSyncHours") ?: 0.0
 
         val avatarUrl = userObj?.optString("avatarUrl")?.ifBlank { null }
-        val backendOnboarding = userObj?.optBoolean("isOnboardingCompleted", true) ?: true
+        val backendOnboarding = userObj?.optBoolean("isOnboardingCompleted", false) ?: false
         val isOnboardingCompleted = backendOnboarding && displayName.isNotBlank()
 
         return UserProfile(
@@ -251,9 +251,9 @@ class NebulaAuthManager(
             displayName = displayName,
             email = email,
             username = username,
-            bio = userObj?.optString("bio")?.ifBlank { null }
-                ?: "Building ambient systems & shared spaces on Android.",
-            status = userObj?.optString("status")?.ifBlank { null } ?: "Online",
+            bio = userObj?.optString("bio") ?: "",
+            status = userObj?.optString("status")?.lowercase()?.let { if (it in setOf("dynamic", "offline", "custom")) it else "dynamic" } ?: "dynamic",
+            customStatus = userObj?.optString("customStatus") ?: "",
             avatarUri = avatarUrl,
             avatarFallbackLetter = (displayName.firstOrNull() ?: 'N').uppercaseChar().toString(),
             isCustomAvatar = !avatarUrl.isNullOrBlank(),

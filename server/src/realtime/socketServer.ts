@@ -116,7 +116,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         if (!dissolved && room.hostId !== user.id && room.participants.length > 0) {
           io.to(`room:${roomId}`).emit('room:host_changed', { newHostId: room.hostId });
         }
-        await UserModel.updateOne({ _id: user.id, activeRoomId: roomId }, { $set: { activeRoomId: null, status: 'online' } });
+        await UserModel.updateOne({ _id: user.id, activeRoomId: roomId }, { $set: { activeRoomId: null, presenceStatus: 'online' } });
         io.to(`room:${roomId}`).emit('participant:left', { userId: user.id, displayName: user.displayName });
         for (const activeSocket of await io.in(`user:${user.id}`).fetchSockets()) {
           activeSocket.leave(`room:${roomId}`);
@@ -175,6 +175,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as AuthenticatedSocketUser;
     const joinedRooms = new Set<string>();
+    void UserModel.findByIdAndUpdate(user.id, { presenceStatus: 'online' });
     console.log(`[Socket Authenticated] ${user.displayName} (@${user.username}) connected [${socket.id}]`);
 
     // Rate limiting tracking for this socket
@@ -305,7 +306,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         socket.leave(`room:${data.roomId}`);
         joinedRooms.delete(data.roomId);
         cancelInactivityRemoval(data.roomId, user.id);
-        await UserModel.updateOne({ _id: user.id, activeRoomId: data.roomId }, { $set: { activeRoomId: null, status: 'online' } });
+        await UserModel.updateOne({ _id: user.id, activeRoomId: data.roomId }, { $set: { activeRoomId: null, presenceStatus: 'online' } });
         if (room?.participants.length === 0) {
           mediaCheckpointAt.delete(data.roomId);
           livePlaybackByRoom.delete(data.roomId);
@@ -588,7 +589,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       try {
         const validStatuses = ['online', 'in_a_room', 'private_chat', 'offline'];
         if (validStatuses.includes(data.status)) {
-          await UserModel.findByIdAndUpdate(user.id, { status: data.status });
+          await UserModel.findByIdAndUpdate(user.id, { presenceStatus: data.status });
           socket.broadcast.emit('presence:updated', {
             userId: user.id,
             status: data.status,
@@ -603,6 +604,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
       clearInterval(rateLimitReset);
       console.log(`[Socket Disconnected] ${user.displayName} (${socket.id})`);
       for (const roomId of joinedRooms) scheduleInactivityRemoval(roomId, user);
+      setTimeout(async () => {
+        const remainingSockets = await io.in(`user:${user.id}`).fetchSockets();
+        if (remainingSockets.length === 0) {
+          await UserModel.findByIdAndUpdate(user.id, { presenceStatus: 'offline' });
+          io.emit('presence:updated', { userId: user.id, status: 'offline' });
+        }
+      }, 250);
     });
   });
 

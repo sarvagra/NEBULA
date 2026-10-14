@@ -36,6 +36,9 @@ class SocialRepositoryImpl(
     private val _suggestedPeople = MutableStateFlow<List<NebulaUser>>(emptyList())
     override val suggestedPeople: StateFlow<List<NebulaUser>> = _suggestedPeople.asStateFlow()
 
+    private val _searchResults = MutableStateFlow<List<NebulaUser>>(emptyList())
+    override val searchResults: StateFlow<List<NebulaUser>> = _searchResults.asStateFlow()
+
     private val _conversations = MutableStateFlow<List<NebulaConversation>>(emptyList())
     override val conversations: StateFlow<List<NebulaConversation>> = _conversations.asStateFlow()
 
@@ -151,9 +154,56 @@ class SocialRepositoryImpl(
         }
     }
 
+    override suspend fun searchPeople(query: String) {
+        if (query.trim().length < 2) {
+            _searchResults.value = emptyList()
+            return
+        }
+        val result = apiClient.searchUsers(query)
+        if (result is ApiResponse.Success) _searchResults.value = parseUsers(result.data)
+    }
+
+    override suspend fun refreshSuggestions(): Boolean {
+        val result = apiClient.refreshSuggestedPeople(_suggestedPeople.value.map { it.id })
+        if (result is ApiResponse.Success) {
+            _suggestedPeople.value = parseUsers(result.data)
+            return true
+        }
+        return false
+    }
+
+    override suspend fun blockUser(userId: String): Boolean {
+        if (apiClient.blockUser(userId) !is ApiResponse.Success) return false
+        _friends.value = _friends.value.filterNot { it.id == userId }
+        _suggestedPeople.value = _suggestedPeople.value.filterNot { it.id == userId }
+        _searchResults.value = _searchResults.value.filterNot { it.id == userId }
+        _friendRequests.value = _friendRequests.value.filterNot { it.sender.id == userId }
+        return true
+    }
+
+    override suspend fun loadPublicProfile(username: String): NebulaUser? {
+        val response = apiClient.getPublicProfile(username)
+        if (response !is ApiResponse.Success) return null
+        val user = response.data.optJSONObject("data") ?: return null
+        return parseUsers(JSONArray().put(user)).firstOrNull()
+    }
+
+    override suspend fun removeFriend(userId: String): Boolean {
+        if (apiClient.removeFriend(userId) !is ApiResponse.Success) return false
+        refresh()
+        return true
+    }
+
     private fun parseUsers(array: JSONArray): List<NebulaUser> = buildList {
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
+            val displayedStatus = item.optString("status", "Offline")
+            val presence = when (displayedStatus.lowercase()) {
+                "offline" -> com.nebula.app.domain.model.NebulaPresenceStatus.OFFLINE
+                "in a room" -> com.nebula.app.domain.model.NebulaPresenceStatus.IN_A_ROOM
+                "private chat" -> com.nebula.app.domain.model.NebulaPresenceStatus.PRIVATE_CHAT
+                else -> com.nebula.app.domain.model.NebulaPresenceStatus.ONLINE
+            }
             add(
                 NebulaUser(
                     id = item.optString("id"),
@@ -162,11 +212,22 @@ class SocialRepositoryImpl(
                     avatarLetter = item.optString("avatarLetter", "U"),
                     avatarUrl = item.optString("avatarUrl").ifBlank { null },
                     bio = item.optString("bio"),
-                    status = item.optString("status", "Online"),
+                    status = displayedStatus,
+                    presenceStatus = presence,
+                    isOnline = presence != com.nebula.app.domain.model.NebulaPresenceStatus.OFFLINE,
+                    bannerUrl = item.optString("bannerUrl").ifBlank { null },
+                    bannerIndex = item.optInt("bannerIndex", 0),
+                    tier = item.optString("tier", "free"),
+                    friendsCount = item.optJSONObject("stats")?.let { if (it.isNull("friendsCount")) null else it.optInt("friendsCount") },
+                    roomsHostedCount = item.optJSONObject("stats")?.optInt("roomsHostedCount", 0) ?: 0,
+                    roomsJoinedCount = item.optJSONObject("stats")?.optInt("roomsJoinedCount", 0) ?: 0,
+                    timeInSyncHours = item.optJSONObject("stats")?.optString("timeInSyncHours")?.toDoubleOrNull() ?: 0.0,
                     interests = item.optJSONArray("interests")?.let { interests ->
                         List(interests.length()) { index -> interests.optString(index) }
                     } ?: emptyList(),
                     friendRequestPending = item.optString("relationship") == "request_sent",
+                    friendRequestReceived = item.optString("relationship") == "request_received",
+                    friendRequestId = item.optString("friendRequestId").ifBlank { null },
                     isFriend = item.optString("relationship") == "friends"
                 )
             )

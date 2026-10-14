@@ -1,6 +1,9 @@
 package com.nebula.app.ui.auth
 
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.Period
+import java.io.ByteArrayOutputStream
 
 /**
  * NebulaOnboardingScreen:
@@ -71,10 +75,11 @@ fun NebulaOnboardingScreen(
     var displayName by remember { mutableStateOf(initialProfile.displayName.ifEmpty { "Nebula Explorer" }) }
     var username by remember {
         mutableStateOf(
-            (initialProfile.username ?: "explorer")
+            (initialProfile.username ?: "")
                 .trim()
                 .replace("^@".toRegex(), "")
                 .lowercase()
+                .let { if (!initialProfile.isOnboardingCompleted && it.startsWith("nebula_")) "" else it }
         )
     }
     var birthYear by remember { mutableIntStateOf(2000) }
@@ -200,7 +205,7 @@ fun NebulaOnboardingScreen(
                         fontSize = 11.5.sp
                     )
                 )
-                TextButton(
+                if (initialProfile.isOnboardingCompleted) TextButton(
                     onClick = {
                         val dobStr = String.format("%04d-%02d-%02d", birthYear, birthMonth, birthDay)
                         val finalGender = if (gender == "Custom") customGender.trim().ifEmpty { "Custom" } else gender
@@ -452,7 +457,7 @@ fun NebulaOnboardingScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(text = usernameError ?: (if (isUsernameAvailable == true) "Username is available!" else ""), color = if (usernameError != null) theme.colors.errorColor else theme.colors.successColor)
-                                        Text(text = "${username.length}/20", color = theme.colors.textTertiary)
+                                        Text(text = "${username.length}/16", color = theme.colors.textTertiary)
                                     }
                                 },
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -788,14 +793,20 @@ fun NebulaOnboardingScreen(
                             val finalGender = if (gender == "Custom") customGender.trim().ifEmpty { "Custom" } else gender
 
                             scope.launch {
+                                val durableAvatarUrl = persistAvatar(context, selectedAvatarUri)
+                                if (!selectedAvatarUri.isNullOrBlank() && durableAvatarUrl.isNullOrBlank()) {
+                                    isSubmitting = false
+                                    submitError = "Profile photo could not be uploaded. Choose another photo or continue with the Nebula avatar."
+                                    return@launch
+                                }
                                 val res = NebulaApiClient.updateProfile(
                                     displayName = displayName.trim(),
                                     username = username.trim(),
                                     bio = initialProfile.bio,
-                                    status = "online",
+                                    status = "dynamic",
                                     bannerIndex = initialProfile.bannerIndex,
                                     interests = initialProfile.interests,
-                                    avatarUrl = selectedAvatarUri,
+                                    avatarUrl = durableAvatarUrl,
                                     isFriendCountPublic = true,
                                     isOnboardingCompleted = true,
                                     dateOfBirth = dobStr,
@@ -810,7 +821,7 @@ fun NebulaOnboardingScreen(
                                             username.trim(),
                                             dobStr,
                                             finalGender,
-                                            selectedAvatarUri
+                                            durableAvatarUrl
                                         )
                                     }
                                     is NebulaApiClient.ApiResponse.Error -> {
@@ -823,7 +834,7 @@ fun NebulaOnboardingScreen(
                     }
                 },
                 enabled = !isSubmitting &&
-                    (currentStep != 3 || (usernameError == null && username.length in 3..20)) &&
+                    (currentStep != 3 || (usernameError == null && username.length in 3..16)) &&
                     (currentStep != 4 || isAtLeastSixteen()),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = theme.colors.primaryAccent,
@@ -861,6 +872,33 @@ fun NebulaOnboardingScreen(
                 }
             }
         }
+    }
+}
+
+private suspend fun persistAvatar(context: android.content.Context, source: String?): String? {
+    if (source.isNullOrBlank()) return null
+    if (!source.startsWith("content:") && !source.startsWith("file:") && !source.startsWith("data:image")) return source
+    return try {
+        val dataUrl = if (source.startsWith("data:image")) source else {
+            val input = context.contentResolver.openInputStream(Uri.parse(source)) ?: return null
+            val bitmap = input.use { BitmapFactory.decodeStream(it) } ?: return null
+            val maxSide = 1024
+            val scale = minOf(1f, maxSide.toFloat() / maxOf(bitmap.width, bitmap.height))
+            val resized = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true) else bitmap
+            val bytes = ByteArrayOutputStream().use { output ->
+                resized.compress(Bitmap.CompressFormat.JPEG, 86, output)
+                output.toByteArray()
+            }
+            if (resized !== bitmap) resized.recycle()
+            bitmap.recycle()
+            "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        }
+        val upload = NebulaApiClient.uploadProfileAsset("avatar", dataUrl, "profile-avatar.jpg")
+        if (upload is NebulaApiClient.ApiResponse.Success) {
+            upload.data.optJSONObject("data")?.optString("url")?.takeIf { it.isNotBlank() }
+        } else null
+    } catch (_: Exception) {
+        null
     }
 }
 

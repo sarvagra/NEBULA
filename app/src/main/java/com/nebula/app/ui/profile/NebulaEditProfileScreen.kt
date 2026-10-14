@@ -115,7 +115,7 @@ sealed class UsernameValidationState {
 @Composable
 fun NebulaEditProfileScreen(
     userProfile: UserProfile,
-    onSave: (displayName: String, username: String, bio: String, status: String, bannerIndex: Int, interests: List<String>, isFriendCountPublic: Boolean, avatarUrl: String?, bannerUrl: String?) -> Unit,
+    onSave: (displayName: String, username: String, bio: String, status: String, bannerIndex: Int, interests: List<String>, isFriendCountPublic: Boolean, avatarUrl: String?, bannerUrl: String?, customStatus: String) -> Unit,
     onBack: () -> Unit,
     onOpenMembership: () -> Unit,
     modifier: Modifier = Modifier
@@ -127,7 +127,8 @@ fun NebulaEditProfileScreen(
     var displayName by remember { mutableStateOf(userProfile.displayName) }
     var username by remember { mutableStateOf(userProfile.username?.removePrefix("@") ?: "") }
     var bio by remember { mutableStateOf(userProfile.bio) }
-    var statusText by remember { mutableStateOf(userProfile.status) }
+    var statusText by remember { mutableStateOf(userProfile.status.lowercase().let { if (it == "online") "dynamic" else it }) }
+    var customStatusText by remember { mutableStateOf(userProfile.customStatus) }
     var selectedBannerIndex by remember { mutableIntStateOf(userProfile.bannerIndex) }
     var customBannerUri by remember { mutableStateOf(userProfile.bannerUrl) }
     var selectedInterests by remember { mutableStateOf(userProfile.interests.toSet()) }
@@ -465,7 +466,8 @@ fun NebulaEditProfileScreen(
                             selectedInterests.toList(),
                             isFriendCountPublic,
                             currentAvatarUri,
-                            customBannerUri
+                            customBannerUri,
+                            customStatusText
                         )
                     }
                     .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -842,8 +844,8 @@ fun NebulaEditProfileScreen(
 
             // 5. STATUS / ROOM PRESENCE (Online/Offline defaults, custom up to 8 chars for premium)
             item {
-                val isPremiumUser = userProfile.subscriptionTier != NebulaSubscriptionTier.FREE ||
-                        userProfile.email.equals("sarvagrawork@gmail.com", ignoreCase = true)
+                val isPremiumUser = userProfile.subscriptionTier != NebulaSubscriptionTier.FREE
+                val isPremiumPlus = userProfile.subscriptionTier == NebulaSubscriptionTier.PREMIUM_PLUS
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -867,20 +869,12 @@ fun NebulaEditProfileScreen(
                                 fontSize = 10.5.sp
                             )
                         )
-                        if (isPremiumUser) {
-                            Text(
-                                text = "${statusText.length}/8",
-                                style = theme.typography.caption.copy(
-                                    color = if (statusText.length >= 8) theme.colors.errorColor else theme.colors.textTertiary,
-                                    fontSize = 10.5.sp
-                                )
-                            )
-                        }
+                        if (isPremiumPlus) Text("${customStatusText.length}/80", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
                     }
 
                     // Default presets (Online, Offline)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Online", "Offline").forEach { preset ->
+                        (if (isPremiumPlus) listOf("dynamic", "offline", "custom") else listOf("dynamic", "offline")).forEach { preset ->
                             val isSelected = statusText.equals(preset, ignoreCase = true)
                             Box(
                                 modifier = Modifier
@@ -891,7 +885,10 @@ fun NebulaEditProfileScreen(
                                         color = if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
                                         shape = RoundedCornerShape(8.dp)
                                     )
-                                    .clickable { statusText = preset }
+                                    .clickable {
+                                        if (preset == "offline" && !isPremiumUser || preset == "custom" && !isPremiumPlus) onOpenMembership()
+                                        else statusText = preset
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Row(
@@ -903,12 +900,12 @@ fun NebulaEditProfileScreen(
                                             .size(7.dp)
                                             .clip(CircleShape)
                                             .background(
-                                                if (preset == "Online") theme.colors.successColor
+                                                if (preset == "dynamic") theme.colors.successColor
                                                 else theme.colors.textTertiary
                                             )
                                     )
                                     Text(
-                                        text = preset,
+                                        text = when (preset) { "dynamic" -> "Dynamic"; "offline" -> "Offline"; else -> "Custom" },
                                         style = theme.typography.caption.copy(
                                             color = if (isSelected) theme.colors.primaryAccent else theme.colors.textPrimary,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
@@ -921,11 +918,11 @@ fun NebulaEditProfileScreen(
                     }
 
                     // Custom status input (up to 8 chars)
-                    if (isPremiumUser) {
+                    if (isPremiumPlus && statusText == "custom") {
                         BasicTextField(
-                            value = statusText,
+                            value = customStatusText,
                             onValueChange = {
-                                if (it.length <= 8) statusText = it
+                                if (it.length <= 80) customStatusText = it
                             },
                             modifier = Modifier.fillMaxWidth(),
                             textStyle = theme.typography.bodyMedium.copy(
@@ -938,7 +935,7 @@ fun NebulaEditProfileScreen(
                                 Box {
                                     if (statusText.isEmpty()) {
                                         Text(
-                                            text = "Custom status (max 8 chars)",
+                                            text = "Custom status (max 80 characters)",
                                             style = theme.typography.bodyMedium.copy(
                                                 color = theme.colors.textTertiary,
                                                 fontSize = 14.sp
@@ -949,9 +946,9 @@ fun NebulaEditProfileScreen(
                                 }
                             }
                         )
-                    } else {
+                    } else if (!isPremiumPlus) {
                         Text(
-                            text = "Upgrade to Nebula Premium to set custom status tags (max 8 chars)",
+                            text = "Offline status is Premium. Custom status is Premium Plus.",
                             style = theme.typography.caption.copy(
                                 color = theme.colors.textTertiary,
                                 fontSize = 11.sp
@@ -1000,8 +997,10 @@ fun NebulaEditProfileScreen(
                                     .clickable {
                                         selectedInterests = if (isSelected) {
                                             selectedInterests - interest
-                                        } else {
+                                        } else if (selectedInterests.size < 5) {
                                             selectedInterests + interest
+                                        } else {
+                                            selectedInterests
                                         }
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -1036,8 +1035,10 @@ fun NebulaEditProfileScreen(
                                     .clickable {
                                         selectedInterests = if (isSelected) {
                                             selectedInterests - interest
-                                        } else {
+                                        } else if (selectedInterests.size < 5) {
                                             selectedInterests + interest
+                                        } else {
+                                            selectedInterests
                                         }
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)

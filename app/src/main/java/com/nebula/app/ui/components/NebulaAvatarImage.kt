@@ -3,6 +3,7 @@ package com.nebula.app.ui.components
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
@@ -62,13 +63,11 @@ fun NebulaAvatarImage(
                 contentScale = ContentScale.Crop
             )
         } else {
-            Text(
-                text = fallbackLetter.take(1).uppercase(),
-                style = theme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = fallbackTextSize,
-                    color = theme.colors.textPrimary
-                )
+            Image(
+                painter = painterResource(com.nebula.app.R.drawable.ic_launcher_foreground),
+                contentDescription = contentDescription ?: "Nebula profile picture",
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
             )
         }
     }
