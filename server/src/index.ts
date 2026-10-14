@@ -4,6 +4,7 @@ import { connectDatabase } from './config/database';
 import { initSocketServer } from './realtime/socketServer';
 import { config } from './config/env';
 import { purgeDueAccountDeletions } from './modules/users/accountLifecycleController';
+import { runReengagementSweep } from './services/reengagementService';
 
 async function bootstrap() {
   console.log('----------------------------------------------------');
@@ -47,6 +48,21 @@ async function bootstrap() {
   void runDeletionSweep();
   const deletionSweepTimer = setInterval(runDeletionSweep, DELETION_SWEEP_MS);
   deletionSweepTimer.unref?.();
+
+  // 7. Controlled re-engagement sweep. The service only ever selects accounts that
+  // explicitly opted in, and applies the cadence floor, per-campaign cooldowns and
+  // quiet hours before anything is dispatched.
+  const REENGAGEMENT_SWEEP_MS = 60 * 60 * 1000;
+  const runReengagement = async () => {
+    try {
+      const result = await runReengagementSweep();
+      if (result.sent > 0) console.log(`[Reengagement] Sent ${result.sent} opt-in message(s)`);
+    } catch (err: any) {
+      console.error('[Reengagement] Sweep failed:', err?.message || err);
+    }
+  };
+  const reengagementTimer = setInterval(runReengagement, REENGAGEMENT_SWEEP_MS);
+  reengagementTimer.unref?.();
 }
 
 bootstrap().catch((err) => {

@@ -124,7 +124,7 @@ fun NebulaOnboardingScreen(
             isUsernameAvailable = null
             return
         }
-        if (!clean.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
+        if (!clean.matches("^[a-z0-9][a-z0-9_]*[a-z0-9]$".toRegex())) {
             usernameError = "Only lowercase letters, numbers, and underscores allowed."
             isUsernameAvailable = null
             return
@@ -428,7 +428,7 @@ fun NebulaOnboardingScreen(
                             )
 
                             Text(
-                                text = "3 to 20 characters. Lowercase letters, numbers, and underscores only.",
+                                text = "3 to 16 characters. Lowercase letters, numbers, and underscores only.",
                                 style = theme.typography.bodySmall.copy(
                                     color = theme.colors.textSecondary,
                                     textAlign = TextAlign.Center
@@ -438,11 +438,15 @@ fun NebulaOnboardingScreen(
                             OutlinedTextField(
                                 value = username,
                                 onValueChange = { input ->
-                                    val clean = input.lowercase().replace("^@".toRegex(), "").filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
-                                    if (clean.length <= 16 && clean.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
-                                        username = clean
-                                        triggerUsernameCheck(clean)
-                                    }
+                                    // Filter and cap only; validation reports the reason. An
+                                    // anchored "valid or reject" gate here silently dropped
+                                    // every keystroke after the first one.
+                                    val clean = input.lowercase()
+                                        .replace("@", "")
+                                        .filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
+                                        .take(16)
+                                    username = clean
+                                    triggerUsernameCheck(clean)
                                 },
                                 prefix = { Text("@", color = theme.colors.primaryAccent, fontWeight = FontWeight.Bold) },
                                 singleLine = true,

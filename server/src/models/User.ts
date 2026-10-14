@@ -40,6 +40,13 @@ export interface IUser extends Document {
   deletionEvents: { action: 'requested' | 'suspended' | 'cancelled' | 'completed'; at: Date; scheduledFor?: Date; eventId: string }[];
   activeRoomId?: string | null;
   fcmTokens: string[];
+  /**
+   * Re-engagement messaging is opt-in only: nothing is scheduled unless the user
+   * turns it on, and the per-type timestamps enforce the cadence floor.
+   */
+  reengagementOptIn: boolean;
+  reengagementOptInAt?: Date;
+  reengagementLastSentAt?: { [key: string]: Date };
   stats: {
     roomsJoinedCount: number;
     roomsHostedCount: number;
@@ -96,6 +103,9 @@ const UserSchema = new Schema<IUser>(
     }],
     activeRoomId: { type: String, default: null, index: true },
     fcmTokens: { type: [String], default: [] },
+    reengagementOptIn: { type: Boolean, default: false },
+    reengagementOptInAt: { type: Date },
+    reengagementLastSentAt: { type: Schema.Types.Mixed, default: {} },
     stats: {
       roomsJoinedCount: { type: Number, default: 0 },
       roomsHostedCount: { type: Number, default: 0 },

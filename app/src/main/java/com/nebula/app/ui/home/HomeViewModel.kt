@@ -816,7 +816,7 @@ class HomeViewModel(
                     ?: _uiState.value.userProfile.email.substringBefore("@").filter { it.isLetterOrDigit() || it == '_' }.take(15).lowercase()
             }.ifEmpty { "nebula_user" }
 
-            if (cleanUsername.length !in 3..16 || !cleanUsername.matches("^[a-z0-9](?:[a-z0-9_]{1,14}[a-z0-9])?$".toRegex())) {
+            if (cleanUsername.length !in 3..16 || !cleanUsername.matches("^[a-z0-9][a-z0-9_]*[a-z0-9]$".toRegex())) {
                 showToast("Username must be 3-16 characters, with no leading or trailing underscore")
                 return@launch
             }

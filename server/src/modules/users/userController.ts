@@ -57,10 +57,10 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     // Check if username is being changed, ensure uniqueness
     if (username) {
       const cleanUsername = username.toLowerCase().trim().replace(/^@/, '');
-      if (!/^[a-z0-9_]{3,20}$/.test(cleanUsername)) {
+      if (!/^[a-z0-9_]{3,16}$/.test(cleanUsername)) {
         res.status(400).json({
           success: false,
-          error: 'Username must be between 3 and 20 characters, containing only letters, numbers, and underscores.',
+          error: 'Username must be between 3 and 16 characters, containing only letters, numbers, and underscores.',
         });
         return;
       }

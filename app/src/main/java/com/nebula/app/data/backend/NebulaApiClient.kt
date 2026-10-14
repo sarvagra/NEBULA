@@ -495,6 +495,14 @@ object NebulaApiClient {
     suspend fun verifyMediaLink(url: String): ApiResponse<JSONObject> =
         request("/media/verify", "POST", JSONObject().put("url", url.trim()))
 
+    // --- Re-engagement messaging consent (opt-in only, server-enforced) ---
+
+    suspend fun getReengagementPreferences(): ApiResponse<JSONObject> =
+        request("/notifications/reengagement", "GET")
+
+    suspend fun setReengagementOptIn(optIn: Boolean): ApiResponse<JSONObject> =
+        request("/notifications/reengagement", "PUT", JSONObject().put("optIn", optIn))
+
     suspend fun getAccountDeletionStatus(): ApiResponse<JSONObject> = request("/users/me/deletion", "GET")
 
     suspend fun requestAccountDeletion(): ApiResponse<JSONObject> = request("/users/me/deletion/request", "POST", JSONObject())

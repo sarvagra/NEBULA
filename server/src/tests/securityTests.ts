@@ -12,6 +12,7 @@ import { MessageModel } from '../models/Message';
 import { ProfileAssetModel } from '../models/ProfileAsset';
 import { issueOtp, consumeOtp, clearOtp } from '../modules/auth/authController';
 import { purgeDueAccountDeletions } from '../modules/users/accountLifecycleController';
+import { runReengagementSweep } from '../services/reengagementService';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { resolveStoredObjectUrl } from '../services/objectStorage';
@@ -939,6 +940,90 @@ async function runSecurityTests() {
       }
     } finally {
       await UserModel.deleteOne({ _id: gateUserId });
+    }
+  });
+
+  await assertTest('Re-engagement messages require consent and respect cadence and quiet hours', async () => {
+    const optedIn = '507f1f77bcf86cd799439201';
+    const optedOut = '507f1f77bcf86cd799439202';
+    const recentlyActive = '507f1f77bcf86cd799439203';
+    const optedInToken = jwt.sign({ ...validUserPayload, id: optedIn, username: 're_opted_in' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const optedOutToken = jwt.sign({ ...validUserPayload, id: optedOut, username: 're_opted_out' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const longAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    try {
+      await UserModel.insertMany([
+        { _id: optedIn, username: 're_opted_in', displayName: 'Opted In', tier: 'free', lastActiveAt: longAgo, fcmTokens: ['a'.repeat(40)], reengagementOptIn: true, reengagementLastSentAt: {} },
+        { _id: optedOut, username: 're_opted_out', displayName: 'Opted Out', tier: 'free', lastActiveAt: longAgo, fcmTokens: ['b'.repeat(40)], reengagementOptIn: false },
+        { _id: recentlyActive, username: 're_recent', displayName: 'Recent', tier: 'free', lastActiveAt: new Date(), fcmTokens: ['c'.repeat(40)], reengagementOptIn: true, reengagementLastSentAt: {} },
+      ]);
+
+      // Consent state is readable and default-off for a normal account.
+      const prefs = await makeRequest('/api/v1/notifications/reengagement', { headers: { Authorization: `Bearer ${optedOutToken}` } });
+      if (prefs.status !== 200) throw new Error(`Preference read failed with ${prefs.status}`);
+      const prefsJson = (await prefs.json()) as any;
+      if (prefsJson.data?.optIn !== false) throw new Error('Re-engagement was on without explicit consent');
+      if (prefsJson.data?.policy?.cooldownHours !== 72) throw new Error('Cadence policy was not exposed');
+
+      // The sweep must never touch a user without consent.
+      const drySweep = await runReengagementSweep(new Date(), { dryRun: true });
+      if (drySweep.considered !== 2) {
+        throw new Error(`Sweep considered ${drySweep.considered} accounts; only the 2 opted-in ones are eligible`);
+      }
+      if (drySweep.sent !== 1) throw new Error(`Sweep planned ${drySweep.sent} sends; only the idle opted-in account qualifies`);
+
+      const optedOutAfter = await UserModel.findById(optedOut).select('reengagementLastSentAt');
+      if (optedOutAfter?.reengagementLastSentAt && Object.keys(optedOutAfter.reengagementLastSentAt).length) {
+        throw new Error('A dry run recorded a send for a non-consenting account');
+      }
+
+      // Quiet hours block dispatch unless explicitly overridden.
+      const quietNow = new Date();
+      quietNow.setHours(23, 30, 0, 0);
+      const quietSweep = await runReengagementSweep(quietNow, { dryRun: true });
+      if (quietSweep.sent !== 0) throw new Error('A message was planned during quiet hours');
+
+      // Cadence floor: a user contacted inside the cooldown window is skipped.
+      const cooling = new Date(Date.now() - 60 * 60 * 1000);
+      await UserModel.updateOne({ _id: optedIn }, { $set: { reengagementLastSentAt: { __any: cooling, new_rooms: cooling } } });
+      const coolingSweep = await runReengagementSweep(new Date(), { dryRun: true });
+      if (coolingSweep.sent !== 0) throw new Error('Cadence floor did not suppress a repeat message');
+
+      // Consent is revocable, and revoking clears the schedule markers.
+      const off = await makeRequest('/api/v1/notifications/reengagement', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${optedInToken}` },
+        body: JSON.stringify({ optIn: false }),
+      });
+      if (off.status !== 200) throw new Error(`Opt-out failed with ${off.status}`);
+      const offJson = (await off.json()) as any;
+      if (offJson.data?.optIn !== false) throw new Error('Opt-out did not persist');
+      const afterOptOut = await UserModel.findById(optedIn).select('reengagementLastSentAt');
+      if (afterOptOut?.reengagementLastSentAt && Object.keys(afterOptOut.reengagementLastSentAt).length) {
+        throw new Error('Opt-out left schedule markers behind');
+      }
+      const postOptOutSweep = await runReengagementSweep(new Date(), { dryRun: true });
+      if (postOptOutSweep.sent !== 0) throw new Error('Sweep still planned a message after opt-out');
+
+      // Non-admins cannot trigger the scheduler manually.
+      const forbidden = await makeRequest('/api/v1/notifications/reengagement/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${optedInToken}` },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      if (forbidden.status !== 403) throw new Error(`Non-admin sweep trigger should be 403, got ${forbidden.status}`);
+
+      // A real (non-dry) sweep records the send and produces an in-app record.
+      await UserModel.updateOne({ _id: optedIn }, { $set: { reengagementOptIn: true, reengagementLastSentAt: {} } });
+      const realSweep = await runReengagementSweep(new Date(), { dryRun: true, ignoreQuietHours: true });
+      if (realSweep.sent !== 1) throw new Error(`Opted-in sweep should plan exactly one send, planned ${realSweep.sent}`);
+      const recorded = await UserModel.findById(optedIn).select('reengagementLastSentAt');
+      if (recorded?.reengagementLastSentAt && (recorded.reengagementLastSentAt as any).__any) {
+        throw new Error('A dry run must not record a send timestamp');
+      }
+    } finally {
+      await NotificationModel.deleteMany({ userId: { $in: [optedIn, optedOut, recentlyActive] } });
+      await UserModel.deleteMany({ _id: { $in: [optedIn, optedOut, recentlyActive] } });
     }
   });
 
