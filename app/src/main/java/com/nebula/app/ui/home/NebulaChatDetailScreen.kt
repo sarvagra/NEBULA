@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -263,12 +266,29 @@ fun NebulaChatDetailScreen(
                 contentPadding = PaddingValues(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(conversation.messages) { message ->
-                    ModernChatBubble(
-                        message = message,
-                        onEdit = { editingMessage = message },
-                        onUnsend = { onUnsendMessage(message.id) }
-                    )
+                val messages = conversation.messages
+                itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                    val previous = messages.getOrNull(index - 1)
+                    val next = messages.getOrNull(index + 1)
+                    // Consecutive messages from the same sender form one visual
+                    // group: the avatar appears once, on the first bubble.
+                    val startsGroup = previous?.senderKeyOrNull() != message.senderKeyOrNull()
+                    val endsGroup = next?.senderKeyOrNull() != message.senderKeyOrNull()
+                    val showDateSeparator = previous == null || !previous.isSameDayAs(message)
+
+                    Column {
+                        if (showDateSeparator) {
+                            DateSeparator(label = message.dateLabel())
+                        }
+                        ModernChatBubble(
+                            message = message,
+                            showAvatar = startsGroup,
+                            isGroupedWithPrevious = !startsGroup,
+                            isGroupedWithNext = !endsGroup,
+                            onEdit = { editingMessage = message },
+                            onUnsend = { onUnsendMessage(message.id) }
+                        )
+                    }
                 }
             }
         }
@@ -475,10 +495,21 @@ fun NebulaChatDetailScreen(
             }
         }
 
+        // Upload feedback is a single green progress hairline on the composer's top
+        // border. No percentage text and no extra row during a send.
         AnimatedVisibility(visible = isUploadingMedia) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Text("Uploading attachment · $uploadProgress%", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp))
-                LinearProgressIndicator(progress = { uploadProgress / 100f }, modifier = Modifier.fillMaxWidth())
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.5.dp)
+                    .background(theme.colors.surfaceBorder.copy(alpha = 0.35f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth((uploadProgress.coerceIn(0, 100)) / 100f)
+                        .fillMaxHeight()
+                        .background(theme.colors.successColor)
+                )
             }
         }
 
@@ -572,8 +603,71 @@ fun NebulaChatDetailScreen(
     }
 }
 
+/** Identity used to decide whether two consecutive messages share a group. */
+private fun ChatMessage.senderKeyOrNull(): String? =
+    senderId ?: senderName ?: if (role == MessageRole.USER) "me" else null
+
+private fun ChatMessage.isSameDayAs(other: ChatMessage): Boolean {
+    val a = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val b = java.util.Calendar.getInstance().apply { timeInMillis = other.timestamp }
+    return a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+        a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+}
+
+/** Minute-accurate local clock time for a message, e.g. "14:07". */
+internal fun Long.clockLabel(): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(this))
+
+/** WhatsApp-style non-editable date divider: TODAY / YESTERDAY / 15 SEPTEMBER 2025. */
+private fun ChatMessage.dateLabel(): String {
+    val messageDay = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val today = java.util.Calendar.getInstance()
+    fun sameDay(x: java.util.Calendar, y: java.util.Calendar) =
+        x.get(java.util.Calendar.YEAR) == y.get(java.util.Calendar.YEAR) &&
+            x.get(java.util.Calendar.DAY_OF_YEAR) == y.get(java.util.Calendar.DAY_OF_YEAR)
+    if (sameDay(messageDay, today)) return "TODAY"
+    val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    if (sameDay(messageDay, yesterday)) return "YESTERDAY"
+    return java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault())
+        .format(java.util.Date(timestamp)).uppercase(java.util.Locale.getDefault())
+}
+
 @Composable
-private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend: () -> Unit) {
+private fun DateSeparator(label: String) {
+    val theme = Theme.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = theme.colors.surfaceElevated
+        ) {
+            Text(
+                text = label,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                style = theme.typography.caption.copy(
+                    color = theme.colors.textSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.6.sp
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModernChatBubble(
+    message: ChatMessage,
+    showAvatar: Boolean,
+    isGroupedWithPrevious: Boolean,
+    isGroupedWithNext: Boolean,
+    onEdit: () -> Unit,
+    onUnsend: () -> Unit
+) {
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
     var showHistory by remember(message.id) { mutableStateOf(false) }
@@ -583,13 +677,53 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
     var videoBuffering by remember(message.id) { mutableStateOf(false) }
     var videoBufferPercent by remember(message.id) { mutableIntStateOf(0) }
     var videoFailed by remember(message.id) { mutableStateOf(false) }
+    // Default to a landscape-ish box until the real dimensions arrive.
+    val isMediaMessage = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
+    val isVideoMessage = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
+    var mediaAspectRatio by remember(message.id) { mutableStateOf(4f / 3f) }
+    val previewContext = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(message.id, message.mediaUrl) {
+        val url = message.mediaUrl
+        if (!url.isNullOrBlank()) {
+            val ratio = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val source = if (url.startsWith("data:")) {
+                        val csv = url.substringAfter("base64,", "")
+                        android.util.Base64.decode(csv, android.util.Base64.DEFAULT)
+                    } else {
+                        java.net.URL(url).openStream().use { it.readBytes() }
+                    }
+                    val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(source, 0, source.size, options)
+                    if (options.outWidth > 0 && options.outHeight > 0) {
+                        options.outWidth.toFloat() / options.outHeight.toFloat()
+                    } else null
+                }.getOrNull()
+            }
+            if (ratio != null && ratio.isFinite() && ratio > 0f) {
+                mediaAspectRatio = ratio.coerceIn(0.5f, 2.2f)
+            } else {
+                // Fall back to a measured-but-shown image's intrinsic size.
+                mediaAspectRatio = 4f / 3f
+            }
+        }
+    }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = if (isGroupedWithPrevious) 2.dp else 10.dp),
         horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        if (!isMe) NebulaAvatarImage(message.senderAvatarUrl, message.senderAvatarLetter, modifier = Modifier.size(28.dp))
+        if (!isMe) {
+            if (showAvatar) {
+                NebulaAvatarImage(message.senderAvatarUrl, message.senderAvatarLetter, modifier = Modifier.size(28.dp))
+            } else {
+                // Keep the text column aligned with the first bubble of the group.
+                Spacer(Modifier.width(28.dp))
+            }
+        }
         Spacer(Modifier.width(if (isMe) 0.dp else 7.dp))
         Column(horizontalAlignment = if (isMe) Alignment.End else Alignment.Start) {
         Box(
@@ -619,12 +753,22 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
             val isMedia = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
             if (isMedia) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Border-less media surface. The height follows the picture's
+                    // own aspect ratio so a portrait photo no longer sits inside a
+                    // wide coloured slab with empty bars either side.
+                    val mediaBoxModifier = if (isVideoMessage) {
+                        Modifier.fillMaxWidth().height(180.dp)
+                    } else {
+                        Modifier
+                            .fillMaxWidth(0.72f)
+                            .aspectRatio(mediaAspectRatio)
+                    }
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
+                        modifier = mediaBoxModifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (isMe) Color.Black.copy(alpha = 0.25f) else theme.colors.surfaceElevated),
+                            .background(
+                                if (isMe) Color.Black.copy(alpha = 0.25f) else theme.colors.surfaceElevated
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         val mediaUrl = message.mediaUrl.orEmpty()
@@ -759,8 +903,9 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // Real clock time, not a relative "Recent"/"Just now" label.
             Text(
-                text = message.timeLabel,
+                text = message.timestamp.clockLabel(),
                 style = theme.typography.caption.copy(
                     color = theme.colors.textTertiary,
                     fontSize = 10.5.sp

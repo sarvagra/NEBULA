@@ -75,10 +75,17 @@ class HomeViewModel(
     )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    fun refreshAll() {
+    /**
+     * Syncs every list.
+     *
+     * [showIndicator] is false by default: opening the app, resuming it, or
+     * completing an action must not flash a spinner. Only a real pull-to-refresh
+     * gesture asks for the indicator.
+     */
+    fun refreshAll(showIndicator: Boolean = false) {
         if (_uiState.value.isRefreshing) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            if (showIndicator) _uiState.value = _uiState.value.copy(isRefreshing = true)
             try {
                 (roomRepository as? RoomRepositoryImpl)?.refreshRooms()
                 socialRepository.refresh()
@@ -187,7 +194,7 @@ class HomeViewModel(
         viewModelScope.launch {
             (roomRepository as? RoomRepositoryImpl)?.reconnectActiveRoom()
             (roomRepository as? RoomRepositoryImpl)?.setAppForegrounded(true)
-            refreshAll()
+            refreshAll(showIndicator = false)
         }
     }
 
@@ -1078,7 +1085,7 @@ class HomeViewModel(
     // --- V2 NOTIFICATIONS & POLLS & VAULT ---
     fun onOpenNotifications() {
         _uiState.value = _uiState.value.copy(activeModalSheet = ActiveModalSheet.Notifications)
-        refreshAll()
+        refreshAll(showIndicator = false)
     }
 
 

@@ -404,7 +404,7 @@ fun HomeScreen(
                         NebulaTab.HOME -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
-                                onRefresh = viewModel::refreshAll
+                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
                                 NebulaHomeScreen(
                                     friends = uiState.friends,
@@ -421,7 +421,7 @@ fun HomeScreen(
                         NebulaTab.ROOMS -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
-                                onRefresh = viewModel::refreshAll
+                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
                                 NebulaRoomsScreen(
                                     rooms = uiState.rooms,
@@ -434,7 +434,7 @@ fun HomeScreen(
                         NebulaTab.CHATS -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
-                                onRefresh = viewModel::refreshAll
+                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
                                 NebulaChatsScreen(
                                     conversations = uiState.socialConversations,
@@ -446,7 +446,7 @@ fun HomeScreen(
                         NebulaTab.FRIENDS -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
-                                onRefresh = viewModel::refreshAll
+                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
                                 NebulaFriendsScreen(
                                     friends = uiState.friends,
@@ -478,7 +478,7 @@ fun HomeScreen(
                         NebulaTab.PROFILE -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
-                                onRefresh = viewModel::refreshAll
+                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
                             NebulaProfileScreen(
                                 user = NebulaUser.CurrentUser.copy(
