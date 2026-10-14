@@ -577,6 +577,7 @@ data class NebulaConversation(
  */
 enum class NotificationType {
     FRIEND_REQUEST,
+    DIRECT_MESSAGE,
     ROOM_INVITE,
     ROOM_STARTED,
     NOTICE

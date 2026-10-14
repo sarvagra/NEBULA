@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type NotificationType = 'friend_request' | 'room_invite' | 'room_activity' | 'system';
+export type NotificationType = 'friend_request' | 'room_invite' | 'room_activity' | 'direct_message' | 'system';
 
 export interface INotification extends Document {
   userId: string;
@@ -16,7 +16,7 @@ export interface INotification extends Document {
 const NotificationSchema = new Schema<INotification>(
   {
     userId: { type: String, required: true, index: true },
-    type: { type: String, enum: ['friend_request', 'room_invite', 'room_activity', 'system'], default: 'system' },
+    type: { type: String, enum: ['friend_request', 'room_invite', 'room_activity', 'direct_message', 'system'], default: 'system' },
     title: { type: String, required: true },
     body: { type: String, required: true },
     actionData: { type: Schema.Types.Mixed },

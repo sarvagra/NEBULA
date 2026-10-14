@@ -95,6 +95,8 @@ export const SendMessageSchema = z.object({
   text: z.string().trim().max(2000, 'Message cannot exceed 2000 characters').optional(),
   mediaUrl: z.string().trim().max(500).optional(),
   messageType: z.enum(['text', 'media', 'system']).default('text'),
+  isSpoiler: z.boolean().optional().default(false),
+  mediaMimeType: z.string().trim().max(80).optional(),
 }).refine((data) => !!data.text || !!data.mediaUrl, {
   message: 'Message must contain either text or a media URL',
 });

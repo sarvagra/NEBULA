@@ -6,6 +6,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 import { notifyUser } from '../notifications/notificationController';
+import { NotificationModel } from '../../models/Notification';
 
 const UNSEND_WINDOW_MS = 2 * 60 * 1000;
 const editLimitForTier = (tier?: string) => (tier === 'premium' || tier === 'premium_plus') ? 2 : 1;
@@ -98,6 +99,17 @@ export async function markConversationRead(req: Request, res: Response): Promise
   try {
     if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
     const { conversationId } = req.params;
+    const friendship = await FriendshipModel.findOne({
+      $or: [
+        { requesterId: req.user.id, recipientId: conversationId },
+        { requesterId: conversationId, recipientId: req.user.id },
+      ],
+      status: 'accepted',
+    });
+    if (!friendship && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, error: 'You can only mark an accepted friend conversation as read' });
+      return;
+    }
     const result = await MessageModel.updateMany(
       { senderId: conversationId, conversationId: req.user.id, roomId: { $exists: false }, readAt: { $exists: false }, deletedAt: { $exists: false } },
       { $set: { readAt: new Date() } },
@@ -295,7 +307,20 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     });
 
     if (conversationId && !roomId) {
-      void notifyUser(conversationId, req.user.displayName, text?.trim() || 'Sent you an attachment', { type: 'dm', conversationId, messageId: message._id.toString() });
+      const notificationBody = text?.trim() || 'Sent you an attachment';
+      try {
+        await NotificationModel.create({
+          userId: conversationId,
+          type: 'direct_message',
+          title: req.user.displayName,
+          body: notificationBody,
+          // The recipient opens the sender's conversation, not their own ID.
+          actionData: { conversationId: req.user.id, messageId: message._id.toString() },
+        });
+      } catch (error) {
+        console.warn('[DM notification] Could not persist notification:', error instanceof Error ? error.message : 'unknown error');
+      }
+      void notifyUser(conversationId, req.user.displayName, notificationBody, { type: 'dm', conversationId: req.user.id, messageId: message._id.toString() });
     }
 
     res.status(201).json({ success: true, data: toMessageDTO(message) });

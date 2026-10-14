@@ -64,16 +64,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
-import coil.ImageLoader
-import coil.decode.GifDecoder
-import coil.decode.ImageDecoderDecoder
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.profile.Custom1to1CropDialog
 import com.nebula.app.ui.components.NebulaAvatarImage
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 
 /**
  * NebulaChatDetailScreen:
@@ -602,12 +600,6 @@ fun NebulaChatDetailScreen(
 @Composable
 private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend: () -> Unit) {
     val theme = Theme.current
-    val context = LocalContext.current
-    val mediaImageLoader = remember(context) {
-        ImageLoader.Builder(context).components {
-            if (android.os.Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
-        }.build()
-    }
     val isMe = message.role == MessageRole.USER
     var showHistory by remember(message.id) { mutableStateOf(false) }
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
@@ -673,12 +665,22 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                                 modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
                             )
                         } else if (mediaUrl.isNotBlank()) {
-                            AsyncImage(
+                            SubcomposeAsyncImage(
                                 model = mediaUrl,
                                 contentDescription = "Shared image",
-                                imageLoader = mediaImageLoader,
                                 modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                loading = {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Loading image…", color = if (isMe) Color.White else theme.colors.textSecondary, fontSize = 12.sp)
+                                    }
+                                },
+                                error = {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Image unavailable", color = if (isMe) Color.White else theme.colors.textSecondary, fontSize = 12.sp)
+                                    }
+                                },
+                                success = { SubcomposeAsyncImageContent() }
                             )
                         } else {
                             Text(

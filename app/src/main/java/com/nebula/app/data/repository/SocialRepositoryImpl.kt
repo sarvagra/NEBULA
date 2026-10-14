@@ -63,20 +63,24 @@ class SocialRepositoryImpl(
                         val parsed = messageFromJson(item, id)
                         val senderIsPartner = parsed.role == MessageRole.ASSISTANT
                         add(if (senderIsPartner && freshPartner != null) parsed.copy(
-                            senderName = parsed.senderName?.takeIf { it.isNotBlank() } ?: freshPartner.displayName,
-                            senderAvatarUrl = parsed.senderAvatarUrl?.takeIf { it.isNotBlank() } ?: freshPartner.avatarUrl,
+                            senderName = freshPartner.displayName,
+                            senderAvatarUrl = freshPartner.avatarUrl,
                             senderAvatarLetter = freshPartner.avatarLetter
                         ) else parsed)
                     }
                 }
             } else target.messages
-            val updatedTarget = target.copy(title = freshPartner?.displayName ?: target.title, partnerUser = freshPartner ?: target.partnerUser, unreadCount = 0, messages = messages)
+            val updatedTarget = target.copy(title = freshPartner?.displayName ?: target.title, partnerUser = freshPartner ?: target.partnerUser, messages = messages)
             _activeConversation.value = updatedTarget
             _conversations.value = _conversations.value.map {
                 if (it.id == id) updatedTarget else it
             }
             // Opening a conversation is the only point at which messages become seen.
-            apiClient.markConversationRead(id)
+            if (apiClient.markConversationRead(id) is ApiResponse.Success) {
+                val readTarget = updatedTarget.copy(unreadCount = 0)
+                if (_activeConversation.value?.id == id) _activeConversation.value = readTarget
+                _conversations.value = _conversations.value.map { if (it.id == id) readTarget else it }
+            }
         }
     }
 

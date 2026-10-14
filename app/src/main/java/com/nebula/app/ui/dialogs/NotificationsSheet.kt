@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
@@ -185,6 +186,7 @@ private fun TelegramSwipeableNotificationItem(
             // Icon indicator
             val (iconVector, iconTint) = when (notif.type) {
                 NotificationType.FRIEND_REQUEST -> Icons.Default.PersonAdd to theme.colors.primaryAccent
+                NotificationType.DIRECT_MESSAGE -> Icons.AutoMirrored.Filled.Send to theme.colors.primaryAccent
                 NotificationType.ROOM_INVITE, NotificationType.ROOM_STARTED -> Icons.Default.Tv to Color(0xFF38BDF8)
                 NotificationType.NOTICE -> Icons.Default.Info to theme.colors.successColor
             }

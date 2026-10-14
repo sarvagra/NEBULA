@@ -364,6 +364,87 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Direct messages persist a clearable notification and retain media metadata', async () => {
+    const sendRes = await makeRequest('/api/v1/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bobToken}`,
+      },
+      body: JSON.stringify({
+        conversationId: validUserPayload.id,
+        text: 'DM notification check',
+        messageType: 'media',
+        mediaUrl: 'https://example.invalid/media.jpg',
+        mediaMimeType: 'image/jpeg',
+        isSpoiler: true,
+      }),
+    });
+    if (sendRes.status !== 201) throw new Error(`Expected DM creation 201, got ${sendRes.status}`);
+    const sendJson = (await sendRes.json()) as any;
+    if (sendJson.data?.mediaMimeType !== 'image/jpeg' || sendJson.data?.isSpoiler !== true) {
+      throw new Error('DM validation dropped attachment MIME type or spoiler state');
+    }
+    const notification = await NotificationModel.findOne({
+      userId: validUserPayload.id,
+      type: 'direct_message',
+      'actionData.conversationId': bobUserPayload.id,
+      'actionData.messageId': sendJson.data.id,
+    });
+    if (!notification) throw new Error('Incoming DM did not create a persistent notification');
+    if (notification.expiresAt && notification.expiresAt.getTime() <= Date.now()) {
+      throw new Error('DM notification expired immediately');
+    }
+
+    const basicEdit = await makeRequest(`/api/v1/chat/${sendJson.data.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+      body: JSON.stringify({ text: 'Basic edit one' }),
+    });
+    if (basicEdit.status !== 200) throw new Error(`Basic user's first edit should pass, got ${basicEdit.status}`);
+    const basicSecondEdit = await makeRequest(`/api/v1/chat/${sendJson.data.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+      body: JSON.stringify({ text: 'Basic edit two' }),
+    });
+    if (basicSecondEdit.status !== 403) throw new Error(`Basic user's second edit should be rejected, got ${basicSecondEdit.status}`);
+
+    const unsend = await makeRequest(`/api/v1/chat/${sendJson.data.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${bobToken}` },
+    });
+    if (unsend.status !== 200) throw new Error(`Fresh DM should be unsendable within two minutes, got ${unsend.status}`);
+    const unsendJson = (await unsend.json()) as any;
+    if (!unsendJson.data?.deletedAt || unsendJson.data?.mediaUrl) {
+      throw new Error('Unsent DM did not become an attachment-free tombstone');
+    }
+
+    for (const tier of ['premium', 'premium_plus']) {
+      await UserModel.updateOne({ _id: bobUserPayload.id }, { $set: { tier } });
+      const create = await makeRequest('/api/v1/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+        body: JSON.stringify({ conversationId: validUserPayload.id, text: `${tier} edit test` }),
+      });
+      if (create.status !== 201) throw new Error(`${tier} DM creation failed with ${create.status}`);
+      const created = (await create.json()) as any;
+      for (let edit = 1; edit <= 2; edit++) {
+        const response = await makeRequest(`/api/v1/chat/${created.data.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+          body: JSON.stringify({ text: `${tier} edit ${edit}` }),
+        });
+        if (response.status !== 200) throw new Error(`${tier} edit ${edit} should pass, got ${response.status}`);
+      }
+      const thirdEdit = await makeRequest(`/api/v1/chat/${created.data.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+        body: JSON.stringify({ text: `${tier} edit 3` }),
+      });
+      if (thirdEdit.status !== 403) throw new Error(`${tier} third edit should be rejected, got ${thirdEdit.status}`);
+    }
+  });
+
   await assertTest('Excessive OTP requests trigger rate limiting (429)', async () => {
     let got429 = false;
     for (let i = 0; i < 6; i++) {

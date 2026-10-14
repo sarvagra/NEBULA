@@ -90,12 +90,14 @@ class HomeViewModel(
                                 val action = item.optJSONObject("actionData")
                                 val type = when (item.optString("type")) {
                                     "friend_request" -> NotificationType.FRIEND_REQUEST
+                                    "direct_message" -> NotificationType.DIRECT_MESSAGE
                                     "room_invite" -> NotificationType.ROOM_INVITE
                                     "room_activity" -> NotificationType.ROOM_STARTED
                                     else -> NotificationType.NOTICE
                                 }
                                 val actionLabel = when (type) {
                                     NotificationType.FRIEND_REQUEST -> "Accept"
+                                    NotificationType.DIRECT_MESSAGE -> "Open chat"
                                     NotificationType.ROOM_INVITE, NotificationType.ROOM_STARTED -> "Open"
                                     NotificationType.NOTICE -> null
                                 }
@@ -107,6 +109,7 @@ class HomeViewModel(
                                     timeLabel = "Recent",
                                     actionLabel = actionLabel,
                                     relatedId = action?.optString("friendshipId")?.ifBlank { null }
+                                        ?: action?.optString("conversationId")?.ifBlank { null }
                                         ?: action?.optString("roomId")?.ifBlank { null },
                                     isRead = item.optBoolean("isRead", false)
                                 )
@@ -607,6 +610,27 @@ class HomeViewModel(
         }
     }
 
+    fun onOpenNotificationDestination(type: String, id: String) {
+        when (type) {
+            "dm" -> viewModelScope.launch {
+                if (socialRepository.conversations.value.none { it.id == id }) socialRepository.refresh()
+                socialRepository.selectConversation(id)
+                val conversation = socialRepository.activeConversation.value
+                if (conversation != null) {
+                    _uiState.value = _uiState.value.copy(
+                        currentTab = NebulaTab.CHATS,
+                        activeRoom = null,
+                        activeSocialConversation = conversation
+                    )
+                } else {
+                    showToast("That conversation is no longer available.")
+                }
+            }
+            "room_invite", "room_activity" -> onJoinRoom(id)
+            "friend_request" -> onTabSelected(NebulaTab.FRIENDS)
+        }
+    }
+
     fun onMessageFriend(user: NebulaUser) {
         val conversation = _uiState.value.socialConversations.firstOrNull { it.partnerUser?.id == user.id }
             ?: NebulaConversation(
@@ -1050,6 +1074,7 @@ class HomeViewModel(
     // --- V2 NOTIFICATIONS & POLLS & VAULT ---
     fun onOpenNotifications() {
         _uiState.value = _uiState.value.copy(activeModalSheet = ActiveModalSheet.Notifications)
+        refreshAll()
     }
 
 
@@ -1132,6 +1157,22 @@ class HomeViewModel(
                             onDismissNotification(notif.id)
                         }
                     }
+                }
+            }
+            com.nebula.app.domain.model.NotificationType.DIRECT_MESSAGE -> {
+                viewModelScope.launch {
+                    when (com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)) {
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                            _uiState.value = _uiState.value.copy(
+                                notifications = _uiState.value.notifications.map {
+                                    if (it.id == notif.id) it.copy(isRead = true) else it
+                                }
+                            )
+                        }
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                            showToast("Notification could not be marked read. Try again.")
+                    }
+                    notif.relatedId?.let { onSelectSocialConversation(it) }
                 }
             }
             com.nebula.app.domain.model.NotificationType.ROOM_INVITE,

@@ -38,12 +38,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.MutableStateFlow
 
 import com.nebula.app.data.auth.NebulaAuthManager
 import com.nebula.app.data.repository.RoomRepositoryImpl
 import com.nebula.app.data.repository.SocialRepositoryImpl
 
 class MainActivity : ComponentActivity() {
+    private val notificationDestination = MutableStateFlow<Pair<String, String>?>(null)
 
     // Session Manager
     private val sessionManager by lazy { com.nebula.app.data.local.SessionManager.getInstance(this) }
@@ -81,16 +83,24 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        notificationDestination.value = notificationDestinationFrom(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install Android 12+ system splashscreen
         installSplashScreen()
         super.onCreate(savedInstanceState)
         com.nebula.app.data.backend.NebulaApiClient.sessionManager = sessionManager
+        notificationDestination.value = notificationDestinationFrom(intent)
         enableEdgeToEdge()
 
         setContent {
             val activeTheme by themeRepository.activeTheme.collectAsState()
             val uiState by homeViewModel.uiState.collectAsState()
+            val pendingNotification by notificationDestination.collectAsState()
             val showWelcomeBack by homeViewModel.showWelcomeBack.collectAsState()
             val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
                 getSharedPreferences("nebula_push", MODE_PRIVATE).edit().putBoolean("notification_permission_prompt_completed", true).apply()
@@ -108,6 +118,13 @@ class MainActivity : ComponentActivity() {
                         val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
                         if (token.isNotBlank()) com.nebula.app.data.backend.NebulaApiClient.registerNotificationDevice(token)
                     }
+                }
+            }
+            LaunchedEffect(uiState.userProfile.isLoggedIn, pendingNotification) {
+                val destination = pendingNotification
+                if (uiState.userProfile.isLoggedIn && destination != null) {
+                    homeViewModel.onOpenNotificationDestination(destination.first, destination.second)
+                    notificationDestination.value = null
                 }
             }
             var isSplashVisible by remember { mutableStateOf(true) }
@@ -163,6 +180,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun notificationDestinationFrom(intent: android.content.Intent?): Pair<String, String>? {
+        if (intent == null) return null
+        val type = intent.getStringExtra("nebula_type") ?: return null
+        val id = when (type) {
+            "dm" -> intent.getStringExtra("nebula_conversationId")
+            "room_invite", "room_activity" -> intent.getStringExtra("nebula_roomId")
+            "friend_request" -> intent.getStringExtra("nebula_userId")
+            else -> null
+        }?.takeIf { it.isNotBlank() } ?: return null
+        return type to id
     }
 }
 

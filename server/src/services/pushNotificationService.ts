@@ -14,7 +14,11 @@ export async function sendDeviceNotification(
       tokens: distinctTokens,
       notification: { title, body },
       data,
-      android: { priority: 'high', notification: { channelId: 'nebula_social' } },
+      android: {
+        priority: 'high',
+        ...(data.type === 'room_invite' ? { ttl: 5 * 60 * 1000 } : {}),
+        notification: { channelId: 'nebula_social' },
+      },
     });
     const invalidTokens = result.responses.flatMap((response, index) =>
       !response.success && ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'].includes(response.error?.code || '')
