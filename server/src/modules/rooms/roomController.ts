@@ -324,6 +324,19 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
       res.status(403).json({ success: false, error: 'You can only invite accepted friends' });
       return;
     }
+
+    // N-034: block enforcement — a block from either direction prevents invites.
+    const blockRecord = await FriendshipModel.findOne({
+      status: 'blocked',
+      $or: [
+        { requesterId: req.user.id, recipientId: userId },
+        { requesterId: userId, recipientId: req.user.id },
+      ],
+    }).select('_id');
+    if (blockRecord) {
+      res.status(403).json({ success: false, error: 'Unable to invite this user' });
+      return;
+    }
     const recipient = await UserModel.findById(userId).select('_id isBanned');
     if (!recipient || recipient.isBanned) {
       res.status(404).json({ success: false, error: 'User not found or unavailable' });

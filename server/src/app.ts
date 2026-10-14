@@ -90,10 +90,8 @@ export function createApp(): express.Application {
   // 5. Global NoSQL Operator Injection Sanitizer
   app.use(noSqlSanitizer);
 
-  // 6. Global Rate Limiter
-  app.use(globalApiRateLimiter);
-
-  // 7. Health & Readiness Endpoints
+  // 6. Health, readiness, and storage routes — registered BEFORE the global rate
+  //    limiter so infrastructure probes and media token checks are never throttled.
   app.get('/', (req, res) => {
     res.json({
       name: 'Nebula API Server',
@@ -124,13 +122,15 @@ export function createApp(): express.Application {
         status: 'not_ready',
         database: dbState === 2 ? 'connecting' : 'disconnected',
       });
-
     }
   });
 
-  // Private profile and chat objects must remain reachable through the public
-  // API regardless of database readiness; authorization is enforced by token.
+  // Private profile and chat objects must remain reachable regardless of load;
+  // authorization is enforced by the signed token in the query string.
   app.get('/storage/:encodedKey', redirectToObject);
+
+  // 7. Global Rate Limiter (applied only to /api/v1/* routes below)
+  app.use(globalApiRateLimiter);
 
   // 8. Mount Protected API v1 Routers
   app.use('/api/v1/auth', authRouter);

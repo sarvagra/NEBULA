@@ -20,6 +20,13 @@ export interface IMessage extends Document {
   editedAt?: Date;
   editHistory: { text: string; editedAt: Date }[];
   deletedAt?: Date;
+  /**
+   * N-003: client-supplied idempotency key. Prevents duplicate DMs on retry/
+   * reconnect. Scoped per sender+conversation pair so the key never needs to be
+   * globally unique — the client can use a UUID or timestamp per message.
+   * Stored only for DMs (conversationId present, roomId absent).
+   */
+  idempotencyKey?: string;
   createdAt: Date;
 }
 
@@ -50,6 +57,10 @@ const MessageSchema = new Schema<IMessage>(
       editedAt: { type: Date, required: true },
     }],
     deletedAt: { type: Date },
+    // N-003: deduplication. Declared as optional String with no default.
+    // A pre-validate hook (below) strips null/empty so the partial-filter index
+    // only ever sees real, non-empty string values and null never reaches it.
+    idempotencyKey: { type: String },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },
@@ -62,6 +73,30 @@ const MessageSchema = new Schema<IMessage>(
         return ret;
       },
     },
+  }
+);
+
+// N-003: strip null/empty idempotencyKey before save. When no key is supplied
+// Mongoose stores null for declared String paths. By unsetting it here the field
+// is truly absent in the stored document, so the partialFilterExpression below
+// excludes it from the unique index and the E11000 cannot fire for un-keyed msgs.
+MessageSchema.pre('save', function (next) {
+  if (this.idempotencyKey == null || this.idempotencyKey === '') {
+    this.idempotencyKey = undefined;
+  }
+  next();
+});
+
+// N-003: deduplication index. Unique per sender+conversation+key.
+// partialFilterExpression restricts the index to documents that actually have a
+// non-empty idempotencyKey — null/absent docs are excluded at the MongoDB level,
+// so the uniqueness constraint never fires for un-keyed messages.
+MessageSchema.index(
+  { senderId: 1, conversationId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    name: 'dm_idempotency',
+    partialFilterExpression: { idempotencyKey: { $type: 'string' } },
   }
 );
 

@@ -59,6 +59,24 @@ export function notifyRoomMediaSwitch(roomId: string, mediaState: { title: strin
   });
 }
 
+/**
+ * Tells the original sender that the recipient opened their thread, so the
+ * message ticks can move from delivered to read without a manual reload.
+ */
+export function notifyConversationRead(
+  readerId: string,
+  senderId: string,
+  readAt: string,
+  readCount: number,
+): void {
+  roomIo?.to(`user:${senderId}`).emit('chat:read', {
+    conversationId: readerId,
+    readerId,
+    readAt,
+    readCount,
+  });
+}
+
 export function notifyUserSocialChanged(userIds: string[]): void {
   for (const userId of new Set(userIds)) {
     roomIo?.to(`user:${userId}`).emit('friendship:changed');
