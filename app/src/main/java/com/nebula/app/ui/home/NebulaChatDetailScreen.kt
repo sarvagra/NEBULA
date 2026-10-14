@@ -68,7 +68,6 @@ import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.theme.Theme
-import com.nebula.app.ui.profile.Custom1to1CropDialog
 import com.nebula.app.ui.components.NebulaAvatarImage
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
@@ -280,8 +279,6 @@ fun NebulaChatDetailScreen(
         var isUploadingMedia by remember { mutableStateOf(false) }
         var uploadProgress by remember { mutableIntStateOf(0) }
         var attachmentIsSpoiler by remember { mutableStateOf(false) }
-        var pendingImageBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-        var showImageCrop by remember { mutableStateOf(false) }
 
         val imagePickerLauncher = rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
@@ -319,61 +316,39 @@ fun NebulaChatDetailScreen(
                         }
                         return@launch
                     }
-                    val bitmap = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(it)?.use { stream ->
-                            android.graphics.BitmapFactory.decodeStream(stream)
-                        }
+                    val bytes = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: ByteArray(0)
                     }
-                    if (bitmap != null) {
-                        pendingImageBitmap = bitmap
-                        showImageCrop = true
+                    if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) {
+                        android.widget.Toast.makeText(context, "Image must be under 5MB", android.widget.Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    isUploadingMedia = true
+                    try {
+                        val dataUrl = "data:$mimeType;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
+                            url = dataUrl,
+                            mimeType = mimeType,
+                            mediaType = "image",
+                            sizeBytes = bytes.size.toLong(),
+                            onProgress = { uploadProgress = it }
+                        )) {
+                            is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                                val mediaUrl = res.data.optString("mediaUrl")
+                                if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
+                                else android.widget.Toast.makeText(context, "Image upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
+                                android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Image could not be uploaded", android.widget.Toast.LENGTH_LONG).show()
+                    } finally {
+                        isUploadingMedia = false
+                        showAttachments = false
                     }
                 }
             }
-        }
-
-        if (showImageCrop && pendingImageBitmap != null) {
-            Custom1to1CropDialog(
-                bitmap = pendingImageBitmap!!,
-                onConfirmCrop = { cropped ->
-                    showImageCrop = false
-                    coroutineScope.launch {
-                        isUploadingMedia = true
-                        try {
-                            val output = java.io.ByteArrayOutputStream()
-                            cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, output)
-                            val imageBytes = output.toByteArray()
-                            if (imageBytes.size > 5 * 1024 * 1024) {
-                                android.widget.Toast.makeText(context, "Image must be under 5MB after crop", android.widget.Toast.LENGTH_LONG).show()
-                                pendingImageBitmap = null
-                                return@launch
-                            }
-                            val dataUrl = "data:image/jpeg;base64," +
-                                android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
-                            when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
-                                url = dataUrl,
-                                mimeType = "image/jpeg",
-                                mediaType = "image",
-                                sizeBytes = imageBytes.size.toLong(),
-                                onProgress = { uploadProgress = it }
-                            )) {
-                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success ->
-                                    onSendAttachment("", res.data.optString("mediaUrl", dataUrl), "media", attachmentIsSpoiler, "image/jpeg")
-                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
-                                    android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
-                            }
-                        } finally {
-                            isUploadingMedia = false
-                            pendingImageBitmap = null
-                            showAttachments = false
-                        }
-                    }
-                },
-                onDismiss = {
-                    showImageCrop = false
-                    pendingImageBitmap = null
-                }
-            )
         }
 
         val videoPickerLauncher = rememberLauncherForActivityResult(
