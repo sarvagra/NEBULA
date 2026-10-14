@@ -254,6 +254,7 @@ data class RoomChatMessage(
     val senderId: String,
     val senderName: String,
     val senderAvatar: String,
+    val senderAvatarUrl: String? = null,
     val content: String,
     val timeLabel: String = "Just now",
     val isSystemMessage: Boolean = false
@@ -304,6 +305,7 @@ data class NebulaRoom(
     val participantCount: Int = 0,
     val participants: List<RoomParticipant> = emptyList(),
     val isPlaying: Boolean = true,
+    val mediaEnded: Boolean = false,
     val playbackPositionMs: Long = 762000L, // 12:42
     val playbackPositionLabel: String = "12:42",
     val durationLabel: String = "2:49:00",

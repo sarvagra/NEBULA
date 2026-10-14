@@ -116,7 +116,6 @@ import com.nebula.app.domain.model.RoomParticipant
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.PABottomSheet
 import com.nebula.app.ui.dialogs.AttachmentPickerSheet
-import com.nebula.app.ui.dialogs.FriendProfileSheet
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -149,6 +148,9 @@ fun NebulaRoomScreen(
     onLeaveRoom: (newHostId: String?) -> Unit,
     onRefreshRoom: () -> Unit = {},
     onHostPlaybackSample: (Long, Boolean) -> Unit = { _, _ -> },
+    onHostVideoEnded: (Long) -> Unit = {},
+    onRestartVideo: () -> Unit = {},
+    onViewParticipantProfile: (NebulaUser) -> Unit = {},
     onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
     onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
     onTogglePlayPause: () -> Unit,
@@ -199,7 +201,6 @@ fun NebulaRoomScreen(
     var showMembersSheet by remember { mutableStateOf(false) }
     var showRoomSettings by remember { mutableStateOf(false) }
     var showMediaSearchSheet by remember { mutableStateOf(false) }
-    var selectedMemberForProfile by remember { mutableStateOf<NebulaUser?>(null) }
     var showHostTransferDialog by remember { mutableStateOf(false) }
     var showLeaveConfirmation by remember { mutableStateOf(false) }
     var showInviteFriends by remember { mutableStateOf(false) }
@@ -308,8 +309,6 @@ fun NebulaRoomScreen(
             showRoomSettings = false
         } else if (showMembersSheet) {
             showMembersSheet = false
-        } else if (selectedMemberForProfile != null) {
-            selectedMemberForProfile = null
         } else {
             showLeaveConfirmation = true
         }
@@ -360,6 +359,9 @@ fun NebulaRoomScreen(
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
+                    onHostVideoEnded = onHostVideoEnded,
+                    mediaEnded = room.mediaEnded,
+                    onRestartVideo = onRestartVideo,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -483,25 +485,8 @@ fun NebulaRoomScreen(
                     }
                 }
 
-                // Settings Option (Accessible only to Admins)
+                // Room settings (video switch is pinned to the player itself)
                 if (isCurrentUserAdmin) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable { showMediaSearchSheet = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search & Queue Video",
-                            tint = theme.colors.primaryAccent,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-
                     Box(
                         modifier = Modifier
                             .size(30.dp)
@@ -607,33 +592,6 @@ fun NebulaRoomScreen(
                         )
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { showMediaSearchSheet = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFCC0000)
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Search YouTube",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
                 }
             } else {
                 NebulaYoutubePlayer(
@@ -645,8 +603,21 @@ fun NebulaRoomScreen(
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
+                    onHostVideoEnded = onHostVideoEnded,
+                    mediaEnded = room.mediaEnded,
+                    onRestartVideo = onRestartVideo,
                     modifier = Modifier.fillMaxSize()
                 )
+
+                if (isCurrentUserAdmin) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(8.dp).size(32.dp).clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.65f)).clickable { showMediaSearchSheet = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = "Switch video for room", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
 
                 // Fullscreen / Landscape Toggle Button
                 IconButton(
@@ -745,32 +716,6 @@ fun NebulaRoomScreen(
                         }
                     }
 
-                    // In-room Change / Queue Video
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable { showMediaSearchSheet = true }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search Video",
-                            tint = theme.colors.primaryAccent,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = "Switch Video",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
                 } else {
                     Row(
                         modifier = Modifier
@@ -778,7 +723,6 @@ fun NebulaRoomScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .background(theme.colors.surface.copy(alpha = 0.5f))
                             .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .clickable { showMediaSearchSheet = true }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -801,14 +745,6 @@ fun NebulaRoomScreen(
                                 )
                             )
                         }
-                        Text(
-                            text = "Search YouTube",
-                            style = theme.typography.caption.copy(
-                                color = Color(0xFFEF4444),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        )
                     }
                 }
             } else {
@@ -1174,7 +1110,7 @@ fun NebulaRoomScreen(
             canModerate = isCurrentUserAdmin,
             onSelectParticipantProfile = { memberUser ->
                 showMembersSheet = false
-                selectedMemberForProfile = memberUser
+                onViewParticipantProfile(memberUser)
             },
             onDismiss = { showMembersSheet = false }
         )
@@ -1214,24 +1150,6 @@ fun NebulaRoomScreen(
                 Toast.makeText(context, "Room settings updated successfully", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showRoomSettings = false }
-        )
-    }
-
-    // Public Profile Sheet for clicked member
-    if (selectedMemberForProfile != null) {
-        FriendProfileSheet(
-            isVisible = true,
-            user = selectedMemberForProfile,
-            onMessage = { u ->
-                selectedMemberForProfile = null
-                onSendRoomMessage("@${u.displayName} ")
-            },
-            onInviteToRoom = {
-                selectedMemberForProfile = null
-            },
-            onDismiss = {
-                selectedMemberForProfile = null
-            }
         )
     }
 
@@ -1311,7 +1229,8 @@ fun NebulaRoomScreen(
 
     if (showInviteFriends) {
         RoomInviteFriendsSheet(
-            friends = friends.filterNot { friend -> participantsList.any { it.user.id == friend.id } },
+            friends = friends.filterNot { friend -> participantsList.any { it.user.id == friend.id } }
+                .sortedWith(compareByDescending<NebulaUser> { it.currentRoomId != null || it.isOnline }.thenBy { it.displayName.lowercase() }),
             onInvite = { friend ->
                 onInviteFriend(friend)
                 showInviteFriends = false
@@ -1331,6 +1250,9 @@ private fun NebulaYoutubePlayer(
     locallyPaused: Boolean,
     hostSeekCommand: Pair<Long, Long>?,
     onHostSample: (Long, Boolean) -> Unit,
+    onHostVideoEnded: (Long) -> Unit,
+    mediaEnded: Boolean,
+    onRestartVideo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Realme's app-clone profile is a separate Android user on the same audio
@@ -1340,9 +1262,11 @@ private fun NebulaYoutubePlayer(
     val player = remember(roomId, videoId) { mutableStateOf<WebView?>(null) }
     val latestSample = remember { AtomicReference(onHostSample) }
     val latestIsHost = remember { AtomicBoolean(isHost) }
+    val latestOnVideoEnded = remember { AtomicReference(onHostVideoEnded) }
     SideEffect {
         latestSample.set(onHostSample)
         latestIsHost.set(isHost)
+        latestOnVideoEnded.set(onHostVideoEnded)
     }
     DisposableEffect(roomId, videoId) {
         onDispose {
@@ -1373,15 +1297,19 @@ private fun NebulaYoutubePlayer(
                             latestSample.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L), false)
                         }
                     }
+                    @JavascriptInterface
+                    fun ended(seconds: Double) {
+                        if (latestIsHost.get()) latestOnVideoEnded.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L))
+                    }
                 }, "Nebula")
                 player.value = this
                 val html = """
                     <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}body{position:fixed;inset:0}#p{position:absolute;top:0;left:0}</style></head>
                     <body><div id="p"></div><script>
-                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false, muteAudioForProfile=$muteAudioForAndroidProfile;
-                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
-                    function applyPending(){if(!ready||!pending)return;let s=pending; if(muteAudioForProfile)player.mute(); if(localPause){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
-                    function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;applyPending();}
+                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false, ended=$mediaEnded, muteAudioForProfile=$muteAudioForAndroidProfile;
+                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(e.data===0){ended=true;if(window.Nebula){try{Nebula.ended(player.getCurrentTime()||0)}catch(_){}}return;}if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
+                    function applyPending(){if(!ready||!pending)return;let s=pending; if(muteAudioForProfile)player.mute(); if(localPause){player.pauseVideo();return;}if(ended&&!s.playing){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(ended&&target>1){player.pauseVideo();return;}ended=false;if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
+                    function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;if(position<1000&&playing)ended=false;applyPending();}
                     setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
                     let apiScript=document.createElement('script');apiScript.src='https://www.youtube.com/iframe_api';document.head.appendChild(apiScript);
                     </script></body></html>
@@ -1401,6 +1329,18 @@ private fun NebulaYoutubePlayer(
     LaunchedEffect(player.value, hostSeekCommand?.first) {
         val positionMs = hostSeekCommand?.second ?: return@LaunchedEffect
         player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player&&typeof player.seekTo==='function'){player.seekTo(${positionMs.coerceAtLeast(0L) / 1000.0},true);}", null)
+    }
+    LaunchedEffect(player.value, mediaEnded) {
+        player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player){ended=$mediaEnded;if(ended)player.pauseVideo();}", null)
+    }
+    if (mediaEnded) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.8f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Video ended", color = Color.White, fontWeight = FontWeight.Bold)
+                if (isHost) Button(onClick = onRestartVideo) { Text("Restart for everyone") }
+                else Text("Waiting for host to restart", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            }
+        }
     }
 }
 
@@ -2096,14 +2036,7 @@ private fun ParticipantAvatarPill(
                 .background(theme.colors.surfaceElevated),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = participant.user.avatarLetter,
-                style = theme.typography.caption.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = theme.colors.textPrimary
-                )
-            )
+            NebulaAvatarImage(participant.user.avatarUrl, participant.user.avatarLetter, modifier = Modifier.size(22.dp))
         }
 
         Text(
@@ -2138,22 +2071,7 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(theme.colors.surfaceElevated),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = message.senderAvatar,
-                style = theme.typography.caption.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = theme.colors.textPrimary
-                )
-            )
-        }
+        NebulaAvatarImage(message.senderAvatarUrl, message.senderAvatar, modifier = Modifier.size(28.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Row(

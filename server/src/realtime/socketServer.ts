@@ -15,10 +15,12 @@ interface AuthenticatedSocketUser {
   displayName: string;
   tier: SubscriptionTier;
   activeRoomId: string | null;
+  avatarUrl?: string;
+  avatarLetter?: string;
 }
 
 let roomIo: Server | null = null;
-type LivePlayback = { positionMs: number; isPlaying: boolean; timestamp: number };
+type LivePlayback = { positionMs: number; isPlaying: boolean; timestamp: number; ended?: boolean };
 const livePlaybackByRoom = new Map<string, LivePlayback>();
 const liveHostByRoom = new Map<string, string>();
 
@@ -41,6 +43,20 @@ export function notifyRoomParticipantKicked(roomId: string, userId: string): voi
 
 export function notifyRoomParticipantUpdated(roomId: string, participant: { userId: string; isMuted: boolean; isCameraOff: boolean }): void {
   roomIo?.to(`room:${roomId}`).emit('participant:updated', participant);
+}
+
+export function notifyRoomsParticipantProfileUpdated(roomIds: string[], userId: string): void {
+  for (const roomId of roomIds) roomIo?.to(`room:${roomId}`).emit('participant:updated', { userId, profileUpdated: true });
+}
+
+export function notifyRoomMediaSwitch(roomId: string, mediaState: { title: string; subtitle: string; mediaUrl: string; durationSeconds: number; playbackPosition: number; isPlaying: boolean }): void {
+  if (!roomIo) return;
+  const timestamp = Date.now();
+  livePlaybackByRoom.set(roomId, { positionMs: 0, isPlaying: true, timestamp, ended: false });
+  roomIo.to(`room:${roomId}`).emit('media:switch', {
+    mediaState: { ...mediaState, playbackPosition: 0, playbackPositionMs: 0, isPlaying: true },
+    senderId: 'server', timestamp, ended: false,
+  });
 }
 
 export function notifyUserSocialChanged(userIds: string[]): void {
@@ -146,7 +162,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
       let user: any = null;
       if (mongoose.connection.readyState === 1) {
-        user = await UserModel.findById(decoded.id).select('_id username displayName tier isBanned activeRoomId');
+        user = await UserModel.findById(decoded.id).select('_id username displayName avatarUrl avatarLetter tier isBanned activeRoomId');
         if (!user) {
           return next(new Error('Authentication failed: User no longer exists'));
         }
@@ -162,6 +178,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
         id: user._id.toString(),
         username: user.username,
         displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        avatarLetter: user.avatarLetter,
         tier: user.tier,
         activeRoomId: user.activeRoomId?.toString() ?? null,
       };
@@ -235,7 +253,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
         socket.to(`room:${room._id.toString()}`).emit('participant:joined', {
           userId: user.id, displayName: user.displayName,
-          avatarLetter: user.displayName.charAt(0).toUpperCase(), timestamp: Date.now(),
+          avatarLetter: user.avatarLetter || user.displayName.charAt(0).toUpperCase(), avatarUrl: user.avatarUrl, timestamp: Date.now(),
         });
         const livePlayback = livePlaybackByRoom.get(room._id.toString());
         const currentPositionMs = livePlayback
@@ -245,6 +263,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           position: currentPositionMs / 1000,
           positionMs: currentPositionMs,
           isPlaying: livePlayback?.isPlaying ?? room.mediaState.isPlaying,
+          ended: livePlayback?.ended ?? false,
           mediaState: {
             title: room.mediaState.title,
             subtitle: room.mediaState.subtitle,
@@ -336,7 +355,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         room.mediaState.playbackPosition = 0;
         room.mediaState.isPlaying = true;
         await room.save();
-        livePlaybackByRoom.set(data.roomId, { positionMs: 0, isPlaying: true, timestamp: Date.now() });
+        livePlaybackByRoom.set(data.roomId, { positionMs: 0, isPlaying: true, timestamp: Date.now(), ended: false });
 
         io.to(`room:${data.roomId}`).emit('media:switch', {
           mediaState: {
@@ -350,9 +369,45 @@ export function initSocketServer(httpServer: HttpServer): Server {
           },
           senderId: user.id,
           timestamp: Date.now(),
+          ended: false,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Media switch failed' });
+      }
+    });
+
+    socket.on('media:end', async (data: { roomId: string; positionMs?: number }) => {
+      try {
+        const roomId = data?.roomId;
+        if (!roomId || !isValidObjectId(roomId) || liveHostByRoom.get(roomId) !== user.id || !joinedRooms.has(roomId)) return;
+        const room = await RoomModel.findById(roomId);
+        if (!room || room.hostId !== user.id) return;
+        const positionMs = Math.max(0, Number(data.positionMs) || 0);
+        const timestamp = Date.now();
+        livePlaybackByRoom.set(roomId, { positionMs, isPlaying: false, timestamp, ended: true });
+        room.mediaState.playbackPosition = positionMs / 1000;
+        room.mediaState.isPlaying = false;
+        await room.save();
+        io.to(`room:${roomId}`).emit('media:ended', { roomId, positionMs, isPlaying: false, ended: true, timestamp, senderId: user.id });
+      } catch {
+        socket.emit('error', { message: 'Could not synchronize video end state' });
+      }
+    });
+
+    socket.on('media:restart', async (data: { roomId: string }) => {
+      try {
+        const roomId = data?.roomId;
+        if (!roomId || !isValidObjectId(roomId) || liveHostByRoom.get(roomId) !== user.id || !joinedRooms.has(roomId)) return;
+        const room = await RoomModel.findById(roomId);
+        if (!room || room.hostId !== user.id) return;
+        const timestamp = Date.now();
+        livePlaybackByRoom.set(roomId, { positionMs: 0, isPlaying: true, timestamp, ended: false });
+        room.mediaState.playbackPosition = 0;
+        room.mediaState.isPlaying = true;
+        await room.save();
+        io.to(`room:${roomId}`).emit('media:restart', { roomId, positionMs: 0, isPlaying: true, ended: false, timestamp, senderId: user.id });
+      } catch {
+        socket.emit('error', { message: 'Could not restart video for this room' });
       }
     });
 
@@ -372,7 +427,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
-        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: true, timestamp });
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: true, timestamp, ended: false });
         room.mediaState.isPlaying = true;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
@@ -402,7 +457,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
-        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: false, timestamp });
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: false, timestamp, ended: false });
         room.mediaState.isPlaying = false;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
@@ -433,7 +488,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
         const prior = livePlaybackByRoom.get(data.roomId);
-        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: prior?.isPlaying ?? room.mediaState.isPlaying, timestamp });
+        livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: prior?.isPlaying ?? room.mediaState.isPlaying, timestamp, ended: safePositionMs === 0 ? false : prior?.ended });
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
 
@@ -463,19 +518,21 @@ export function initSocketServer(httpServer: HttpServer): Server {
           const positionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
           const isPlaying = data.isPlaying === true;
           const now = Date.now();
-          livePlaybackByRoom.set(data.roomId, { positionMs, isPlaying, timestamp: now });
+          const ended = livePlaybackByRoom.get(data.roomId)?.ended ?? false;
+          livePlaybackByRoom.set(data.roomId, { positionMs, isPlaying: ended ? false : isPlaying, timestamp: now, ended });
           if (now - (mediaCheckpointAt.get(data.roomId) ?? 0) >= 5_000) {
             const room = await RoomModel.findById(data.roomId);
             if (!room || room.hostId !== user.id) return;
             room.mediaState.playbackPosition = positionMs / 1000;
-            room.mediaState.isPlaying = isPlaying;
+            room.mediaState.isPlaying = ended ? false : isPlaying;
             await room.save();
             mediaCheckpointAt.set(data.roomId, now);
           }
           io.to(`room:${data.roomId}`).except(socket.id).emit('media:sync', {
             position: positionMs / 1000,
             positionMs,
-            isPlaying,
+            isPlaying: ended ? false : isPlaying,
+            ended,
             timestamp: now,
             senderId: user.id,
           });
@@ -521,6 +578,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           senderId: user.id, // Strictly server-authoritative
           senderName: user.displayName,
           senderAvatarLetter: user.displayName.charAt(0).toUpperCase(),
+          senderAvatarUrl: (await UserModel.findById(user.id).select('avatarUrl'))?.avatarUrl,
           text: safeText,
           mediaUrl: data.mediaUrl?.slice(0, 7000000),
           messageType: data.mediaUrl ? 'media' : 'text',

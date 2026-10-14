@@ -34,6 +34,8 @@ interface IRoomRepository {
     suspend fun togglePlayPause()
     suspend fun seekTo(positionMs: Long, positionLabel: String)
     fun reportHostPlayerSample(positionMs: Long, isPlaying: Boolean)
+    fun reportVideoEnded(positionMs: Long)
+    fun restartVideo()
     suspend fun sendRoomMessage(content: String)
     suspend fun sendReaction(emoji: String)
     suspend fun votePoll(optionId: String): Boolean

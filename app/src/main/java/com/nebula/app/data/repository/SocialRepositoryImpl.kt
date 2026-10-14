@@ -133,7 +133,8 @@ class SocialRepositoryImpl(
     override suspend fun refresh() {
         val friends = apiClient.getFriends()
         if (friends is ApiResponse.Success) {
-            _friends.value = parseUsers(friends.data)
+            val friendUsers = parseUsers(friends.data)
+            _friends.value = attachRoomPresence(friendUsers)
             _conversations.value = _friends.value.map { friend ->
                 NebulaConversation(
                     id = friend.id,
@@ -154,19 +155,36 @@ class SocialRepositoryImpl(
         }
     }
 
+    private suspend fun attachRoomPresence(users: List<NebulaUser>): List<NebulaUser> {
+        if (users.isEmpty()) return users
+        val activeRooms = apiClient.getRooms()
+        if (activeRooms !is ApiResponse.Success) return users
+        val roomByUser = mutableMapOf<String, String>()
+        for (index in 0 until activeRooms.data.length()) {
+            val room = activeRooms.data.optJSONObject(index) ?: continue
+            val roomId = room.optString("id")
+            val participants = room.optJSONArray("participants") ?: continue
+            for (participantIndex in 0 until participants.length()) {
+                val userId = participants.optJSONObject(participantIndex)?.optString("userId") ?: continue
+                if (userId.isNotBlank()) roomByUser[userId] = roomId
+            }
+        }
+        return users.map { user -> roomByUser[user.id]?.let { user.copy(currentRoomId = it, isOnline = true, presenceStatus = com.nebula.app.domain.model.NebulaPresenceStatus.IN_A_ROOM) } ?: user }
+    }
+
     override suspend fun searchPeople(query: String) {
         if (query.trim().length < 2) {
             _searchResults.value = emptyList()
             return
         }
         val result = apiClient.searchUsers(query)
-        if (result is ApiResponse.Success) _searchResults.value = parseUsers(result.data)
+        if (result is ApiResponse.Success) _searchResults.value = attachRoomPresence(parseUsers(result.data))
     }
 
     override suspend fun refreshSuggestions(): Boolean {
         val result = apiClient.refreshSuggestedPeople(_suggestedPeople.value.map { it.id })
         if (result is ApiResponse.Success) {
-            _suggestedPeople.value = parseUsers(result.data)
+            _suggestedPeople.value = attachRoomPresence(parseUsers(result.data))
             return true
         }
         return false
@@ -183,6 +201,13 @@ class SocialRepositoryImpl(
 
     override suspend fun loadPublicProfile(username: String): NebulaUser? {
         val response = apiClient.getPublicProfile(username)
+        if (response !is ApiResponse.Success) return null
+        val user = response.data.optJSONObject("data") ?: return null
+        return parseUsers(JSONArray().put(user)).firstOrNull()
+    }
+
+    override suspend fun loadPublicProfileById(userId: String): NebulaUser? {
+        val response = apiClient.getPublicProfileById(userId)
         if (response !is ApiResponse.Success) return null
         val user = response.data.optJSONObject("data") ?: return null
         return parseUsers(JSONArray().put(user)).firstOrNull()

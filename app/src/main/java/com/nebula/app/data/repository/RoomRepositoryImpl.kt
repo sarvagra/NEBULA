@@ -68,6 +68,8 @@ class RoomRepositoryImpl(
         }
     )
 
+    init { socketClient.setOnEndedStateListener { positionMs, ended -> applyRealtimeEndedState(positionMs, ended) } }
+
     fun setAppForegrounded(foregrounded: Boolean) = socketClient.setAppForegrounded(foregrounded)
 
     /**
@@ -112,13 +114,19 @@ class RoomRepositoryImpl(
                 senderId = json.optString("senderId"),
                 senderName = json.optString("senderName", "Nebula User"),
                 senderAvatar = json.optString("senderAvatarLetter", "U"),
+                senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
                 content = json.optString("text", ""),
                 timeLabel = "Earlier",
                 isSystemMessage = json.optString("messageType") == "system"
             )
         }
-        _activeRoom.value = current.copy(recentMessages = messages)
-        _rooms.value = _rooms.value.map { if (it.id == roomId) current.copy(recentMessages = messages) else it }
+        val rosterCurrent = _activeRoom.value ?: current
+        val withAvatars = messages.map { message ->
+            if (!message.senderAvatarUrl.isNullOrBlank()) message
+            else rosterCurrent.participants.firstOrNull { it.user.id == message.senderId }?.user?.avatarUrl?.let { message.copy(senderAvatarUrl = it) } ?: message
+        }
+        _activeRoom.value = rosterCurrent.copy(recentMessages = withAvatars)
+        _rooms.value = _rooms.value.map { if (it.id == roomId) rosterCurrent.copy(recentMessages = withAvatars) else it }
     }
 
     override suspend fun createRoom(
@@ -311,12 +319,12 @@ class RoomRepositoryImpl(
         val updated = current.copy(
             mediaItem = newMedia,
             isPlaying = true,
+            mediaEnded = false,
             playbackPositionMs = 0L,
             playbackPositionLabel = "00:00"
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
-        socketClient.switchMedia(title, mediaUrl, durationSeconds)
         return updated
     }
 
@@ -325,6 +333,7 @@ class RoomRepositoryImpl(
         val safePositionMs = positionMs.coerceAtLeast(0L)
         val updated = current.copy(
             isPlaying = isPlaying,
+            mediaEnded = if (isPlaying) false else current.mediaEnded,
             playbackPositionMs = safePositionMs,
             playbackPositionLabel = String.format(
                 "%02d:%02d",
@@ -334,6 +343,30 @@ class RoomRepositoryImpl(
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
+    }
+
+    private fun applyRealtimeEndedState(positionMs: Long, ended: Boolean) {
+        val current = _activeRoom.value ?: return
+        val safePositionMs = positionMs.coerceAtLeast(0L)
+        val updated = current.copy(
+            isPlaying = if (ended) false else current.isPlaying,
+            mediaEnded = ended,
+            playbackPositionMs = safePositionMs,
+            playbackPositionLabel = String.format("%02d:%02d", safePositionMs / 60000L, (safePositionMs / 1000L) % 60L)
+        )
+        _activeRoom.value = updated
+        _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
+    }
+
+    override fun reportVideoEnded(positionMs: Long) {
+        socketClient.reportVideoEnded(positionMs)
+        applyRealtimeEndedState(positionMs, true)
+    }
+
+    override fun restartVideo() {
+        socketClient.restartVideo()
+        applyRealtimeEndedState(0L, false)
+        applyRealtimeMediaState(0L, true)
     }
 
     override suspend fun sendRoomMessage(content: String) {
@@ -352,6 +385,7 @@ class RoomRepositoryImpl(
             senderId = json.optString("senderId"),
             senderName = json.optString("senderName", "Nebula User"),
             senderAvatar = json.optString("senderAvatarLetter", "U"),
+            senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
             content = json.optString("text", ""),
             timeLabel = createdAt.takeIf { it.isNotBlank() }?.let { "Just now" } ?: "Just now",
             isSystemMessage = json.optString("messageType") == "system"
@@ -422,11 +456,16 @@ class RoomRepositoryImpl(
             if (pId == hostId || isHost) hostName = pName
             val u = NebulaUser(
                 id = pId,
-                username = "@${pName.lowercase().replace(" ", "")}",
+                username = p.optString("username").takeIf { it.isNotBlank() }?.let { if (it.startsWith("@")) it else "@$it" } ?: "@${pName.lowercase().replace(" ", "")}",
                 displayName = pName,
                 avatarLetter = p.optString("avatarLetter", pName.take(1).uppercase()),
-                bio = "",
-                status = "In room",
+                avatarUrl = p.optString("avatarUrl").ifBlank { null },
+                bannerUrl = p.optString("bannerUrl").ifBlank { null },
+                bio = p.optString("bio", ""),
+                status = p.optString("status", "In room"),
+                interests = p.optJSONArray("interests")?.let { arr -> List(arr.length()) { index -> arr.optString(index) }.filter { it.isNotBlank() } } ?: emptyList(),
+                isOnline = true,
+                presenceStatus = com.nebula.app.domain.model.NebulaPresenceStatus.IN_A_ROOM,
                 currentRoomId = id,
                 roomsHostedCount = 0,
                 roomsJoinedCount = 0,
@@ -487,6 +526,7 @@ class RoomRepositoryImpl(
             isVideoAllowed = json.optBoolean("isVideoAllowed", true),
             participants = participantList,
             isPlaying = isPlaying,
+            mediaEnded = false,
             playbackPositionMs = positionMs,
             playbackPositionLabel = String.format("%02d:%02d", positionMs / 60000L, (positionMs / 1000L) % 60L),
             durationLabel = String.format("%02d:%02d", durationSeconds / 60, durationSeconds % 60),

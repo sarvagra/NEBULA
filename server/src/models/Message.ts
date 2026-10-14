@@ -8,6 +8,7 @@ export interface IMessage extends Document {
   senderId: string;
   senderName: string;
   senderAvatarLetter: string;
+  senderAvatarUrl?: string;
   text: string;
   mediaUrl?: string;
   messageType: MessageType;
@@ -22,6 +23,7 @@ const MessageSchema = new Schema<IMessage>(
     senderId: { type: String, required: true, index: true },
     senderName: { type: String, required: true },
     senderAvatarLetter: { type: String, default: 'U' },
+    senderAvatarUrl: { type: String },
     text: { type: String, default: '' },
     mediaUrl: { type: String },
     messageType: { type: String, enum: ['text', 'media', 'system'], default: 'text' },

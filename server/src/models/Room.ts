@@ -5,9 +5,14 @@ export type RoomActivity = 'watch' | 'chat' | 'voice';
 
 export interface IRoomParticipant {
   userId: string;
+  username?: string;
   displayName: string;
   avatarLetter: string;
   avatarUrl?: string;
+  bannerUrl?: string;
+  bio?: string;
+  status?: string;
+  interests?: string[];
   joinedAt: Date;
   isHost: boolean;
   isMuted?: boolean;
@@ -65,9 +70,14 @@ const RoomSchema = new Schema<IRoom>(
     participants: [
       {
         userId: { type: String, required: true },
+        username: { type: String },
         displayName: { type: String, required: true },
         avatarLetter: { type: String, default: 'U' },
         avatarUrl: { type: String },
+        bannerUrl: { type: String },
+        bio: { type: String, default: '' },
+        status: { type: String, default: 'dynamic' },
+        interests: { type: [String], default: [] },
         joinedAt: { type: Date, default: Date.now },
         isHost: { type: Boolean, default: false },
         isMuted: { type: Boolean, default: false },

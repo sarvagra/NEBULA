@@ -437,6 +437,8 @@ object NebulaApiClient {
         return request("/users/public/$clean", "GET")
     }
 
+    suspend fun getPublicProfileById(userId: String): ApiResponse<JSONObject> = request("/users/public/id/${userId.trim()}", "GET")
+
     // ==========================================
     // PROFILE ASSETS & MEDIA
     // ==========================================

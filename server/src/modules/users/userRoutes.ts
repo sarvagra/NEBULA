@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { updateProfile, checkUsername, getPublicProfile } from './userController';
+import { updateProfile, checkUsername, getPublicProfile, getPublicProfileById } from './userController';
 import { listAssets, uploadAsset, applyAsset, deleteAsset } from './profileAssetController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody } from '../../middlewares/validation';
@@ -10,6 +10,7 @@ export const userRouter = Router();
 
 userRouter.put('/profile', authMiddleware, profileRateLimiter, validateBody(UpdateProfileSchema), updateProfile);
 userRouter.get('/check-username/:username', authMiddleware, profileRateLimiter, checkUsername);
+userRouter.get('/public/id/:id', optionalAuthMiddleware, getPublicProfileById);
 userRouter.get('/public/:username', optionalAuthMiddleware, getPublicProfile);
 
 // Profile Asset History / Media Management

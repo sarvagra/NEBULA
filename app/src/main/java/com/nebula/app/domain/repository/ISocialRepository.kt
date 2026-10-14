@@ -25,5 +25,6 @@ interface ISocialRepository {
     suspend fun refreshSuggestions(): Boolean
     suspend fun blockUser(userId: String): Boolean
     suspend fun loadPublicProfile(username: String): NebulaUser?
+    suspend fun loadPublicProfileById(userId: String): NebulaUser?
     suspend fun removeFriend(userId: String): Boolean
 }

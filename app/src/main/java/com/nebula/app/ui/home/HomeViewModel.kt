@@ -539,6 +539,14 @@ class HomeViewModel(
         roomRepository.reportHostPlayerSample(positionMs, isPlaying)
     }
 
+    fun onHostVideoEnded(positionMs: Long) {
+        roomRepository.reportVideoEnded(positionMs)
+    }
+
+    fun onRestartRoomVideo() {
+        roomRepository.restartVideo()
+    }
+
     fun onSeekTo(positionMs: Long) {
         viewModelScope.launch {
             val totalSec = positionMs / 1000L
@@ -654,7 +662,7 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(activeFriendProfile = user)
         navigateTo(FullScreenDestination.PublicProfile(user))
         if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
-            socialRepository.loadPublicProfile(user.username)?.let { loaded ->
+            socialRepository.loadPublicProfileById(user.id)?.let { loaded ->
                 _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
             }
         }
@@ -685,7 +693,7 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(activeFriendProfile = user)
         navigateTo(FullScreenDestination.PublicProfile(user))
         if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
-            socialRepository.loadPublicProfile(user.username)?.let { loaded ->
+            socialRepository.loadPublicProfileById(user.id)?.let { loaded ->
                 _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
             }
         }

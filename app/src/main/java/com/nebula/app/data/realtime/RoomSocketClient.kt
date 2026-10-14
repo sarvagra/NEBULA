@@ -26,6 +26,10 @@ class RoomSocketClient(
     private var basePositionMs = 0L
     private var baseTimestampMs = 0L
     private var playing = false
+    @Volatile private var ended = false
+    private var onEndedState: (Long, Boolean) -> Unit = { _, _ -> }
+
+    fun setOnEndedStateListener(listener: (Long, Boolean) -> Unit) { onEndedState = listener }
 
     fun connect(roomId: String, hostId: String) {
         disconnect()
@@ -70,9 +74,24 @@ class RoomSocketClient(
                     state.optBoolean("isPlaying", false),
                     state.optLong("timestamp", System.currentTimeMillis())
                 )
+                ended = state.optBoolean("ended", false)
+                onEndedState(state.optLong("positionMs", 0L), ended)
             }
-            on("media:play") { args -> handlePlayback(args, true) }
-            on("media:pause") { args -> handlePlayback(args, false) }
+            on("media:ended") { args ->
+                val state = args.firstOrNull() as? JSONObject ?: return@on
+                ended = true
+                val position = state.optLong("positionMs", 0L)
+                applyState(position, false, state.optLong("timestamp", System.currentTimeMillis()))
+                onEndedState(position, true)
+            }
+            on("media:restart") { args ->
+                val state = args.firstOrNull() as? JSONObject ?: return@on
+                ended = false
+                applyState(0L, true, state.optLong("timestamp", System.currentTimeMillis()))
+                onEndedState(0L, false)
+            }
+            on("media:play") { args -> if (!ended) handlePlayback(args, true) }
+            on("media:pause") { args -> if (!ended) handlePlayback(args, false) }
             on("media:seek") { args ->
                 val payload = args.firstOrNull() as? JSONObject ?: return@on
                 applyState(
@@ -91,6 +110,8 @@ class RoomSocketClient(
                 basePositionMs = mediaState.optLong("playbackPositionMs")
                 baseTimestampMs = payload.optLong("timestamp", System.currentTimeMillis())
                 playing = mediaState.optBoolean("isPlaying", false)
+                ended = false
+                onEndedState(0L, false)
                 onMediaSwitch(mediaState)
             }
             on("chat:message") { args ->
@@ -139,6 +160,24 @@ class RoomSocketClient(
                 JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
             )
         }
+    }
+
+    fun reportVideoEnded(positionMs: Long) {
+        if (!isHost() || ended) return
+        ended = true
+        playing = false
+        basePositionMs = positionMs.coerceAtLeast(0L)
+        baseTimestampMs = System.currentTimeMillis()
+        socket?.emit("media:end", JSONObject().put("roomId", roomId).put("positionMs", basePositionMs))
+    }
+
+    fun restartVideo() {
+        if (!isHost()) return
+        ended = false
+        playing = true
+        basePositionMs = 0L
+        baseTimestampMs = System.currentTimeMillis()
+        socket?.emit("media:restart", JSONObject().put("roomId", roomId))
     }
 
     fun currentPlaybackPositionMs(): Long = (basePositionMs + if (playing) {
@@ -204,6 +243,7 @@ class RoomSocketClient(
         basePositionMs = positionMs.coerceAtLeast(0L)
         baseTimestampMs = timestampMs
         playing = isPlaying
+        if (positionMs == 0L && isPlaying) ended = false
         val projected = if (isPlaying) {
             basePositionMs + (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
         } else {

@@ -44,6 +44,7 @@ import com.nebula.app.domain.model.NebulaRoom
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaCompactRoomCard
+import com.nebula.app.ui.components.NebulaAvatarImage
 
 /**
  * NebulaHomeScreen:
@@ -317,14 +318,7 @@ private fun ActiveFriendItem(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = user.avatarLetter,
-                    style = theme.typography.bodyLarge.copy(
-                        color = theme.colors.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                )
+                NebulaAvatarImage(user.avatarUrl, user.avatarLetter, modifier = Modifier.size(54.dp))
             }
 
             // Consistent status indicator dot
@@ -483,14 +477,7 @@ private fun HomeChatRow(
                 .border(1.dp, theme.colors.surfaceBorder, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = avatarLetter,
-                style = theme.typography.bodyMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            )
+            NebulaAvatarImage(conversation.partnerUser?.avatarUrl, avatarLetter, modifier = Modifier.size(42.dp))
         }
 
         Column(modifier = Modifier.weight(1f)) {

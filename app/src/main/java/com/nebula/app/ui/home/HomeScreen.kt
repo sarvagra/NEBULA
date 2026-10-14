@@ -242,6 +242,9 @@ fun HomeScreen(
                 onLeaveRoom = { newHostId -> viewModel.onLeaveRoom(newHostId) },
                 onRefreshRoom = { viewModel.refreshActiveRoom() },
                 onHostPlaybackSample = { positionMs, playing -> viewModel.onHostPlaybackSample(positionMs, playing) },
+                onHostVideoEnded = { viewModel.onHostVideoEnded(it) },
+                onRestartVideo = { viewModel.onRestartRoomVideo() },
+                onViewParticipantProfile = { viewModel.onOpenFriendProfile(it) },
                 onUpdateRoomSettings = { name, max, mic, vid, tags ->
                     viewModel.onUpdateRoomSettings(name, max, mic, vid, tags)
                 },

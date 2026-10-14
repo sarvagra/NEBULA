@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { ProfileAssetModel } from '../../models/ProfileAsset';
 import { UserModel } from '../../models/User';
 import { uploadObject } from '../../services/objectStorage';
+import { RoomModel } from '../../models/Room';
+import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'];
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
@@ -129,7 +131,15 @@ export async function applyAsset(req: Request, res: Response): Promise<void> {
         updateFields.bannerUrl = asset.url;
       }
 
-      await UserModel.findByIdAndUpdate(req.user.id, updateFields);
+      const updatedUser = await UserModel.findByIdAndUpdate(req.user.id, updateFields, { new: true });
+      if (updatedUser) {
+        const rooms = await RoomModel.find({ 'participants.userId': req.user.id }).select('_id');
+        await RoomModel.updateMany({ 'participants.userId': req.user.id }, { $set: {
+          'participants.$.avatarUrl': updatedUser.avatarUrl,
+          'participants.$.bannerUrl': updatedUser.bannerUrl,
+        } });
+        notifyRoomsParticipantProfileUpdated(rooms.map((room) => room._id.toString()), req.user.id);
+      }
 
       res.json({
         success: true,

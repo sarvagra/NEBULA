@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { MessageModel } from '../../models/Message';
+import { UserModel } from '../../models/User';
 import { RoomModel } from '../../models/Room';
 import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
@@ -28,10 +29,12 @@ export async function getRoomMessages(req: Request, res: Response): Promise<void
     const messages = await MessageModel.find({ roomId })
       .sort({ createdAt: -1 })
       .limit(limit);
+    const senders = await UserModel.find({ _id: { $in: [...new Set(messages.map((message) => message.senderId))] } }).select('_id avatarUrl');
+    const avatarByUserId = new Map(senders.map((sender) => [sender._id.toString(), sender.avatarUrl]));
 
     res.json({
       success: true,
-      data: messages.reverse().map(toMessageDTO),
+      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: message.senderAvatarUrl || avatarByUserId.get(message.senderId) })),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve messages' });
@@ -217,6 +220,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       senderId: req.user.id, // Server authoritative
       senderName: req.user.displayName,
       senderAvatarLetter: req.user.displayName.charAt(0).toUpperCase(),
+      senderAvatarUrl: (await UserModel.findById(req.user.id).select('avatarUrl'))?.avatarUrl,
       text: text?.trim() || '',
       mediaUrl,
       messageType: messageType || 'text',

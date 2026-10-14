@@ -183,13 +183,7 @@ fun NebulaFriendsScreen(
                                             .border(1.dp, theme.colors.surfaceBorder, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = friend.avatarLetter,
-                                            style = theme.typography.bodyMedium.copy(
-                                                color = theme.colors.textPrimary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        )
+                                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(38.dp))
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
@@ -382,14 +376,7 @@ fun NebulaFriendsScreen(
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = friend.avatarLetter,
-                                            style = theme.typography.bodyLarge.copy(
-                                                color = theme.colors.textPrimary,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 18.sp
-                                            )
-                                        )
+                                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(52.dp))
                                     }
 
                                     Box(
@@ -470,13 +457,7 @@ fun NebulaFriendsScreen(
                                             .background(theme.colors.surfaceElevated),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = req.sender.avatarLetter,
-                                            style = theme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = theme.colors.textPrimary
-                                            )
-                                        )
+                                        NebulaAvatarImage(req.sender.avatarUrl, req.sender.avatarLetter, modifier = Modifier.size(42.dp))
                                     }
 
                                     Column {
@@ -667,13 +648,7 @@ fun NebulaFriendsScreen(
                                             .background(theme.colors.surfaceElevated),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = person.avatarLetter,
-                                            style = theme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = theme.colors.textPrimary
-                                            )
-                                        )
+                                        NebulaAvatarImage(person.avatarUrl, person.avatarLetter, modifier = Modifier.size(42.dp))
                                     }
 
                                     Column {
@@ -815,13 +790,7 @@ private fun FriendListItem(
                         .border(1.dp, theme.colors.surfaceBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = user.avatarLetter,
-                        style = theme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = theme.colors.textPrimary
-                        )
-                    )
+                    NebulaAvatarImage(avatarUrl = user.avatarUrl, fallbackLetter = user.avatarLetter, modifier = Modifier.size(44.dp))
                 }
 
                 Box(

@@ -60,6 +60,7 @@ import com.nebula.app.domain.model.MessageRole
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.profile.Custom1to1CropDialog
+import com.nebula.app.ui.components.NebulaAvatarImage
 import coil.compose.AsyncImage
 
 /**
@@ -127,13 +128,7 @@ fun NebulaChatDetailScreen(
                         .border(1.dp, theme.colors.surfaceBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = conversation.partnerUser?.avatarLetter ?: "G",
-                        style = theme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = theme.colors.textPrimary
-                        )
-                    )
+                    NebulaAvatarImage(conversation.partnerUser?.avatarUrl, conversation.partnerUser?.avatarLetter ?: "G", modifier = Modifier.size(38.dp))
                 }
 
                 Column {
@@ -221,14 +216,7 @@ fun NebulaChatDetailScreen(
                             .background(theme.colors.surfaceElevated),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = conversation.partnerUser?.avatarLetter ?: "N",
-                            style = theme.typography.titleLarge.copy(
-                                color = theme.colors.primaryAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 24.sp
-                            )
-                        )
+                        NebulaAvatarImage(conversation.partnerUser?.avatarUrl, conversation.partnerUser?.avatarLetter ?: "N", modifier = Modifier.size(64.dp))
                     }
                     Text(
                         text = "Say hello to ${conversation.title}!",

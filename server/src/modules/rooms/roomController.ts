@@ -6,7 +6,7 @@ import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
 import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { NotificationModel } from '../../models/Notification';
-import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated } from '../../realtime/socketServer';
+import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated } from '../../realtime/socketServer';
 
 async function claimActiveRoom(userId: string, roomId: string): Promise<boolean> {
   const otherMembership = await RoomModel.findOne({
@@ -118,6 +118,7 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
     const maxParticipants = requestedMax ? Math.min(Math.max(parseInt(String(requestedMax), 10) || 20, 2), tierLimit) : (req.user.tier === 'premium_plus' ? 50 : 20);
 
     const roomId = new mongoose.Types.ObjectId().toString();
+    const creatorProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
     if (!(await claimActiveRoom(req.user.id, roomId))) {
       res.status(409).json({ success: false, error: 'Leave your current room before creating another one' });
       return;
@@ -146,8 +147,14 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
       participants: [
         {
           userId: req.user.id,
-          displayName: req.user.displayName,
-          avatarLetter: req.user.displayName.charAt(0).toUpperCase(),
+          username: creatorProfile?.username || req.user.username,
+          displayName: creatorProfile?.displayName || req.user.displayName,
+          avatarLetter: creatorProfile?.avatarLetter || req.user.displayName.charAt(0).toUpperCase(),
+          avatarUrl: creatorProfile?.avatarUrl,
+          bannerUrl: creatorProfile?.bannerUrl,
+          bio: creatorProfile?.bio,
+          status: creatorProfile?.status,
+          interests: creatorProfile?.interests || [],
           isHost: true,
           joinedAt: new Date(),
         },
@@ -214,6 +221,7 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
     }
 
     const alreadyIn = room.participants.some((p) => p.userId === req.user!.id);
+    const joiningProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
     if (!(await claimActiveRoom(req.user.id, room._id.toString()))) {
       res.status(409).json({ success: false, error: 'Leave your current room before joining another one' });
       return;
@@ -227,8 +235,14 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
         } as any,
         { $push: { participants: {
         userId: req.user.id,
-        displayName: req.user.displayName,
-        avatarLetter: req.user.displayName.charAt(0).toUpperCase(),
+        username: joiningProfile?.username || req.user.username,
+        displayName: joiningProfile?.displayName || req.user.displayName,
+        avatarLetter: joiningProfile?.avatarLetter || req.user.displayName.charAt(0).toUpperCase(),
+        avatarUrl: joiningProfile?.avatarUrl,
+        bannerUrl: joiningProfile?.bannerUrl,
+        bio: joiningProfile?.bio,
+        status: joiningProfile?.status,
+        interests: joiningProfile?.interests || [],
         joinedAt: new Date(),
         isHost: room.hostId === req.user.id,
         } } },
@@ -501,7 +515,12 @@ export async function updateMedia(req: Request, res: Response): Promise<void> {
     if (isPlaying !== undefined) room.mediaState.isPlaying = isPlaying;
     if (mediaUrl !== undefined) room.mediaState.mediaUrl = mediaUrl;
 
+    if (mediaUrl !== undefined || title !== undefined) {
+      room.mediaState.playbackPosition = 0;
+      room.mediaState.isPlaying = true;
+    }
     await room.save();
+    if (mediaUrl !== undefined || title !== undefined) notifyRoomMediaSwitch(room._id.toString(), room.mediaState);
     res.json({ success: true, data: room.mediaState });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to update media playback' });

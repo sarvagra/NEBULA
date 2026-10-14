@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
+import com.nebula.app.ui.components.NebulaAvatarImage
 import com.nebula.app.ui.components.PABottomSheet
 
 /**
@@ -78,14 +79,7 @@ fun FriendProfileSheet(
                         .border(2.dp, theme.colors.primaryAccent.copy(alpha = 0.4f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = user.avatarLetter,
-                        style = theme.typography.titleLarge.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 26.sp
-                        )
-                    )
+                    NebulaAvatarImage(user.avatarUrl, user.avatarLetter, modifier = Modifier.size(76.dp), fallbackTextSize = 26.sp)
                 }
 
                 Box(

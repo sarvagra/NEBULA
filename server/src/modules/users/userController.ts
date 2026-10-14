@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { toPrivateUserDTO, toPublicUserDTO } from '../../utils/dto';
+import { RoomModel } from '../../models/Room';
+import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
 
 export async function updateProfile(req: Request, res: Response): Promise<void> {
   try {
@@ -104,6 +106,22 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       if (!updated) {
         res.status(404).json({ success: false, error: 'User not found' });
         return;
+      }
+      if (['displayName', 'avatarLetter', 'avatarUrl', 'bannerUrl', 'bio', 'status', 'interests', 'username'].some((key) => key in updateFields)) {
+        const activeRooms = await RoomModel.find({ 'participants.userId': req.user.id }).select('_id');
+        await RoomModel.updateMany({ 'participants.userId': req.user.id }, {
+          $set: {
+            'participants.$.username': updated.username,
+            'participants.$.displayName': updated.displayName,
+            'participants.$.avatarLetter': updated.avatarLetter,
+            'participants.$.avatarUrl': updated.avatarUrl,
+            'participants.$.bannerUrl': updated.bannerUrl,
+            'participants.$.bio': updated.bio,
+            'participants.$.status': updated.status,
+            'participants.$.interests': updated.interests,
+          },
+        });
+        notifyRoomsParticipantProfileUpdated(activeRooms.map((room) => room._id.toString()), req.user.id);
       }
       res.json({ success: true, data: toPrivateUserDTO(updated) });
     } else {
@@ -209,6 +227,38 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
     }
     res.json({ success: true, data: profile });
   } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Failed to retrieve public profile' });
+  }
+}
+
+export async function getPublicProfileById(req: Request, res: Response): Promise<void> {
+  const userId = req.params.id;
+  if (!mongoose.isValidObjectId(userId)) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  try {
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+    let relationship = 'none';
+    if (req.user) {
+      if (req.user.id === userId) relationship = 'self';
+      else {
+        const friendship = await FriendshipModel.findOne({ $or: [{ requesterId: req.user.id, recipientId: userId }, { requesterId: userId, recipientId: req.user.id }] });
+        if (friendship?.status === 'accepted') relationship = 'friends';
+        else if (friendship?.status === 'pending') relationship = friendship.requesterId === req.user.id ? 'request_sent' : 'request_received';
+        const blocked = await FriendshipModel.exists({ status: 'blocked', $or: [{ requesterId: req.user.id, recipientId: userId }, { requesterId: userId, recipientId: req.user.id }] });
+        if (blocked) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+      }
+    }
+    const profile = toPublicUserDTO(user, relationship);
+    if (relationship === 'request_received' && req.user) {
+      const incoming = await FriendshipModel.findOne({ requesterId: userId, recipientId: req.user.id, status: 'pending' }).select('_id');
+      profile.friendRequestId = incoming?._id.toString();
+    }
+    if (user.isFriendCountPublic) profile.stats.friendsCount = await FriendshipModel.countDocuments({ status: 'accepted', $or: [{ requesterId: userId }, { recipientId: userId }] });
+    res.json({ success: true, data: profile });
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to retrieve public profile' });
   }
 }

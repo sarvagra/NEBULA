@@ -461,15 +461,14 @@ fun NebulaPublicProfileScreen(
             }
 
             // INTERESTS & ROOM CATEGORY BADGES
-            if (user.interests.isNotEmpty()) {
-                item {
+            item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
                 ) {
                     Text(
-                        text = "INTERESTS & ROOM BADGES",
+                        text = "TAGS",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
                             fontWeight = FontWeight.Bold,
@@ -478,11 +477,14 @@ fun NebulaPublicProfileScreen(
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        user.interests.take(5).forEach { interest ->
+                    if (user.interests.isEmpty()) {
+                        Text("No tags yet", style = theme.typography.caption.copy(color = theme.colors.textTertiary))
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            user.interests.take(5).forEach { interest ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
@@ -499,10 +501,10 @@ fun NebulaPublicProfileScreen(
                                     )
                                 )
                             }
+                            }
                         }
                     }
                 }
-            }
             }
 
             // PUBLIC STATS (Derived from user activity)
