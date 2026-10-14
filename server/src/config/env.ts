@@ -37,7 +37,20 @@ export const config = {
     nodeEnv: process.env.NODE_ENV || 'development',
     isProduction: process.env.NODE_ENV === 'production',
     port: parseInt(process.env.PORT || '5001', 10),
-    apiBaseUrl: requireExternal('API_BASE_URL'),
+    apiBaseUrl: (() => {
+      const configured = requireExternal('API_BASE_URL');
+      try {
+        const parsed = new URL(configured);
+        const isLocalOrigin = ['localhost', '127.0.0.1', '0.0.0.0', '10.0.2.2'].includes(parsed.hostname);
+        const renderOrigin = process.env.RENDER_EXTERNAL_URL?.trim();
+        if (process.env.NODE_ENV === 'production' && isLocalOrigin && renderOrigin) {
+          return renderOrigin.replace(/\/$/, '');
+        }
+      } catch {
+        throw new Error('API_BASE_URL must be a valid absolute URL');
+      }
+      return configured.replace(/\/$/, '');
+    })(),
     corsAllowedOrigins: (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
   },
   mongodb: {

@@ -48,6 +48,19 @@ export function createPrivateObjectUrl(key: string): string {
   return `${origin}/storage/${encodedKey}?token=${token}`;
 }
 
+/** Repair legacy local-origin references while keeping real provider URLs untouched. */
+export function resolveStoredObjectUrl(value?: string): string | undefined {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    if (!['localhost', '127.0.0.1', '0.0.0.0', '10.0.2.2'].includes(parsed.hostname)) return value;
+    const origin = config.server.apiBaseUrl.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+    return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return value;
+  }
+}
+
 export async function getPrivateObjectRedirect(key: string): Promise<string> {
   return getSignedUrl(
     client,

@@ -1,6 +1,7 @@
 import { IUser } from '../models/User';
 import { IRoom } from '../models/Room';
 import { IMessage } from '../models/Message';
+import { resolveStoredObjectUrl } from '../services/objectStorage';
 
 export interface PublicUserDTO {
   id: string;
@@ -61,9 +62,9 @@ export function toPublicUserDTO(user: IUser, relationship: string = 'none'): Pub
     username: user.username,
     displayName: user.displayName,
     avatarLetter: user.avatarLetter,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: resolveStoredObjectUrl(user.avatarUrl),
     bannerIndex: user.bannerIndex,
-    bannerUrl: user.bannerUrl,
+    bannerUrl: resolveStoredObjectUrl(user.bannerUrl),
     tier: user.tier,
     status: user.status === 'custom' ? (user.customStatus || 'Custom') : user.status === 'offline' || user.presenceStatus === 'offline' ? 'Offline' : user.presenceStatus === 'in_a_room' ? 'In a room' : 'Online',
     profileStatus: ['dynamic', 'offline', 'custom'].includes(user.status) ? user.status : 'dynamic',
@@ -86,7 +87,7 @@ export function toPrivateUserDTO(user: IUser): PrivateUserDTO {
     username: user.username,
     displayName: user.displayName,
     avatarLetter: user.avatarLetter,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: resolveStoredObjectUrl(user.avatarUrl),
     bannerIndex: user.bannerIndex,
     tier: user.tier,
     isTrial: user.isTrial || false,
@@ -100,7 +101,7 @@ export function toPrivateUserDTO(user: IUser): PrivateUserDTO {
     isOnboardingCompleted: user.isOnboardingCompleted ?? Boolean(user.displayName && user.username),
     dateOfBirth: user.dateOfBirth,
     gender: user.gender,
-    bannerUrl: user.bannerUrl,
+    bannerUrl: resolveStoredObjectUrl(user.bannerUrl),
     role: user.role,
     stats: {
       roomsJoinedCount: user.stats?.roomsJoinedCount || 0,
@@ -133,7 +134,7 @@ export function toPublicRoomDTO(room: IRoom, currentUserId?: string) {
       playbackPosition: room.mediaState.playbackPosition,
       isPlaying: room.mediaState.isPlaying,
       ended: false,
-      mediaUrl: room.mediaState.mediaUrl || '',
+      mediaUrl: resolveStoredObjectUrl(room.mediaState.mediaUrl) || '',
     },
     participantCount: room.participants.length,
     maxParticipants: room.maxParticipants,
@@ -144,8 +145,8 @@ export function toPublicRoomDTO(room: IRoom, currentUserId?: string) {
       username: p.username,
       displayName: p.displayName,
       avatarLetter: p.avatarLetter,
-      avatarUrl: p.avatarUrl,
-      bannerUrl: p.bannerUrl,
+      avatarUrl: resolveStoredObjectUrl(p.avatarUrl),
+      bannerUrl: resolveStoredObjectUrl(p.bannerUrl),
       bio: p.bio,
       status: p.status,
       interests: p.interests || [],
@@ -173,7 +174,7 @@ export function toMessageDTO(message: IMessage) {
     senderAvatarLetter: message.senderAvatarLetter,
     senderAvatarUrl: message.senderAvatarUrl,
     text: message.text,
-    mediaUrl: message.mediaUrl,
+    mediaUrl: resolveStoredObjectUrl(message.mediaUrl),
     isSpoiler: message.isSpoiler,
     mediaMimeType: message.mediaMimeType,
     messageType: message.messageType,

@@ -125,9 +125,12 @@ export function createApp(): express.Application {
         database: dbState === 2 ? 'connecting' : 'disconnected',
       });
 
-      app.get('/storage/:encodedKey', redirectToObject);
     }
   });
+
+  // Private profile and chat objects must remain reachable through the public
+  // API regardless of database readiness; authorization is enforced by token.
+  app.get('/storage/:encodedKey', redirectToObject);
 
   // 8. Mount Protected API v1 Routers
   app.use('/api/v1/auth', authRouter);

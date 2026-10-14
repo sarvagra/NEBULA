@@ -19,7 +19,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import com.nebula.app.theme.Theme
 
 @Composable
@@ -30,7 +31,6 @@ fun NebulaAvatarImage(
     modifier: Modifier = Modifier,
     fallbackTextSize: TextUnit = 18.sp
 ) {
-    val theme = Theme.current
     val base64Bitmap = remember(avatarUrl) {
         if (!avatarUrl.isNullOrBlank() && avatarUrl.startsWith("data:image")) {
             try {
@@ -57,24 +57,33 @@ fun NebulaAvatarImage(
                 contentScale = ContentScale.Crop
             )
         } else if (!avatarUrl.isNullOrBlank()) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = avatarUrl,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                loading = { AvatarInitial(fallbackLetter, fallbackTextSize) },
+                error = { AvatarInitial(fallbackLetter, fallbackTextSize) },
+                success = { SubcomposeAsyncImageContent() }
             )
         } else {
-            Box(
-                modifier = Modifier.fillMaxSize().clip(CircleShape).background(theme.colors.surfaceElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = fallbackLetter.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "N",
-                    color = theme.colors.primaryAccent.takeUnless { it == Color.Transparent } ?: Color(0xFF7C5CFF),
-                    fontSize = fallbackTextSize,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            AvatarInitial(fallbackLetter, fallbackTextSize)
         }
+    }
+}
+
+@Composable
+private fun AvatarInitial(fallbackLetter: String, fallbackTextSize: TextUnit) {
+    val theme = Theme.current
+    Box(
+        modifier = Modifier.fillMaxSize().clip(CircleShape).background(theme.colors.surfaceElevated),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = fallbackLetter.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "N",
+            color = theme.colors.primaryAccent.takeUnless { it == Color.Transparent } ?: Color(0xFF7C5CFF),
+            fontSize = fallbackTextSize,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
