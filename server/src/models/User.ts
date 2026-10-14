@@ -25,6 +25,7 @@ export interface IUser extends Document {
   trialExpiresAt?: Date;
   status: UserPresenceStatus;
   presenceStatus?: 'online' | 'in_a_room' | 'private_chat' | 'offline';
+  lastActiveAt?: Date;
   customStatus?: string;
   interests: string[];
   suggestionRefreshDate?: string;
@@ -71,6 +72,7 @@ const UserSchema = new Schema<IUser>(
     trialExpiresAt: { type: Date },
     status: { type: String, default: 'dynamic' },
     presenceStatus: { type: String, enum: ['online', 'in_a_room', 'private_chat', 'offline'], default: 'offline' },
+    lastActiveAt: { type: Date },
     customStatus: { type: String, default: '' },
     interests: { type: [String], default: [] },
     suggestionRefreshDate: { type: String, default: '' },

@@ -229,6 +229,9 @@ object NebulaApiClient {
         return request("/auth/me", "GET")
     }
 
+    suspend fun updateAppPresence(active: Boolean): ApiResponse<JSONObject> =
+        request("/users/presence", "PUT", JSONObject().put("active", active))
+
     suspend fun logout(): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             sessionManager?.getRefreshToken()?.takeIf { it.isNotBlank() }?.let { put("refreshToken", it) }

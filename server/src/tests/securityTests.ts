@@ -242,6 +242,31 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Dynamic presence becomes Active in foreground and Offline in background', async () => {
+    const active = await makeRequest('/api/v1/users/presence', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({ active: true }),
+    });
+    if (active.status !== 200) throw new Error(`Expected foreground presence update 200, got ${active.status}`);
+    const activeProfile = await makeRequest(`/api/v1/users/public/id/${validUserPayload.id}`);
+    const activeJson = await activeProfile.json() as any;
+    if (activeJson.data?.status !== 'Active' || activeJson.data?.presenceStatus !== 'online') {
+      throw new Error('Public profile did not show active dynamic presence');
+    }
+    const background = await makeRequest('/api/v1/users/presence', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({ active: false }),
+    });
+    if (background.status !== 200) throw new Error(`Expected background presence update 200, got ${background.status}`);
+    const offlineProfile = await makeRequest(`/api/v1/users/public/id/${validUserPayload.id}`);
+    const offlineJson = await offlineProfile.json() as any;
+    if (offlineJson.data?.status !== 'Offline' || offlineJson.data?.presenceStatus !== 'offline') {
+      throw new Error('Public profile did not show offline after backgrounding');
+    }
+  });
+
   // 8c. PROFILE ASSET AUTHORIZATION & OWNERSHIP ENFORCEMENT
   await assertTest('User B cannot delete User A profile asset (403)', async () => {
     // 1. Create asset for Alice

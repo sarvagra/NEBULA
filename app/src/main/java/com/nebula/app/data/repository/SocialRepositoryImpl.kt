@@ -252,10 +252,10 @@ class SocialRepositoryImpl(
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
             val displayedStatus = item.optString("status", "Offline")
-            val presence = when (displayedStatus.lowercase()) {
+            val presence = when (item.optString("presenceStatus").ifBlank { displayedStatus }.lowercase()) {
                 "offline" -> com.nebula.app.domain.model.NebulaPresenceStatus.OFFLINE
-                "in a room" -> com.nebula.app.domain.model.NebulaPresenceStatus.IN_A_ROOM
-                "private chat" -> com.nebula.app.domain.model.NebulaPresenceStatus.PRIVATE_CHAT
+                "in a room", "in_a_room" -> com.nebula.app.domain.model.NebulaPresenceStatus.IN_A_ROOM
+                "private chat", "private_chat" -> com.nebula.app.domain.model.NebulaPresenceStatus.PRIVATE_CHAT
                 else -> com.nebula.app.domain.model.NebulaPresenceStatus.ONLINE
             }
             add(

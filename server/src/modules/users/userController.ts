@@ -18,6 +18,26 @@ function addCalendarMonths(date: Date, months: number): Date {
 
 const USERNAME_CHANGE_COOLDOWN_MONTHS = 6;
 
+export async function updatePresence(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
+    const user = await UserModel.findById(req.user.id).select('status activeRoomId');
+    if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+    const active = req.body?.active === true;
+    const presenceStatus = user.status === 'offline'
+      ? 'offline'
+      : active
+        ? (user.activeRoomId ? 'in_a_room' : 'online')
+        : 'offline';
+    await UserModel.updateOne({ _id: req.user.id }, {
+      $set: { presenceStatus, ...(active ? { lastActiveAt: new Date() } : {}) },
+    });
+    res.json({ success: true, data: { presenceStatus } });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to update presence' });
+  }
+}
+
 export async function updateProfile(req: Request, res: Response): Promise<void> {
   try {
     if (!req.user) {

@@ -27,6 +27,8 @@ import com.nebula.app.data.auth.NebulaAuthManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class HomeViewModel(
@@ -38,6 +40,8 @@ class HomeViewModel(
     private val authManager: NebulaAuthManager? = null,
     private val sessionManager: com.nebula.app.data.local.SessionManager? = null
 ) : ViewModel() {
+
+    private var presencePulseJob: Job? = null
 
     private val _showWelcomeBack = MutableStateFlow(false)
     val showWelcomeBack: StateFlow<Boolean> = _showWelcomeBack.asStateFlow()
@@ -168,6 +172,15 @@ class HomeViewModel(
     }
 
     fun onAppForegrounded() {
+        presencePulseJob?.cancel()
+        presencePulseJob = viewModelScope.launch {
+            while (true) {
+                if (_uiState.value.userProfile.isLoggedIn) {
+                    com.nebula.app.data.backend.NebulaApiClient.updateAppPresence(true)
+                }
+                delay(25_000)
+            }
+        }
         viewModelScope.launch {
             (roomRepository as? RoomRepositoryImpl)?.reconnectActiveRoom()
             (roomRepository as? RoomRepositoryImpl)?.setAppForegrounded(true)
@@ -176,6 +189,11 @@ class HomeViewModel(
     }
 
     fun onAppBackgrounded() {
+        presencePulseJob?.cancel()
+        presencePulseJob = null
+        if (_uiState.value.userProfile.isLoggedIn) {
+            viewModelScope.launch { com.nebula.app.data.backend.NebulaApiClient.updateAppPresence(false) }
+        }
         (roomRepository as? RoomRepositoryImpl)?.setAppForegrounded(false)
     }
 

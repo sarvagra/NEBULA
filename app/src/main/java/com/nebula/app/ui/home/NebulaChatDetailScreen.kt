@@ -166,11 +166,7 @@ fun NebulaChatDetailScreen(
                         )
                     )
 
-                    val statusText = if (conversation.isGroup) "${conversation.participants.size} members" else when (conversation.partnerUser?.profileStatus?.lowercase()) {
-                        "offline" -> "Offline"
-                        "custom" -> conversation.partnerUser.customStatus.ifBlank { "Custom" }
-                        else -> "Dynamic"
-                    }
+                    val statusText = if (conversation.isGroup) "${conversation.participants.size} members" else conversation.partnerUser?.status?.ifBlank { "Offline" } ?: "Offline"
 
                     Text(
                         text = statusText,
