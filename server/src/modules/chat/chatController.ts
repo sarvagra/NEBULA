@@ -135,6 +135,9 @@ export async function unsendDirectMessage(req: Request, res: Response): Promise<
     if (Date.now() - message.createdAt.getTime() > UNSEND_WINDOW_MS) { res.status(403).json({ success: false, error: 'Messages can only be unsent during the first 2 minutes' }); return; }
     message.text = 'This message was unsent.';
     message.mediaUrl = undefined;
+    message.mediaMimeType = undefined;
+    message.isSpoiler = false;
+    message.messageType = 'text';
     message.deletedAt = new Date();
     await message.save();
     res.json({ success: true, data: toMessageDTO(message) });

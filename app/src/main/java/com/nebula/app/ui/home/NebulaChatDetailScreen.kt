@@ -649,7 +649,7 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            val isMedia = message.mediaUrl != null || message.messageType == "media"
+            val isMedia = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
             if (isMedia) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
