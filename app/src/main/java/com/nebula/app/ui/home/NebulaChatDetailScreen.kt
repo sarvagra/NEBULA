@@ -579,6 +579,10 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
     var showHistory by remember(message.id) { mutableStateOf(false) }
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
     var videoStarted by remember(message.id) { mutableStateOf(false) }
+    var videoPrepared by remember(message.id) { mutableStateOf(false) }
+    var videoBuffering by remember(message.id) { mutableStateOf(false) }
+    var videoBufferPercent by remember(message.id) { mutableIntStateOf(0) }
+    var videoFailed by remember(message.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -632,11 +636,31 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                                         setVideoURI(android.net.Uri.parse(mediaUrl))
                                         setOnPreparedListener { player ->
                                             player.isLooping = false
+                                            videoPrepared = true
+                                            videoFailed = false
+                                            player.setOnBufferingUpdateListener { _, percent ->
+                                                videoBufferPercent = percent.coerceIn(0, 100)
+                                                videoBuffering = percent < 100
+                                            }
                                             if (videoStarted) start()
+                                        }
+                                        setOnInfoListener { _, what, _ ->
+                                            when (what) {
+                                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START -> videoBuffering = true
+                                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END -> videoBuffering = false
+                                            }
+                                            true
+                                        }
+                                        setOnErrorListener { _, _, _ ->
+                                            videoFailed = true
+                                            videoBuffering = false
+                                            true
                                         }
                                     }
                                 },
-                                update = { player -> if (videoStarted && !player.isPlaying) player.start() },
+                                update = { player ->
+                                    if (videoStarted && videoPrepared && !videoFailed && !player.isPlaying) player.start()
+                                },
                                 modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
                             )
                         } else if (mediaUrl.isNotBlank()) {
@@ -665,6 +689,35 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                                     fontWeight = FontWeight.SemiBold
                                 )
                             )
+                        }
+                        if (isVideo && videoFailed && spoilerRevealed) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center),
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Black.copy(alpha = 0.78f)
+                            ) {
+                                Text("Video unavailable", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White, fontSize = 12.sp)
+                            }
+                        } else if (isVideo && videoBuffering && spoilerRevealed) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Black.copy(alpha = 0.78f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        progress = { videoBufferPercent / 100f },
+                                        modifier = Modifier.width(110.dp),
+                                        color = Color.White,
+                                        trackColor = Color.White.copy(alpha = 0.3f)
+                                    )
+                                    Text("$videoBufferPercent%", color = Color.White, fontSize = 11.sp)
+                                }
+                            }
                         }
                         if (!spoilerRevealed) {
                             Surface(
