@@ -3,7 +3,7 @@ package com.nebula.app.ui.components
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
@@ -13,8 +13,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
@@ -63,12 +65,17 @@ fun NebulaAvatarImage(
                 contentScale = ContentScale.Crop
             )
         } else {
-            Image(
-                painter = painterResource(com.nebula.app.R.drawable.ic_launcher_foreground),
-                contentDescription = contentDescription ?: "Nebula profile picture",
-                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
+            Box(
+                modifier = Modifier.fillMaxSize().clip(CircleShape).background(theme.colors.surfaceElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = fallbackLetter.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "N",
+                    color = theme.colors.primaryAccent.takeUnless { it == Color.Transparent } ?: Color(0xFF7C5CFF),
+                    fontSize = fallbackTextSize,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
