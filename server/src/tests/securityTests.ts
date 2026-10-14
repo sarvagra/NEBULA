@@ -10,6 +10,7 @@ import { FriendshipModel } from '../models/Friendship';
 import { NotificationModel } from '../models/Notification';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { resolveStoredObjectUrl } from '../services/objectStorage';
 
 // Standalone security test runner
 async function runSecurityTests() {
@@ -357,6 +358,20 @@ async function runSecurityTests() {
   await assertTest('GET /ready returns readiness status', async () => {
     const res = await makeRequest('/ready');
     if (res.status !== 200 && res.status !== 503) throw new Error(`Expected 200 or 503, got ${res.status}`);
+  });
+
+  await assertTest('Private storage route is registered and rejects invalid media tokens', async () => {
+    const res = await makeRequest('/storage/dGVzdC1rZXk?token=invalid');
+    if (res.status !== 403) throw new Error(`Expected invalid media token to return 403, got ${res.status}`);
+  });
+
+  await assertTest('Legacy localhost object URLs normalize to the configured API origin', async () => {
+    const resolved = resolveStoredObjectUrl('http://localhost:5001/storage/asset-key?token=signed');
+    const output = new URL(resolved || '');
+    const expected = new URL(config.server.apiBaseUrl);
+    if (output.origin !== expected.origin || output.pathname !== '/storage/asset-key' || output.searchParams.get('token') !== 'signed') {
+      throw new Error(`Legacy object URL did not preserve path/query at configured origin (${output.origin})`);
+    }
   });
 
   // 11. SOCKET.IO UNAUTHORIZED CONNECTION REJECTION
