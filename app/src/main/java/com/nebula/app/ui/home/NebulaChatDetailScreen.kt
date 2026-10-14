@@ -304,7 +304,7 @@ fun NebulaChatDetailScreen(
                             val dataUrl = "data:image/gif;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(dataUrl, "image/gif", "gif", bytes.size.toLong()) { uploadProgress = it }) {
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
-                                    val mediaUrl = res.data.optString("mediaUrl")
+                                    val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
                                     if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, "image/gif")
                                     else android.widget.Toast.makeText(context, "GIF upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                                 }
@@ -334,7 +334,7 @@ fun NebulaChatDetailScreen(
                             onProgress = { uploadProgress = it }
                         )) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
-                                val mediaUrl = res.data.optString("mediaUrl")
+                                val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
                                 if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
                                 else android.widget.Toast.makeText(context, "Image upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                             }
@@ -390,7 +390,7 @@ fun NebulaChatDetailScreen(
                         )
                         when (res) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
-                                val mediaUrl = res.data.optString("mediaUrl")
+                                val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
                                 if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
                                 else android.widget.Toast.makeText(context, "Video upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                             }
