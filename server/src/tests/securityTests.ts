@@ -246,6 +246,80 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Username cooldown applies to every tier and releases at the six-month boundary', async () => {
+    const cooldownUserId = '507f1f77bcf86cd799439034';
+    const cooldownToken = jwt.sign(
+      { ...validUserPayload, id: cooldownUserId, username: 'test_cooldown' },
+      config.auth.jwtSecret,
+      { expiresIn: '1h' },
+    );
+    const rename = (username: string) =>
+      makeRequest('/api/v1/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cooldownToken}` },
+        body: JSON.stringify({ username }),
+      });
+
+    try {
+      for (const tier of ['free', 'premium', 'premium_plus']) {
+        await UserModel.deleteOne({ _id: cooldownUserId });
+        await UserModel.create({
+          _id: cooldownUserId,
+          username: 'test_cooldown',
+          displayName: 'Cooldown Test',
+          tier,
+        });
+
+        // A first change is always allowed and records an atomic audit event.
+        const first = await rename(`cooldown_${tier}`.slice(0, 16));
+        if (first.status !== 200) throw new Error(`${tier} first rename failed with ${first.status}`);
+        const afterFirst = await UserModel.findById(cooldownUserId).select('username usernameChangedAt usernameHistory');
+        if (!afterFirst?.usernameChangedAt || afterFirst.usernameHistory?.length !== 1) {
+          throw new Error(`${tier} rename did not persist the cooldown timestamp and history`);
+        }
+
+        // An immediate second change is refused for every tier.
+        const immediate = await rename(`cooldown_b_${tier}`.slice(0, 16));
+        if (immediate.status !== 403) throw new Error(`${tier} immediate second rename should be 403, got ${immediate.status}`);
+        const blockedJson = (await immediate.json()) as any;
+        if (!blockedJson.data?.usernameChangeAvailableAt) {
+          throw new Error(`${tier} cooldown rejection did not return the exact next allowed time`);
+        }
+        const expectedRelease = new Date(afterFirst.usernameChangedAt);
+        expectedRelease.setMonth(expectedRelease.getMonth() + 6);
+        const reported = new Date(blockedJson.data.usernameChangeAvailableAt);
+        if (Math.abs(reported.getTime() - expectedRelease.getTime()) > 1000) {
+          throw new Error(`${tier} reported release time does not match the stored six-month boundary`);
+        }
+
+        // One day before the boundary it is still locked. The cooldown is calendar
+        // months, so the fixtures are derived the same way the server derives them.
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const justBefore = new Date(sixMonthsAgo.getTime() + 24 * 60 * 60 * 1000);
+        await UserModel.updateOne({ _id: cooldownUserId }, { $set: { usernameChangedAt: justBefore } });
+        const stillLocked = await rename(`cooldown_c_${tier}`.slice(0, 16));
+        if (stillLocked.status !== 403) {
+          throw new Error(`${tier} rename one day before the boundary should be 403, got ${stillLocked.status}`);
+        }
+
+        // Exactly past the boundary the change is allowed again.
+        const past = new Date(sixMonthsAgo.getTime() - 2 * 24 * 60 * 60 * 1000);
+        await UserModel.updateOne({ _id: cooldownUserId }, { $set: { usernameChangedAt: past } });
+        const released = await rename(`cooldown_d_${tier}`.slice(0, 16));
+        if (released.status !== 200) {
+          throw new Error(`${tier} rename past the six-month boundary should pass, got ${released.status}`);
+        }
+        const afterSecond = await UserModel.findById(cooldownUserId).select('usernameHistory');
+        if (afterSecond?.usernameHistory?.length !== 2) {
+          throw new Error(`${tier} second allowed rename did not append a history event`);
+        }
+      }
+    } finally {
+      await UserModel.deleteOne({ _id: cooldownUserId });
+    }
+  });
+
   await assertTest('Dynamic presence becomes Active in foreground and Offline in background', async () => {
     const active = await makeRequest('/api/v1/users/presence', {
       method: 'PUT',
