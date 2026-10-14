@@ -598,6 +598,8 @@ fun HomeScreen(
                     onCreateRoom = { name, privacy, tags, maxParticipants, media ->
                         viewModel.onCreateRoom(name, privacy, tags, media, maxParticipants)
                     },
+                    // Let the sheet surface a rejected link inline before create.
+                    verifySourceLink = { url -> com.nebula.app.data.backend.NebulaApiClient.verifyMediaLink(url) },
                     onDismiss = { viewModel.onDismissModalSheet() }
                 )
             }

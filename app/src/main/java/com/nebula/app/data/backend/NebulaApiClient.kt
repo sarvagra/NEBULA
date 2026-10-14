@@ -488,6 +488,13 @@ object NebulaApiClient {
 
     // --- Account deletion lifecycle (OTP-verified, 30-day grace period) ---
 
+    /**
+     * Preflight a room media link. The server applies the same playability rules
+     * as room create/update and answers 422 with a single-line error message.
+     */
+    suspend fun verifyMediaLink(url: String): ApiResponse<JSONObject> =
+        request("/media/verify", "POST", JSONObject().put("url", url.trim()))
+
     suspend fun getAccountDeletionStatus(): ApiResponse<JSONObject> = request("/users/me/deletion", "GET")
 
     suspend fun requestAccountDeletion(): ApiResponse<JSONObject> = request("/users/me/deletion/request", "POST", JSONObject())

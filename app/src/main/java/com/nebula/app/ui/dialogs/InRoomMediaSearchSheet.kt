@@ -88,16 +88,24 @@ fun InRoomMediaSearchSheet(
         linkError = null
         scope.launch {
             isSubmitting = true
-            val rejection = runCatching { onSubmitMediaLink(item) }.getOrNull()
+            val outcome = runCatching { onSubmitMediaLink(item) }
             isSubmitting = false
-            if (rejection.isNullOrBlank()) {
-                linkInput = ""
-                linkError = null
-                onDismiss()
-            } else {
-                // Server authority (HTTP 422): exactly one inline line under the field and
-                // no change to the local now-playing state.
-                linkError = singleLineLinkError(rejection)
+            val rejection = outcome.getOrNull()
+            when {
+                outcome.isFailure -> {
+                    // Transport failure: keep the sheet open and leave now-playing untouched.
+                    linkError = "Could not reach the server. Check your connection and try again."
+                }
+                rejection.isNullOrBlank() -> {
+                    linkInput = ""
+                    linkError = null
+                    onDismiss()
+                }
+                else -> {
+                    // Server authority (HTTP 422): exactly one inline line under the field and
+                    // no change to the local now-playing state.
+                    linkError = singleLineLinkError(rejection)
+                }
             }
         }
     }
