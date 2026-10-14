@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { config } from '../../config/env';
 import { MediaHistoryModel, MediaSourceType } from '../../models/MediaHistory';
+import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
 
 // Helper regex to extract 11-character YouTube video ID
 const YOUTUBE_ID_REGEX = /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([a-zA-Z0-9_-]{11})|^([a-zA-Z0-9_-]{11})$/;
@@ -233,5 +234,47 @@ export async function deleteMediaHistory(req: Request, res: Response): Promise<v
     res.json({ success: true, message: 'Media history updated' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to delete media history' });
+  }
+}
+
+/**
+ * POST /media/verify
+ *
+ * Preflight endpoint for room media links. It applies exactly the same
+ * playability rules as room create and media update, so a client can show a
+ * single-line rejection inline before it attempts to create the room.
+ */
+export async function verifyMediaLink(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!url) {
+      res.status(400).json({ success: false, code: 'INVALID_LINK', error: 'Enter a video link to play in this room.' });
+      return;
+    }
+
+    const result = await tryVerifyPlayableLink(url);
+    if (!result.ok) {
+      res.status(422).json({ success: false, code: result.code, error: result.error });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        kind: result.link.kind,
+        sourceUrl: result.link.sourceUrl,
+        embedUrl: result.link.embedUrl,
+        title: result.link.title,
+        thumbnailUrl: result.link.thumbnailUrl,
+        mimeType: result.link.mimeType,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Failed to verify media link' });
   }
 }

@@ -941,6 +941,26 @@ async function runSecurityTests() {
       });
       if (invalidVimeo.status !== 422) throw new Error(`Non-video Vimeo page should be rejected with 422, got ${invalidVimeo.status}`);
 
+      // The client preflight endpoint applies the same rules so a link can be
+      // rejected inline before the user reaches the create step.
+      const preflightBad = await makeRequest('/api/v1/media/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${linkToken}` },
+        body: JSON.stringify({ url: 'https://cdn.example.com/poster.png' }),
+      });
+      if (preflightBad.status !== 422) throw new Error(`Preflight for an image link should be 422, got ${preflightBad.status}`);
+      const preflightJson = (await preflightBad.json()) as any;
+      if (preflightJson.code !== 'NOT_A_VIDEO') throw new Error(`Preflight returned code ${preflightJson.code}`);
+      if (!preflightJson.error || preflightJson.error.includes('\n')) {
+        throw new Error('Preflight rejection was not a single line of text');
+      }
+      const preflightEmpty = await makeRequest('/api/v1/media/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${linkToken}` },
+        body: JSON.stringify({ url: '   ' }),
+      });
+      if (preflightEmpty.status !== 400) throw new Error(`Empty preflight link should be 400, got ${preflightEmpty.status}`);
+
       const noRoom = await RoomModel.findOne({ hostId: linkUserId });
       if (noRoom) throw new Error('Rejected media link still created a room');
     } finally {
