@@ -92,14 +92,16 @@ class MainActivity : ComponentActivity() {
             val activeTheme by themeRepository.activeTheme.collectAsState()
             val uiState by homeViewModel.uiState.collectAsState()
             val showWelcomeBack by homeViewModel.showWelcomeBack.collectAsState()
-            val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+            val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+                getSharedPreferences("nebula_push", MODE_PRIVATE).edit().putBoolean("notification_permission_prompt_completed", true).apply()
+            }
             LaunchedEffect(uiState.userProfile.isLoggedIn, uiState.userProfile.id) {
                 if (uiState.userProfile.isLoggedIn && uiState.userProfile.id.isNotBlank()) {
                     if (android.os.Build.VERSION.SDK_INT >= 33 &&
                         androidx.core.content.ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
-                        !getSharedPreferences("nebula_push", MODE_PRIVATE).getBoolean("notification_permission_requested", false)
+                        !getSharedPreferences("nebula_push", MODE_PRIVATE).getBoolean("notification_permission_prompt_completed", false) &&
+                        !shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS)
                     ) {
-                        getSharedPreferences("nebula_push", MODE_PRIVATE).edit().putBoolean("notification_permission_requested", true).apply()
                         notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
                     runCatching {
