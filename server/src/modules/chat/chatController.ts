@@ -6,6 +6,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 import { notifyUser } from '../notifications/notificationController';
+import { notifyConversationRead } from '../../realtime/socketServer';
 import { NotificationModel } from '../../models/Notification';
 import { dmRetentionCutoff, dmRetentionCutoffForDays, entitlementsForTier, messageEditLimitForTier } from '../../utils/entitlements';
 
@@ -95,6 +96,19 @@ export async function getConversationMessages(req: Request, res: Response): Prom
       return;
     }
 
+    // N-034: block check — a blocked relationship from either direction closes the conversation view.
+    const blockRecord = await FriendshipModel.findOne({
+      status: 'blocked',
+      $or: [
+        { requesterId: req.user.id, recipientId: conversationId },
+        { requesterId: conversationId, recipientId: req.user.id },
+      ],
+    }).select('_id');
+    if (blockRecord && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, error: 'This conversation is unavailable' });
+      return;
+    }
+
     // Tier retention: Basic 4 weeks, Premium 6 weeks, Premium Plus 12 months.
     // History outside the window is no longer returned to either participant.
     const { cutoff, retention } = await retentionContext(req.user.id, conversationId);
@@ -138,6 +152,7 @@ export async function markConversationRead(req: Request, res: Response): Promise
       return;
     }
     const { cutoff } = await retentionContext(req.user.id);
+    const readAt = new Date();
     const result = await MessageModel.updateMany(
       {
         senderId: conversationId,
@@ -147,9 +162,20 @@ export async function markConversationRead(req: Request, res: Response): Promise
         deletedAt: { $exists: false },
         createdAt: { $gte: cutoff },
       },
-      { $set: { readAt: new Date() } },
+      { $set: { readAt } },
     );
-    res.json({ success: true, data: { readCount: result.modifiedCount } });
+
+    // Read receipts are only useful to the sender, so tell *them* that their
+    // messages were opened. Without this the sender's ticks stayed single until
+    // they happened to reload the thread.
+    if (result.modifiedCount > 0) {
+      notifyConversationRead(conversationId, req.user.id, readAt.toISOString(), result.modifiedCount);
+    }
+
+    res.json({
+      success: true,
+      data: { readCount: result.modifiedCount, readAt: readAt.toISOString() },
+    });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to mark conversation read' });
   }
@@ -208,7 +234,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { roomId, conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType } = req.body;
+    const { roomId, conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType, idempotencyKey } = req.body;
 
     // 1. If sending to a ROOM: verify that the user is an active participant in that room
     if (roomId) {
@@ -324,6 +350,34 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
         });
         return;
       }
+
+      // N-034: block enforcement — a blocked relationship from either direction
+      // prevents DMs even when an accepted friendship exists.
+      const blockRecord = await FriendshipModel.findOne({
+        status: 'blocked',
+        $or: [
+          { requesterId: req.user.id, recipientId: conversationId },
+          { requesterId: conversationId, recipientId: req.user.id },
+        ],
+      }).select('_id');
+      if (blockRecord && req.user.role !== 'admin') {
+        res.status(403).json({ success: false, error: 'You cannot send messages to this user' });
+        return;
+      }
+
+      // N-003: idempotency dedup — if the client supplies a key and a message with
+      // that exact key already exists in this conversation, return it as-is.
+      if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 128) {
+        const existing = await MessageModel.findOne({
+          senderId: req.user.id,
+          conversationId,
+          idempotencyKey,
+        });
+        if (existing) {
+          res.status(201).json({ success: true, data: toMessageDTO(existing), deduplicated: true });
+          return;
+        }
+      }
     }
 
     const message = await MessageModel.create({
@@ -339,6 +393,11 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       mediaMimeType,
       messageType: messageType || 'text',
       reactions: [],
+      // N-003: only store when the client provided a non-empty key; never store null/undefined
+      // so the sparse unique index excludes all messages without a key.
+      ...(conversationId && !roomId && idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 128
+        ? { idempotencyKey: idempotencyKey.trim() }
+        : {}),
     });
 
     if (conversationId && !roomId) {
