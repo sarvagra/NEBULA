@@ -265,6 +265,10 @@ fun HomeScreen(
                 showInlineSuggestions = uiState.showInlineSuggestions,
                 onBack = { viewModel.onCloseSocialConversation() },
                 onSendMessage = { viewModel.onSendDirectMessage(it) },
+                onSendAttachment = { text, url, type -> viewModel.onSendDirectAttachment(text, url, type) },
+                onEditMessage = { id, text -> viewModel.onEditDirectMessage(id, text) },
+                onUnsendMessage = { id -> viewModel.onUnsendDirectMessage(id) },
+                onOpenProfile = { uiState.activeSocialConversation?.partnerUser?.let { viewModel.onOpenFriendProfile(it) } },
                 onInviteToRoom = {
                     val partner = uiState.activeSocialConversation?.partnerUser
                     if (partner != null) {

@@ -15,7 +15,9 @@ interface ISocialRepository {
 
     suspend fun selectConversation(id: String)
     suspend fun closeConversation()
-    suspend fun sendMessage(conversationId: String, content: String): Boolean
+    suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text"): Boolean
+    suspend fun editMessage(messageId: String, content: String): Boolean
+    suspend fun unsendMessage(messageId: String): Boolean
     suspend fun acceptFriendRequest(requestId: String): Boolean
     suspend fun declineFriendRequest(requestId: String): Boolean
     suspend fun addFriend(user: NebulaUser): Boolean

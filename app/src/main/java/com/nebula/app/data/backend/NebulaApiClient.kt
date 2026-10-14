@@ -541,11 +541,14 @@ object NebulaApiClient {
         request("/friends/request/withdraw/$userId", "DELETE")
     suspend fun removeFriend(userId: String): ApiResponse<JSONObject> = request("/friends/$userId", "DELETE")
 
-    suspend fun sendDirectMessage(conversationId: String, text: String): ApiResponse<JSONObject> =
+    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text"): ApiResponse<JSONObject> =
         request(
             "/chat",
             "POST",
-            JSONObject().put("conversationId", conversationId).put("text", text)
+            JSONObject().put("conversationId", conversationId).put("text", text).apply {
+                mediaUrl?.let { put("mediaUrl", it) }
+                put("messageType", messageType)
+            }
         )
 
     suspend fun getConversationMessages(conversationId: String): ApiResponse<JSONArray> {
@@ -555,6 +558,15 @@ object NebulaApiClient {
             is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
         }
     }
+
+    suspend fun markConversationRead(conversationId: String): ApiResponse<JSONObject> =
+        request("/chat/conversation/$conversationId/read", "POST")
+
+    suspend fun editDirectMessage(messageId: String, text: String): ApiResponse<JSONObject> =
+        request("/chat/$messageId", "PUT", JSONObject().put("text", text))
+
+    suspend fun unsendDirectMessage(messageId: String): ApiResponse<JSONObject> =
+        request("/chat/$messageId", "DELETE")
 
 
     // ==========================================

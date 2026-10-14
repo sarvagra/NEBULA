@@ -101,6 +101,10 @@ export const AddReactionSchema = z.object({
   emoji: z.string().trim().min(1).max(8),
 });
 
+export const EditMessageSchema = z.object({
+  text: z.string().trim().min(1).max(2000, 'Message cannot exceed 2000 characters'),
+});
+
 export const SendFriendRequestSchema = z.object({
   recipientId: z.string().trim().length(24, 'Invalid user ID format').optional(),
   username: z.string().trim().min(2, 'Username must be at least 2 characters').max(30).optional(),

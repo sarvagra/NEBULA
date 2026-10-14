@@ -359,7 +359,7 @@ class HomeViewModel(
 
     // --- NAVIGATION ---
     fun onTabSelected(tab: NebulaTab) {
-        if (tab == NebulaTab.FRIENDS) viewModelScope.launch { socialRepository.refresh() }
+        if (tab == NebulaTab.FRIENDS || tab == NebulaTab.CHATS || tab == NebulaTab.HOME) viewModelScope.launch { socialRepository.refresh() }
         _uiState.value = _uiState.value.copy(
             currentTab = tab,
             activeRoom = null,
@@ -625,6 +625,21 @@ class HomeViewModel(
                 showToast("Message could not be sent. Check your connection and friendship status.")
             }
         }
+    }
+
+    fun onSendDirectAttachment(text: String, mediaUrl: String, messageType: String) {
+        val conversationId = _uiState.value.activeSocialConversation?.id ?: return
+        viewModelScope.launch {
+            if (!socialRepository.sendMessage(conversationId, text, mediaUrl, messageType)) showToast("Attachment could not be sent.")
+        }
+    }
+
+    fun onEditDirectMessage(messageId: String, text: String) {
+        viewModelScope.launch { if (!socialRepository.editMessage(messageId, text)) showToast("Message could not be edited.") }
+    }
+
+    fun onUnsendDirectMessage(messageId: String) {
+        viewModelScope.launch { if (!socialRepository.unsendMessage(messageId)) showToast("This message can no longer be unsent.") }
     }
 
     fun onInviteFriendToActiveRoom(user: NebulaUser) {

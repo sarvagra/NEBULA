@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -75,12 +77,17 @@ fun NebulaChatDetailScreen(
     showInlineSuggestions: Boolean,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
+    onSendAttachment: (text: String, mediaUrl: String, messageType: String) -> Unit,
+    onEditMessage: (messageId: String, text: String) -> Unit,
+    onUnsendMessage: (messageId: String) -> Unit,
+    onOpenProfile: () -> Unit,
     onInviteToRoom: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
     var inputText by remember { mutableStateOf("") }
     var showAttachments by remember { mutableStateOf(false) }
+    var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(conversation.messages.size) {
@@ -120,6 +127,14 @@ fun NebulaChatDetailScreen(
                     )
                 }
 
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onOpenProfile() }
+                        .padding(end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                 Box(
                     modifier = Modifier
                         .size(38.dp)
@@ -141,11 +156,7 @@ fun NebulaChatDetailScreen(
                         )
                     )
 
-                    val statusText = when {
-                        conversation.isGroup -> "${conversation.participants.size} members"
-                        conversation.partnerUser?.isOnline == true -> "Online now"
-                        else -> "Active recently"
-                    }
+                    val statusText = if (conversation.isGroup) "${conversation.participants.size} members" else conversation.partnerUser?.status?.ifBlank { "Dynamic" } ?: "Dynamic"
 
                     Text(
                         text = statusText,
@@ -154,6 +165,7 @@ fun NebulaChatDetailScreen(
                             fontSize = 11.5.sp
                         )
                     )
+                }
                 }
             }
 
@@ -245,7 +257,11 @@ fun NebulaChatDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(conversation.messages) { message ->
-                    ModernChatBubble(message = message)
+                    ModernChatBubble(
+                        message = message,
+                        onEdit = { editingMessage = message },
+                        onUnsend = { onUnsendMessage(message.id) }
+                    )
                 }
             }
         }
@@ -300,7 +316,7 @@ fun NebulaChatDetailScreen(
                                 mediaType = "image"
                             )) {
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success ->
-                                    onSendMessage("📷 Image: ${res.data.optString("mediaUrl", dataUrl)}")
+                                    onSendAttachment("", res.data.optString("mediaUrl", dataUrl), "media")
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
                                     android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
                             }
@@ -338,32 +354,36 @@ fun NebulaChatDetailScreen(
                             }
                         }.getOrDefault(Long.MAX_VALUE)
                     }
-                    if (size > 30 * 1024 * 1024L || duration > 5000L) {
+                    if (size > 30 * 1024 * 1024L) {
                         android.widget.Toast.makeText(
                             context,
-                            if (size > 30 * 1024 * 1024L) "Video must be under 30MB" else "Video must be 5 seconds or shorter",
+                            "Video must be under 30MB",
                             android.widget.Toast.LENGTH_LONG
                         ).show()
                         return@launch
                     }
                     isUploadingMedia = true
                     try {
+                        val dataUrl = withContext(Dispatchers.IO) {
+                            val bytes = context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: ByteArray(0)
+                            "data:video/mp4;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        }
                         val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
-                            url = it.toString(),
+                            url = dataUrl,
                             mimeType = "video/mp4",
                             mediaType = "video"
                         )
                         when (res) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
                                 val mediaUrl = res.data.optString("mediaUrl", it.toString())
-                                onSendMessage("🎬 Video: $mediaUrl")
+                                onSendAttachment("", mediaUrl, "media")
                             }
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
-                                onSendMessage("🎬 Video: $it")
+                                android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
                             }
                         }
                     } catch (e: Exception) {
-                        onSendMessage("🎬 Video: $it")
+                        android.widget.Toast.makeText(context, "Video could not be uploaded", android.widget.Toast.LENGTH_LONG).show()
                     }
                     isUploadingMedia = false
                     showAttachments = false
@@ -440,7 +460,7 @@ fun NebulaChatDetailScreen(
                             .background(theme.colors.surfaceElevated)
                             .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
                             .clickable {
-                                onSendMessage("GIF: $gifLabel")
+                                onSendAttachment(gifLabel, "https://media.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.gif", "media")
                                 showAttachments = false
                             }
                             .padding(horizontal = 10.dp, vertical = 7.dp)
@@ -535,18 +555,32 @@ fun NebulaChatDetailScreen(
                 }
             }
         }
+        editingMessage?.let { message ->
+            var editedText by remember(message.id) { mutableStateOf(message.content) }
+            AlertDialog(
+                onDismissRequest = { editingMessage = null },
+                title = { Text("Edit message") },
+                text = { BasicTextField(value = editedText, onValueChange = { editedText = it }, modifier = Modifier.fillMaxWidth(), textStyle = theme.typography.bodyMedium.copy(color = theme.colors.textPrimary)) },
+                confirmButton = { TextButton(onClick = { if (editedText.isNotBlank()) onEditMessage(message.id, editedText.trim()); editingMessage = null }) { Text("Save") } },
+                dismissButton = { TextButton(onClick = { editingMessage = null }) { Text("Cancel") } }
+            )
+        }
     }
 }
 
 @Composable
-private fun ModernChatBubble(message: ChatMessage) {
+private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend: () -> Unit) {
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
 
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
+        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom
     ) {
+        if (!isMe) NebulaAvatarImage(message.senderAvatarUrl, message.senderAvatarLetter, modifier = Modifier.size(28.dp))
+        Spacer(Modifier.width(if (isMe) 0.dp else 7.dp))
+        Column(horizontalAlignment = if (isMe) Alignment.End else Alignment.Start) {
         Box(
             modifier = Modifier
                 .widthIn(max = 280.dp)
@@ -571,7 +605,7 @@ private fun ModernChatBubble(message: ChatMessage) {
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            val isMedia = message.content.startsWith("📷 Image:") || message.content.startsWith("🎬 Video:") || message.content.startsWith("GIF:")
+            val isMedia = message.mediaUrl != null || message.messageType == "media"
             if (isMedia) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
@@ -582,8 +616,8 @@ private fun ModernChatBubble(message: ChatMessage) {
                             .background(if (isMe) Color.Black.copy(alpha = 0.25f) else theme.colors.surfaceElevated),
                         contentAlignment = Alignment.Center
                     ) {
-                        val mediaUrl = message.content.substringAfter(": ", "")
-                        if (message.content.startsWith("📷 Image:") && mediaUrl.isNotBlank()) {
+                        val mediaUrl = message.mediaUrl.orEmpty()
+                        if ((mediaUrl.contains(".gif", ignoreCase = true) || message.messageType == "media") && mediaUrl.isNotBlank() && !mediaUrl.contains("video", ignoreCase = true)) {
                             AsyncImage(
                                 model = mediaUrl,
                                 contentDescription = "Shared image",
@@ -593,9 +627,9 @@ private fun ModernChatBubble(message: ChatMessage) {
                         } else {
                             Text(
                                 text = when {
-                                    message.content.startsWith("📷 Image:") -> "Photo Attachment"
-                                    message.content.startsWith("🎬 Video:") -> "Video Media"
-                                    else -> "Shared GIF"
+                                    mediaUrl.contains(".gif", ignoreCase = true) -> "Shared GIF"
+                                    mediaUrl.contains("video", ignoreCase = true) -> "Video attachment"
+                                    else -> "Video attachment"
                                 },
                                 style = theme.typography.bodyMedium.copy(
                                     color = if (isMe) Color.White else theme.colors.textPrimary,
@@ -605,7 +639,7 @@ private fun ModernChatBubble(message: ChatMessage) {
                         }
                     }
                     Text(
-                        text = message.content,
+                        text = message.content.ifBlank { if (message.mediaUrl?.contains("gif", true) == true) "GIF" else "Attachment" },
                         style = theme.typography.caption.copy(
                             color = if (isMe) Color.White.copy(alpha = 0.85f) else theme.colors.textSecondary,
                             fontSize = 11.5.sp
@@ -645,6 +679,19 @@ private fun ModernChatBubble(message: ChatMessage) {
                     modifier = Modifier.size(12.dp)
                 )
             }
+            if (message.editedAt != null) Text("Edited", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
+        }
+        if (isMe && message.deletedAt == null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Edit", modifier = Modifier.clickable { onEdit() }, style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp))
+                if (System.currentTimeMillis() - message.timestamp <= 2 * 60 * 1000L) Text("Unsend", modifier = Modifier.clickable { onUnsend() }, style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.5.sp))
+            }
+        } else if (!isMe && message.editHistory.isNotEmpty()) {
+            Column {
+                Text("Edited ${message.editHistory.size} time${if (message.editHistory.size == 1) "" else "s"}", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
+                message.editHistory.forEach { previous -> Text("Previous: $previous", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp)) }
+            }
+        }
         }
     }
 }

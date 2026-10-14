@@ -213,6 +213,7 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
         userId: req.user.id,
         type: 'room_invite',
         'actionData.roomId': room._id.toString(),
+        expiresAt: { $gt: new Date() },
       });
       if (!acceptedInvite) {
         res.status(403).json({ success: false, error: 'Cannot join an invite-only room without an invitation' });
@@ -313,6 +314,7 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'User not found or unavailable' });
       return;
     }
+    await NotificationModel.deleteMany({ userId, type: 'room_invite', expiresAt: { $lte: new Date() } });
     const existing = await NotificationModel.findOne({
       userId,
       type: 'room_invite',
@@ -329,6 +331,7 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
       title: room.name,
       body: `${req.user.displayName} invited you to join a room.`,
       actionData: { roomId: room._id.toString(), inviterId: req.user.id },
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     res.status(201).json({ success: true, data: invite.toJSON() });
   } catch {

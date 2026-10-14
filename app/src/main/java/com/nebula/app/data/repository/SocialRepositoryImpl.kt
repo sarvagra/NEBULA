@@ -53,14 +53,7 @@ class SocialRepositoryImpl(
                 buildList {
                     for (index in 0 until history.data.length()) {
                         val item = history.data.optJSONObject(index) ?: continue
-                        add(
-                            ChatMessage(
-                                id = item.optString("id"),
-                                role = if (item.optString("senderId") == id) MessageRole.ASSISTANT else MessageRole.USER,
-                                content = item.optString("text"),
-                                timeLabel = "Recent"
-                            )
-                        )
+                        add(messageFromJson(item, id))
                     }
                 }
             } else target.messages
@@ -68,6 +61,8 @@ class SocialRepositoryImpl(
             _conversations.value = _conversations.value.map {
                 if (it.id == id) it.copy(unreadCount = 0, messages = messages) else it
             }
+            // Opening a conversation is the only point at which messages become seen.
+            apiClient.markConversationRead(id)
         }
     }
 
@@ -75,17 +70,12 @@ class SocialRepositoryImpl(
         _activeConversation.value = null
     }
 
-    override suspend fun sendMessage(conversationId: String, content: String): Boolean {
-        if (content.isBlank()) return false
-        val response = apiClient.sendDirectMessage(conversationId, content.trim())
+    override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String): Boolean {
+        if (content.isBlank() && mediaUrl.isNullOrBlank()) return false
+        val response = apiClient.sendDirectMessage(conversationId, content.trim(), mediaUrl, messageType)
         if (response !is ApiResponse.Success) return false
         val currentConv = _conversations.value.firstOrNull { it.id == conversationId } ?: return false
-        val newMsg = ChatMessage(
-            id = "msg_${UUID.randomUUID().toString().take(6)}",
-            role = MessageRole.USER,
-            content = content.trim(),
-            timeLabel = "Just now"
-        )
+        val newMsg = response.data.optJSONObject("data")?.let { messageFromJson(it, conversationId) } ?: ChatMessage(id = "msg_${UUID.randomUUID().toString().take(6)}", role = MessageRole.USER, content = content.trim(), timeLabel = "Just now", mediaUrl = mediaUrl, messageType = messageType)
         val updatedConv = currentConv.copy(
             lastMessageText = "you: ${content.trim()}",
             lastMessageTime = "Just now",
@@ -97,6 +87,21 @@ class SocialRepositoryImpl(
         if (_activeConversation.value?.id == conversationId) {
             _activeConversation.value = updatedConv
         }
+        return true
+    }
+
+    override suspend fun editMessage(messageId: String, content: String): Boolean = updateMessageFromResponse(apiClient.editDirectMessage(messageId, content))
+
+    override suspend fun unsendMessage(messageId: String): Boolean = updateMessageFromResponse(apiClient.unsendDirectMessage(messageId))
+
+    private fun updateMessageFromResponse(response: ApiResponse<JSONObject>): Boolean {
+        if (response !is ApiResponse.Success) return false
+        val raw = response.data.optJSONObject("data") ?: return false
+        val active = _activeConversation.value ?: return false
+        val updated = messageFromJson(raw, active.id)
+        val revised = active.copy(messages = active.messages.map { if (it.id == updated.id) updated else it })
+        _activeConversation.value = revised
+        _conversations.value = _conversations.value.map { if (it.id == active.id) revised else it }
         return true
     }
 
@@ -136,14 +141,24 @@ class SocialRepositoryImpl(
             val friendUsers = parseUsers(friends.data)
             _friends.value = attachRoomPresence(friendUsers)
             _conversations.value = _friends.value.map { friend ->
+                val history = apiClient.getConversationMessages(friend.id)
+                val messages = if (history is ApiResponse.Success) buildList {
+                    for (index in 0 until history.data.length()) {
+                        history.data.optJSONObject(index)?.let { add(messageFromJson(it, friend.id)) }
+                    }
+                } else emptyList()
+                val unread = messages.count { it.role == MessageRole.ASSISTANT && it.readAt == null && it.deletedAt == null }
+                val latest = messages.lastOrNull()
                 NebulaConversation(
                     id = friend.id,
                     title = friend.displayName,
                     isGroup = false,
                     partnerUser = friend,
                     participants = listOf(NebulaUser.CurrentUser, friend),
-                    lastMessageText = "",
-                    lastMessageTime = "",
+                    lastMessageText = latest?.content ?: "",
+                    lastMessageTime = if (latest != null) "Recent" else "",
+                    unreadCount = unread,
+                    messages = messages,
                 )
             }
         }
@@ -257,6 +272,26 @@ class SocialRepositoryImpl(
                 )
             )
         }
+    }
+
+    private fun messageFromJson(item: JSONObject, partnerId: String): ChatMessage {
+        val history = item.optJSONArray("editHistory")?.let { entries ->
+            List(entries.length()) { index -> entries.optJSONObject(index)?.optString("text").orEmpty() }
+        } ?: emptyList()
+        return ChatMessage(
+            id = item.optString("id"),
+            role = if (item.optString("senderId") == partnerId) MessageRole.ASSISTANT else MessageRole.USER,
+            content = item.optString("text"), timeLabel = "Recent",
+            timestamp = item.optString("createdAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrDefault(System.currentTimeMillis()) } ?: System.currentTimeMillis(),
+            senderId = item.optString("senderId"), senderName = item.optString("senderName"),
+            senderAvatarUrl = item.optString("senderAvatarUrl").ifBlank { null },
+            senderAvatarLetter = item.optString("senderAvatarLetter", "U"),
+            mediaUrl = item.optString("mediaUrl").ifBlank { null }, messageType = item.optString("messageType", "text"),
+            editedAt = item.optString("editedAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            editHistory = history,
+            deletedAt = item.optString("deletedAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            readAt = item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+        )
     }
 
     private fun parseRequests(array: JSONArray): List<NebulaFriendRequest> = buildList {

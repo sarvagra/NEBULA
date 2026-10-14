@@ -6,6 +6,15 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 
+const UNSEND_WINDOW_MS = 2 * 60 * 1000;
+const editLimitForTier = (tier?: string) => tier === 'premium_plus' ? 2 : tier === 'premium' ? 1 : 1;
+
+async function authorizedDirectMessage(req: Request, messageId: string) {
+  const message = await MessageModel.findById(messageId);
+  if (!message || !req.user || message.roomId || message.senderId !== req.user.id) return null;
+  return message;
+}
+
 export async function getRoomMessages(req: Request, res: Response): Promise<void> {
   try {
     const { roomId } = req.params;
@@ -72,12 +81,64 @@ export async function getConversationMessages(req: Request, res: Response): Prom
       .sort({ createdAt: -1 })
       .limit(limit);
 
+    const senders = await UserModel.find({ _id: { $in: [...new Set(messages.map((message) => message.senderId))] } }).select('_id avatarUrl');
+    const avatarByUserId = new Map(senders.map((sender) => [sender._id.toString(), sender.avatarUrl]));
     res.json({
       success: true,
-      data: messages.reverse().map(toMessageDTO),
+      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: message.senderAvatarUrl || avatarByUserId.get(message.senderId) })),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve direct conversation' });
+  }
+}
+
+/** Messages are read only when the recipient explicitly opens this conversation. */
+export async function markConversationRead(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
+    const { conversationId } = req.params;
+    const result = await MessageModel.updateMany(
+      { senderId: conversationId, conversationId: req.user.id, roomId: { $exists: false }, readAt: { $exists: false }, deletedAt: { $exists: false } },
+      { $set: { readAt: new Date() } },
+    );
+    res.json({ success: true, data: { readCount: result.modifiedCount } });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to mark conversation read' });
+  }
+}
+
+export async function editDirectMessage(req: Request, res: Response): Promise<void> {
+  try {
+    const message = await authorizedDirectMessage(req, req.params.messageId);
+    if (!message) { res.status(404).json({ success: false, error: 'Message not found' }); return; }
+    if (message.deletedAt) { res.status(409).json({ success: false, error: 'This message was unsent' }); return; }
+    const sender = await UserModel.findById(req.user!.id).select('tier');
+    const editsUsed = (message.editHistory || []).length;
+    if (editsUsed >= editLimitForTier(sender?.tier)) { res.status(403).json({ success: false, error: 'Your edit limit for this message has been reached' }); return; }
+    const nextText = String(req.body.text || '').trim();
+    if (nextText === message.text) { res.json({ success: true, data: toMessageDTO(message) }); return; }
+    message.editHistory.push({ text: message.text, editedAt: new Date() });
+    message.text = nextText;
+    message.editedAt = new Date();
+    await message.save();
+    res.json({ success: true, data: toMessageDTO(message) });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to edit message' });
+  }
+}
+
+export async function unsendDirectMessage(req: Request, res: Response): Promise<void> {
+  try {
+    const message = await authorizedDirectMessage(req, req.params.messageId);
+    if (!message) { res.status(404).json({ success: false, error: 'Message not found' }); return; }
+    if (Date.now() - message.createdAt.getTime() > UNSEND_WINDOW_MS) { res.status(403).json({ success: false, error: 'Messages can only be unsent during the first 2 minutes' }); return; }
+    message.text = 'This message was unsent.';
+    message.mediaUrl = undefined;
+    message.deletedAt = new Date();
+    await message.save();
+    res.json({ success: true, data: toMessageDTO(message) });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to unsend message' });
   }
 }
 

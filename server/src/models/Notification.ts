@@ -9,6 +9,7 @@ export interface INotification extends Document {
   body: string;
   actionData?: Record<string, any>;
   isRead: boolean;
+  expiresAt?: Date;
   createdAt: Date;
 }
 
@@ -20,6 +21,8 @@ const NotificationSchema = new Schema<INotification>(
     body: { type: String, required: true },
     actionData: { type: Schema.Types.Mixed },
     isRead: { type: Boolean, default: false },
+    // Invite records remain visible until acted on, then expire server-side after five minutes.
+    expiresAt: { type: Date, index: true },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },

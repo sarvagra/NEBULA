@@ -174,6 +174,10 @@ export function toMessageDTO(message: IMessage) {
     mediaUrl: message.mediaUrl,
     messageType: message.messageType,
     reactions: message.reactions,
+    readAt: message.readAt,
+    editedAt: message.editedAt,
+    editHistory: message.editHistory || [],
+    deletedAt: message.deletedAt,
     createdAt: message.createdAt,
   };
 }

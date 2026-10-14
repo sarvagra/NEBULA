@@ -13,6 +13,11 @@ export interface IMessage extends Document {
   mediaUrl?: string;
   messageType: MessageType;
   reactions: { emoji: string; count: number; userIds: string[] }[];
+  /** Direct messages only.  The recipient explicitly marks these read. */
+  readAt?: Date;
+  editedAt?: Date;
+  editHistory: { text: string; editedAt: Date }[];
+  deletedAt?: Date;
   createdAt: Date;
 }
 
@@ -34,6 +39,13 @@ const MessageSchema = new Schema<IMessage>(
         userIds: { type: [String], default: [] },
       },
     ],
+    readAt: { type: Date },
+    editedAt: { type: Date },
+    editHistory: [{
+      text: { type: String, required: true },
+      editedAt: { type: Date, required: true },
+    }],
+    deletedAt: { type: Date },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },

@@ -10,7 +10,12 @@ export async function listNotifications(req: Request, res: Response): Promise<vo
 
     const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 50);
 
-    const notifications = await NotificationModel.find({ userId: req.user.id })
+    const now = new Date();
+    await NotificationModel.deleteMany({ userId: req.user.id, expiresAt: { $lte: now } });
+    const notifications = await NotificationModel.find({
+      userId: req.user.id,
+      $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: now } }],
+    })
       .sort({ createdAt: -1 })
       .limit(limit);
 

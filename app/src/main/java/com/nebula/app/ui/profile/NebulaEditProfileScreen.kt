@@ -360,9 +360,15 @@ fun NebulaEditProfileScreen(
                             name = "avatar_${System.currentTimeMillis()}.jpg"
                         )
                         if (upload is NebulaApiClient.ApiResponse.Success) {
-                            val uploadedUrl = upload.data.optJSONObject("data")?.optString("url")?.takeIf { !it.isNullOrBlank() }
+                            val asset = upload.data.optJSONObject("data")
+                            val assetId = asset?.optString("id").orEmpty()
+                            val applied = assetId.takeIf { it.isNotBlank() }?.let { NebulaApiClient.applyProfileAsset(it) }
+                            val uploadedUrl = asset?.optString("url")?.takeIf { !it.isNullOrBlank() }
                                 ?: upload.data.optString("url").takeIf { it.isNotBlank() }
-                            if (uploadedUrl != null) currentAvatarUri = uploadedUrl
+                            if (applied is NebulaApiClient.ApiResponse.Success && uploadedUrl != null) {
+                                currentAvatarUri = uploadedUrl
+                                onSave(displayName, username, bio, statusText, selectedBannerIndex, selectedInterests.toList(), isFriendCountPublic, uploadedUrl, customBannerUri, customStatusText)
+                            }
                             else Toast.makeText(context, "Avatar upload did not return a saved image", Toast.LENGTH_LONG).show()
                         } else if (upload is NebulaApiClient.ApiResponse.Error) {
                             Toast.makeText(context, "Avatar upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
@@ -403,9 +409,15 @@ fun NebulaEditProfileScreen(
                             name = "banner_${System.currentTimeMillis()}.jpg"
                         )
                         if (upload is NebulaApiClient.ApiResponse.Success) {
-                            val uploadedUrl = upload.data.optJSONObject("data")?.optString("url")?.takeIf { !it.isNullOrBlank() }
+                            val asset = upload.data.optJSONObject("data")
+                            val assetId = asset?.optString("id").orEmpty()
+                            val applied = assetId.takeIf { it.isNotBlank() }?.let { NebulaApiClient.applyProfileAsset(it) }
+                            val uploadedUrl = asset?.optString("url")?.takeIf { !it.isNullOrBlank() }
                                 ?: upload.data.optString("url").takeIf { it.isNotBlank() }
-                            if (uploadedUrl != null) customBannerUri = uploadedUrl
+                            if (applied is NebulaApiClient.ApiResponse.Success && uploadedUrl != null) {
+                                customBannerUri = uploadedUrl
+                                onSave(displayName, username, bio, statusText, selectedBannerIndex, selectedInterests.toList(), isFriendCountPublic, currentAvatarUri, uploadedUrl, customStatusText)
+                            }
                             else Toast.makeText(context, "Banner upload did not return a saved image", Toast.LENGTH_LONG).show()
                         } else if (upload is NebulaApiClient.ApiResponse.Error) {
                             Toast.makeText(context, "Banner upload failed: ${upload.message}", Toast.LENGTH_LONG).show()

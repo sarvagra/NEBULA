@@ -36,5 +36,15 @@ data class ChatMessage(
     val timeLabel: String = "Just now",
     val status: AssistantStatus = AssistantStatus.COMPLETED,
     val attachments: List<ChatAttachment> = emptyList(),
-    val isSavedToMemory: Boolean = false
+    val isSavedToMemory: Boolean = false,
+    val senderId: String? = null,
+    val senderName: String? = null,
+    val senderAvatarUrl: String? = null,
+    val senderAvatarLetter: String = "U",
+    val mediaUrl: String? = null,
+    val messageType: String = "text",
+    val editedAt: Long? = null,
+    val editHistory: List<String> = emptyList(),
+    val deletedAt: Long? = null,
+    val readAt: Long? = null,
 )

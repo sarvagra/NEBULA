@@ -257,6 +257,11 @@ private fun TelegramSwipeableNotificationItem(
                     }
                 }
             }
+            // A visible clear action makes dismissal discoverable even when a notification
+            // contains its own tap target and intercepts a drag gesture.
+            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Clear notification", tint = theme.colors.textSecondary, modifier = Modifier.size(18.dp))
+            }
         }
     }
 }
