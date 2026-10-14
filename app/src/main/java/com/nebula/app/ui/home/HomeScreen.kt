@@ -28,8 +28,6 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +47,7 @@ import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.LiquidGlassProfileOverlay
 import com.nebula.app.ui.components.NABottomBar
 import com.nebula.app.ui.components.NebulaLogo
+import com.nebula.app.ui.components.NebulaPullRefresh
 import com.nebula.app.ui.dialogs.AboutSheet
 import com.nebula.app.ui.dialogs.CreateRoomSheet
 import com.nebula.app.ui.dialogs.FriendProfileSheet
@@ -84,10 +83,6 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val theme = Theme.current
     val context = LocalContext.current
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = uiState.isRefreshing,
-        onRefresh = viewModel::refreshAll
-    )
 
     // Quick Toast feedback
     LaunchedEffect(uiState.quickToastMessage) {
@@ -113,7 +108,6 @@ fun HomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .pullRefresh(pullRefreshState)
             .background(theme.colors.background)
     ) {
         // 1. MAIN CONTENT (Full screen destination, room, chat detail, or tab screen)
@@ -176,6 +170,7 @@ fun HomeScreen(
                         onBack = { viewModel.onNavigateBack() },
                         onOpenAccount = { viewModel.onOpenAccountSettings() },
                         onOpenGoogleAccount = { viewModel.onOpenGoogleAccountSettings() },
+                        onOpenBlockedUsers = { viewModel.onOpenBlockedUsers() },
                         onOpenAppearance = { viewModel.onOpenThemes() },
                         onOpenPermissions = { viewModel.onOpenPermissions() },
                         onOpenPrivacyPolicy = { viewModel.onOpenPrivacyPolicy() },
@@ -199,6 +194,12 @@ fun HomeScreen(
                         onBack = { viewModel.onNavigateBack() },
                         onSwitchGoogleAccount = { viewModel.signInWithGoogle(context) },
                         onSignOut = { viewModel.signOutGoogle() }
+                    )
+                }
+
+                is FullScreenDestination.BlockedUsers -> {
+                    com.nebula.app.ui.settings.NebulaBlockedUsersScreen(
+                        onBack = { viewModel.onNavigateBack() }
                     )
                 }
 
@@ -395,63 +396,90 @@ fun HomeScreen(
                 }
 
                 // TAB CONTENT
+                //
+                // Each tab owns its own pull-to-refresh container so the gesture
+                // works from the top of every tab's list, not only outside a list.
                 Box(modifier = Modifier.weight(1f)) {
                     when (uiState.currentTab) {
                         NebulaTab.HOME -> {
-                            NebulaHomeScreen(
-                                friends = uiState.friends,
-                                rooms = uiState.rooms,
-                                conversations = uiState.socialConversations,
-                                onJoinRoom = { viewModel.onJoinRoom(it) },
-                                onCreateRoomClick = { viewModel.onCreateRoomClick() },
-                                onOpenConversation = { viewModel.onSelectSocialConversation(it) },
-                                onFriendClick = { viewModel.onOpenFriendProfile(it) }
-                            )
+                            NebulaPullRefresh(
+                                isRefreshing = uiState.isRefreshing,
+                                onRefresh = viewModel::refreshAll
+                            ) {
+                                NebulaHomeScreen(
+                                    friends = uiState.friends,
+                                    rooms = uiState.rooms,
+                                    conversations = uiState.socialConversations,
+                                    onJoinRoom = { viewModel.onJoinRoom(it) },
+                                    onCreateRoomClick = { viewModel.onCreateRoomClick() },
+                                    onOpenConversation = { viewModel.onSelectSocialConversation(it) },
+                                    onFriendClick = { viewModel.onOpenFriendProfile(it) }
+                                )
+                            }
                         }
 
                         NebulaTab.ROOMS -> {
-                            NebulaRoomsScreen(
-                                rooms = uiState.rooms,
-                                onJoinRoom = { viewModel.onJoinRoom(it) },
-                                onCreateRoomClick = { viewModel.onCreateRoomClick() }
-                            )
+                            NebulaPullRefresh(
+                                isRefreshing = uiState.isRefreshing,
+                                onRefresh = viewModel::refreshAll
+                            ) {
+                                NebulaRoomsScreen(
+                                    rooms = uiState.rooms,
+                                    onJoinRoom = { viewModel.onJoinRoom(it) },
+                                    onCreateRoomClick = { viewModel.onCreateRoomClick() }
+                                )
+                            }
                         }
 
                         NebulaTab.CHATS -> {
-                            NebulaChatsScreen(
-                                conversations = uiState.socialConversations,
-                                onSelectConversation = { viewModel.onSelectSocialConversation(it) }
-                            )
+                            NebulaPullRefresh(
+                                isRefreshing = uiState.isRefreshing,
+                                onRefresh = viewModel::refreshAll
+                            ) {
+                                NebulaChatsScreen(
+                                    conversations = uiState.socialConversations,
+                                    onSelectConversation = { viewModel.onSelectSocialConversation(it) }
+                                )
+                            }
                         }
 
                         NebulaTab.FRIENDS -> {
-                            NebulaFriendsScreen(
-                                friends = uiState.friends,
-                                friendRequests = uiState.friendRequests,
-                                suggestedPeople = uiState.suggestedPeople,
-                                searchResults = uiState.searchResults,
-                                onSearchQuery = { viewModel.onSearchPeople(it) },
-                                onRefreshSuggestions = { viewModel.onRefreshSuggestions() },
-                                onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
-                                onInviteToRoom = { friend ->
-                                    viewModel.onInviteFriendToActiveRoom(friend)
-                                },
-                                onFriendClick = { friend ->
-                                    viewModel.onOpenFriendProfile(friend)
-                                },
-                                onAcceptRequest = { reqId ->
-                                    viewModel.onAcceptFriendRequest(reqId)
-                                },
-                                onDeclineRequest = { reqId ->
-                                    viewModel.onDeclineFriendRequest(reqId)
-                                },
-                                onAddSuggested = { user ->
-                                    viewModel.onAddSuggestedFriend(user)
-                                }
-                            )
+                            NebulaPullRefresh(
+                                isRefreshing = uiState.isRefreshing,
+                                onRefresh = viewModel::refreshAll
+                            ) {
+                                NebulaFriendsScreen(
+                                    friends = uiState.friends,
+                                    friendRequests = uiState.friendRequests,
+                                    suggestedPeople = uiState.suggestedPeople,
+                                    searchResults = uiState.searchResults,
+                                    onSearchQuery = { viewModel.onSearchPeople(it) },
+                                    onRefreshSuggestions = { viewModel.onRefreshSuggestions() },
+                                    onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
+                                    onInviteToRoom = { friend ->
+                                        viewModel.onInviteFriendToActiveRoom(friend)
+                                    },
+                                    onFriendClick = { friend ->
+                                        viewModel.onOpenFriendProfile(friend)
+                                    },
+                                    onAcceptRequest = { reqId ->
+                                        viewModel.onAcceptFriendRequest(reqId)
+                                    },
+                                    onDeclineRequest = { reqId ->
+                                        viewModel.onDeclineFriendRequest(reqId)
+                                    },
+                                    onAddSuggested = { user ->
+                                        viewModel.onAddSuggestedFriend(user)
+                                    }
+                                )
+                            }
                         }
 
                         NebulaTab.PROFILE -> {
+                            NebulaPullRefresh(
+                                isRefreshing = uiState.isRefreshing,
+                                onRefresh = viewModel::refreshAll
+                            ) {
                             NebulaProfileScreen(
                                 user = NebulaUser.CurrentUser.copy(
                                     id = uiState.userProfile.id,
@@ -503,6 +531,7 @@ fun HomeScreen(
                                 isAuthLoading = uiState.isAuthLoading,
                                 activeTier = uiState.activeSubscriptionTier
                             )
+                            }
                         }
                     }
                 }

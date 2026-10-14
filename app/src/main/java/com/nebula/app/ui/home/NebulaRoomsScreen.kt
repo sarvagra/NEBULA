@@ -135,7 +135,7 @@ fun NebulaRoomsScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 280.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // 1. HEADER (No "+ Create" button)

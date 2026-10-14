@@ -1,11 +1,16 @@
 package com.nebula.app.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,18 +50,39 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import com.nebula.app.domain.model.NebulaSubscriptionTier
 import com.nebula.app.domain.model.UserProfile
+import com.nebula.app.theme.PAColors
 import com.nebula.app.theme.Theme
+
+/**
+ * Banner fallback palettes shared by the public profile screen and this overlay,
+ * so a profile without a banner image gets the exact same gradient in both places.
+ */
+internal val NebulaBannerPalettes: List<List<Color>> = listOf(
+    listOf(Color(0xFF1E1B4B), Color(0xFF312E81)), // Deep Indigo
+    listOf(Color(0xFF3B0764), Color(0xFF581C87)), // Nebula Violet
+    listOf(Color(0xFF042F2E), Color(0xFF115E59)), // Midnight Teal
+    listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)), // Cosmic Crimson
+    listOf(Color(0xFF090B10), Color(0xFF1E222D))  // Obsidian Glass
+)
 
 /**
  * LiquidGlassProfileOverlay:
@@ -93,10 +120,51 @@ fun LiquidGlassProfileOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xE608090D)) // Liquid dark glass backdrop
+                // Liquid-glass backdrop, layer 1+2: the translucent theme scrim
+                // token dims whatever is behind the overlay, and a theme-tinted
+                // vertical vignette adds depth without ever going fully opaque.
+                .background(theme.colors.overlayScrim)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            theme.colors.background.copy(alpha = if (theme.colors.isDark) 0.42f else 0.26f),
+                            theme.colors.background.copy(alpha = if (theme.colors.isDark) 0.78f else 0.58f)
+                        )
+                    )
+                )
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
+            // Ambient accent glow that sits behind the identity card. It is a soft
+            // radial brush on its own and is additionally blurred on API 31+ via
+            // Modifier.blur. Below API 31 that modifier is a no-op, so the radial
+            // gradient alone still reads correctly and minSdk stays 26.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .offset(y = 44.dp)
+                    .height(210.dp)
+                    .then(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            // Unbounded so the blur bleeds past the node bounds instead
+                            // of being cut into a hard-edged rectangle.
+                            Modifier.blur(56.dp, BlurredEdgeTreatment.Unbounded)
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                theme.colors.primaryAccent.copy(alpha = 0.40f),
+                                theme.colors.secondaryAccent.copy(alpha = 0.16f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -140,33 +208,25 @@ fun LiquidGlassProfileOverlay(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(theme.colors.surface)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
+                        .liquidGlassSurface(RoundedCornerShape(20.dp), theme.colors)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Banner Background
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(96.dp)
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(Color(0xFF23283E), Color(0xFF141721))
-                                    )
-                                )
-                        )
+                        // Banner + avatar hero. The avatar is bottom-centred on the
+                        // banner and pushed down by half its own height, so it
+                        // overlaps the banner's bottom edge symmetrically.
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            ProfileOverlayBanner(
+                                bannerUrl = userProfile.bannerUrl,
+                                bannerIndex = userProfile.bannerIndex,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(96.dp)
+                            )
 
-                        // Avatar & Name (overlapping banner)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp)
-                                .padding(top = 0.dp, bottom = 18.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
                             Box(
                                 modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .offset(y = 38.dp)
                                     .size(76.dp)
                                     .clip(CircleShape)
                                     .background(theme.colors.surfaceElevated)
@@ -181,9 +241,18 @@ fun LiquidGlassProfileOverlay(
                                     fallbackTextSize = 26.sp
                                 )
                             }
+                        }
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
+                        // Avatar & Name (avatar overlaps the banner above)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp)
+                                // 38dp avatar overhang + 10dp gap keeps the name
+                                // clear of the avatar for every font scale.
+                                .padding(top = 48.dp, bottom = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(
                                 text = userProfile.displayName,
                                 style = theme.typography.titleMedium.copy(
@@ -288,14 +357,19 @@ fun LiquidGlassProfileOverlay(
                         .background(
                             Brush.linearGradient(
                                 listOf(
-                                    Color(0xFF4F46E5).copy(alpha = 0.22f),
-                                    Color(0xFF7C3AED).copy(alpha = 0.12f)
+                                    theme.colors.primaryAccent.copy(alpha = 0.22f),
+                                    theme.colors.secondaryAccent.copy(alpha = 0.12f)
                                 )
                             )
                         )
                         .border(
                             1.2.dp,
-                            Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFFA855F7))),
+                            Brush.linearGradient(
+                                listOf(
+                                    theme.colors.primaryAccent.copy(alpha = 0.65f),
+                                    theme.colors.secondaryAccent.copy(alpha = 0.35f)
+                                )
+                            ),
                             RoundedCornerShape(18.dp)
                         )
                         .clickable {
@@ -317,13 +391,13 @@ fun LiquidGlassProfileOverlay(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF6366F1).copy(alpha = 0.3f)),
+                                    .background(theme.colors.primaryAccent.copy(alpha = 0.22f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Star,
                                     contentDescription = null,
-                                    tint = Color(0xFFA5B4FC),
+                                    tint = theme.colors.primaryAccent,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -331,7 +405,7 @@ fun LiquidGlassProfileOverlay(
                                 text = "Nebula Membership",
                                 style = theme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
+                                    color = theme.colors.textPrimary,
                                     fontSize = 15.sp
                                 )
                             )
@@ -340,7 +414,7 @@ fun LiquidGlassProfileOverlay(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = Color(0xFFA5B4FC),
+                            tint = theme.colors.primaryAccent,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -350,9 +424,7 @@ fun LiquidGlassProfileOverlay(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(theme.colors.surface)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                        .liquidGlassSurface(RoundedCornerShape(16.dp), theme.colors)
                 ) {
                     LiquidGlassActionRow(
                         icon = Icons.Default.Settings,
@@ -386,6 +458,11 @@ fun LiquidGlassProfileOverlay(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(theme.colors.errorColor.copy(alpha = 0.12f))
+                        .border(
+                            1.dp,
+                            theme.colors.errorColor.copy(alpha = 0.28f),
+                            RoundedCornerShape(14.dp)
+                        )
                         .clickable(onClick = onLogoutClick)
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center
@@ -480,5 +557,85 @@ private fun LiquidGlassActionRow(
             tint = theme.colors.textTertiary,
             modifier = Modifier.size(16.dp)
         )
+    }
+}
+
+/**
+ * Liquid-glass card surface: a semi-transparent theme surface, a soft white sheen
+ * across the top third and a hairline highlight border, all clipped to [shape].
+ * The sheen/highlight intensities follow [PAColors.isDark], so the same recipe
+ * reads correctly on the light theme and on all three dark themes.
+ */
+private fun Modifier.liquidGlassSurface(shape: Shape, colors: PAColors): Modifier {
+    val sheenAlpha = if (colors.isDark) 0.10f else 0.55f
+    val highlightAlpha = if (colors.isDark) 0.30f else 0.95f
+
+    return this
+        .clip(shape)
+        .background(colors.surface.copy(alpha = 0.72f))
+        .background(
+            Brush.verticalGradient(
+                0.0f to Color.White.copy(alpha = sheenAlpha),
+                0.45f to Color.Transparent
+            )
+        )
+        .border(
+            width = 1.dp,
+            brush = Brush.verticalGradient(
+                0f to Color.White.copy(alpha = highlightAlpha),
+                1f to colors.surfaceBorder.copy(alpha = 0.55f)
+            ),
+            shape = shape
+        )
+}
+
+/**
+ * Banner renderer for the overlay. The gradient fallback is always painted first,
+ * so a null URL, a failed base64 decode or a Coil load error simply reveals the
+ * brand gradient for [bannerIndex] instead of an empty box.
+ */
+@Composable
+private fun ProfileOverlayBanner(
+    bannerUrl: String?,
+    bannerIndex: Int,
+    modifier: Modifier = Modifier
+) {
+    val palette = remember(bannerIndex) {
+        NebulaBannerPalettes[bannerIndex.coerceIn(0, NebulaBannerPalettes.lastIndex)]
+    }
+
+    Box(modifier = modifier.background(Brush.horizontalGradient(palette))) {
+        if (!bannerUrl.isNullOrBlank()) {
+            val base64Bitmap = remember(bannerUrl) { decodeBase64Image(bannerUrl) }
+            if (base64Bitmap != null) {
+                Image(
+                    bitmap = base64Bitmap.asImageBitmap(),
+                    contentDescription = "Profile banner",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                SubcomposeAsyncImage(
+                    model = bannerUrl,
+                    contentDescription = "Profile banner",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    loading = { },
+                    error = { },
+                    success = { SubcomposeAsyncImageContent() }
+                )
+            }
+        }
+    }
+}
+
+/** Decodes an inline `data:image/...;base64,...` banner, or returns null. */
+private fun decodeBase64Image(value: String): Bitmap? {
+    if (!value.startsWith("data:image")) return null
+    return try {
+        val decoded = Base64.decode(value.substringAfter("base64,"), Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+    } catch (e: Exception) {
+        null
     }
 }

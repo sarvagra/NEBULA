@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.nebula.app.data.repository.ChatRepositoryImpl
 import com.nebula.app.data.repository.ProfileRepositoryImpl
@@ -203,24 +206,40 @@ private fun WelcomeBackScreen(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    // The welcome-back surface follows the selected theme instead of falling
+    // through to the platform window background, which is gray in dark themes.
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        theme.colors.background,
+                        theme.colors.background,
+                        theme.colors.surface
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        NebulaLogo(Modifier.size(92.dp))
-        Spacer(Modifier.height(24.dp))
-        Text(
-            text = "Welcome back${displayName.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""}",
-            color = theme.colors.textPrimary,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(Modifier.height(8.dp))
-        Text("Your Nebula spaces are ready.", color = theme.colors.textSecondary)
-        Spacer(Modifier.height(28.dp))
-        Button(onClick = onContinue) {
-            Text("Continue")
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            NebulaLogo(Modifier.size(92.dp))
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "Welcome back${displayName.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""}",
+                color = theme.colors.textPrimary,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Your Nebula spaces are ready.", color = theme.colors.textSecondary)
+            Spacer(Modifier.height(28.dp))
+            Button(onClick = onContinue) {
+                Text("Continue")
+            }
         }
     }
 }

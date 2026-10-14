@@ -222,7 +222,7 @@ fun NebulaFriendsScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 280.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // 1. TOP HEADER & SEARCH

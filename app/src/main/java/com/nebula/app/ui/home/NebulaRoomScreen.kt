@@ -1121,11 +1121,41 @@ fun NebulaRoomScreen(
         InRoomMediaSearchSheet(
             isVisible = showMediaSearchSheet,
             onDismiss = { showMediaSearchSheet = false },
-            onSelectMedia = { selectedMedia ->
-                val url = selectedMedia.youtubeVideoId?.let { "https://www.youtube.com/watch?v=$it" } ?: selectedMedia.mediaUrl
-                onUpdateMedia(selectedMedia.title, url)
-                showMediaSearchSheet = false
-                Toast.makeText(context, "Switched video to: ${selectedMedia.title}", Toast.LENGTH_SHORT).show()
+            onSubmitMediaLink = { selectedMedia ->
+                val url = selectedMedia.youtubeVideoId?.takeIf { it.isNotBlank() }
+                    ?.let { "https://www.youtube.com/watch?v=$it" }
+                    ?: selectedMedia.mediaUrl.orEmpty()
+
+                // Cheap offline pre-check: obvious non-videos never reach the network.
+                val precheck = com.nebula.app.ui.dialogs.mediaLinkPrecheckError(url)
+                when {
+                    precheck != null -> precheck
+                    room.id.isBlank() -> {
+                        // No server round trip is possible without a room; keep the old local path.
+                        onUpdateMedia(selectedMedia.title, url)
+                        null
+                    }
+                    else -> when (val response = com.nebula.app.data.backend.NebulaApiClient.updateMedia(
+                        roomId = room.id,
+                        title = selectedMedia.title,
+                        mediaUrl = url,
+                        playbackPosition = 0L,
+                        isPlaying = true
+                    )) {
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                            // Server confirmed the switch: refresh from the server instead of
+                            // optimistically trusting local state, then close the sheet.
+                            onRefreshRoom()
+                            Toast.makeText(context, "Switched video to: ${selectedMedia.title}", Toast.LENGTH_SHORT).show()
+                            null
+                        }
+                        is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
+                            // 422 (or any rejection): surface the server's sentence as one inline
+                            // line and leave the local now-playing state exactly as it was.
+                            response.message
+                        }
+                    }
+                }
             }
         )
     }

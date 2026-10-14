@@ -47,6 +47,10 @@ import com.nebula.app.ui.components.PABottomSheet
  * 7. Nebula Premium
  *
  * Clean layout: strictly ICON + TITLE (no subtitles).
+ *
+ * State ownership: this sheet intentionally holds NO profile/banner/status state. It only routes
+ * to the single profile editor (Account), so the persisted banner/status values keep exactly one
+ * owner and cannot be written from two places.
  */
 @Composable
 fun NebulaSettingsSheet(

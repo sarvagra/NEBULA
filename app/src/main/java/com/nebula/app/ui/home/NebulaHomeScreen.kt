@@ -68,7 +68,7 @@ fun NebulaHomeScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 280.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         // 1. ACTIVE NOW

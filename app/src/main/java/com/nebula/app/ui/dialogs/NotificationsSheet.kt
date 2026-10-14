@@ -1,8 +1,14 @@
 package com.nebula.app.ui.dialogs
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,44 +16,64 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import com.nebula.app.domain.model.NebulaNotification
 import com.nebula.app.domain.model.NotificationType
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.PABottomSheet
-import kotlinx.coroutines.launch
+import kotlin.math.abs
+
+/** Horizontal distance (dp) a card must travel before a swipe dismisses it. */
+private const val SwipeDismissThresholdDp = 90f
+
+/** Off-screen travel distance (dp) used by the dismiss animation. */
+private const val SwipeDismissTravelDp = 600f
+
+/** Distance (dp) over which a swiped card fully dissolves (alpha 1f -> 0f). */
+private const val SwipeDissolveDistanceDp = 300f
+
+/** Resting (collapsed) sheet height fraction of the window (N-025). */
+private const val SheetCollapsedFraction = 0.88f
+
+/** Expanded sheet height fraction (N-025). */
+private const val SheetExpandedFraction = 1f
 
 /**
  * NotificationsSheet:
@@ -56,6 +82,10 @@ import kotlinx.coroutines.launch
  * - New friend requests
  * - Live room invitations & starting alerts
  * - System notices & announcements
+ *
+ * N-023: each row is swipe-to-dismiss (left or right), with no close/X affordance.
+ * N-025: the sheet grows to the full window when the list is scrolled past its end and
+ * returns to [SheetCollapsedFraction] of the window on a downward pull at the top.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -67,16 +97,56 @@ fun NotificationsSheet(
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
+    val listState = rememberLazyListState()
+
+    // N-025: height fraction of the whole sheet, animated between 88% and 100% of the window.
+    var isSheetExpanded by remember { mutableStateOf(false) }
+    val sheetHeightFraction by animateFloatAsState(
+        targetValue = if (isSheetExpanded) SheetExpandedFraction else SheetCollapsedFraction,
+        animationSpec = tween(durationMillis = 240),
+        label = "notificationsSheetHeight"
+    )
+
+    // N-025: nested-scroll bridge. The list keeps consuming its own scroll; we only observe the
+    // part of the gesture it could not consume to grow/shrink the sheet.
+    val expandOnScrollConnection = remember(listState) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // Downward drag while the list is already at its top: collapse back to 88%.
+                if (available.y > 0f && !listState.canScrollBackward) {
+                    isSheetExpanded = false
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (available.y < 0f && !listState.canScrollForward) {
+                    // Upward scroll the list could not consume (top reached / not scrollable):
+                    // expand the sheet to fill the window.
+                    isSheetExpanded = true
+                } else if (available.y > 0f && !listState.canScrollBackward) {
+                    // Downward scroll at the top of the list: restore the 88% height.
+                    isSheetExpanded = false
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     PABottomSheet(
         isVisible = isVisible,
         onDismissRequest = onDismiss,
-        title = "Notifications"
+        title = "Notifications",
+        heightFraction = sheetHeightFraction
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.88f)
+                .weight(1f)
                 .padding(horizontal = 18.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -94,9 +164,11 @@ fun NotificationsSheet(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .weight(1f)
+                        .nestedScroll(expandOnScrollConnection),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(notifications, key = { it.id }) { notif ->
@@ -121,17 +193,52 @@ private fun TelegramSwipeableNotificationItem(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val swipeThreshold = 90f * density
-    val targetDistance = 600f * density
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { SwipeDismissThresholdDp.dp.toPx() }
+    val dismissTravel = with(density) { SwipeDismissTravelDp.dp.toPx() }
+    val dissolveDistance = with(density) { SwipeDissolveDistanceDp.dp.toPx() }
 
-    val offsetX = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(0f) }
-    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    // Live drag offset. A plain snapshot state updated directly from the pointer-input callback:
+    // no coroutine is launched per drag delta, so the card tracks the finger 1:1 and slow drags
+    // (many tiny deltas) accumulate correctly instead of racing an animation.
+    var dragOffset by remember(notif.id) { mutableFloatStateOf(0f) }
 
-    val currentOffset = offsetX.value
-    val absOffset = kotlin.math.abs(currentOffset)
-    // Telegram-like dissolve fade: as card slides, alpha smoothly dissolves
-    val dissolveAlpha = (1f - (absOffset / (300f * density))).coerceIn(0f, 1f)
+    // Non-null only while a release animation is pending: 0f = snap back,
+    // +/- dismissTravel = slide off-screen and dismiss once.
+    var settleTarget by remember(notif.id) { mutableStateOf<Float?>(null) }
+
+    // A single Animatable drives the release animation, snapped to wherever the finger left the
+    // card. It is never touched from onHorizontalDrag.
+    val settleAnimation = remember(notif.id) { Animatable(0f) }
+
+    LaunchedEffect(notif.id, settleTarget) {
+        val target = settleTarget ?: return@LaunchedEffect
+        settleAnimation.snapTo(dragOffset)
+        settleAnimation.animateTo(
+            targetValue = target,
+            animationSpec = if (target == 0f) {
+                spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            } else {
+                tween(durationMillis = 180)
+            }
+        ) { dragOffset = value }
+
+        if (target != 0f) {
+            // Card is off-screen: dismiss exactly once, then rewind for the next item.
+            onDismiss()
+            dragOffset = 0f
+        } else {
+            dragOffset = 0f
+        }
+        settleTarget = null
+    }
+
+    val absOffset = abs(dragOffset)
+    // Telegram-like dissolve: the card fades out as it is dragged away.
+    val dissolveAlpha = (1f - (absOffset / dissolveDistance)).coerceIn(0f, 1f)
 
     Box(
         modifier = modifier
@@ -139,37 +246,27 @@ private fun TelegramSwipeableNotificationItem(
             .pointerInput(notif.id) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        coroutineScope.launch {
-                            val releasedOffset = offsetX.value
-                            if (kotlin.math.abs(releasedOffset) > swipeThreshold) {
-                                // Swiped past threshold: dissolve off screen & dismiss synchronously
-                                val targetX = if (releasedOffset > 0) targetDistance else -targetDistance
-                                offsetX.animateTo(
-                                    targetValue = targetX,
-                                    animationSpec = androidx.compose.animation.core.tween(180)
-                                )
-                                onDismiss()
-                            } else {
-                                // Snap back with gentle spring
-                                offsetX.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = androidx.compose.animation.core.spring(
-                                        stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
-                                    )
-                                )
-                            }
+                        val releasedOffset = dragOffset
+                        settleTarget = if (abs(releasedOffset) > swipeThreshold) {
+                            // Both left and right swipes past the threshold dismiss this item.
+                            if (releasedOffset > 0f) dismissTravel else -dismissTravel
+                        } else {
+                            0f
                         }
                     },
+                    onDragCancel = { settleTarget = 0f },
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
-                        coroutineScope.launch {
-                            offsetX.snapTo(offsetX.value + dragAmount)
-                        }
+                        // Re-grabbing during a release animation cancels it (the LaunchedEffect
+                        // restarts on a null target) so the finger owns the offset again.
+                        if (settleTarget != null) settleTarget = null
+                        dragOffset = (dragOffset + dragAmount)
+                            .coerceIn(-dismissTravel, dismissTravel)
                     }
                 )
             }
             .graphicsLayer {
-                translationX = currentOffset
+                translationX = dragOffset
                 alpha = dissolveAlpha
             }
     ) {
@@ -206,7 +303,8 @@ private fun TelegramSwipeableNotificationItem(
                 )
             }
 
-            // Notification content
+            // Notification content. Invitation cards stay minimal: no X / close / dismiss button,
+            // the only way to remove a row is the horizontal swipe handled above.
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -239,7 +337,7 @@ private fun TelegramSwipeableNotificationItem(
                     )
                 )
 
-                // Action button if available (Dismiss button removed, user slides to dismiss!)
+                // Single action button (accept) when the notification offers one.
                 if (notif.actionLabel != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(

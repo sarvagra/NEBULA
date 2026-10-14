@@ -1,5 +1,7 @@
 package com.nebula.app.ui.home
 
+import com.nebula.app.ui.components.NebulaAvatarImage
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -190,7 +192,7 @@ fun NebulaChatsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 280.dp),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 itemsIndexed(filtered) { index, conv ->
@@ -237,13 +239,10 @@ private fun ChatListItem(
                     .border(1.dp, theme.colors.surfaceBorder, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = letter,
-                    style = theme.typography.bodyLarge.copy(
-                        color = theme.colors.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
+                NebulaAvatarImage(
+                    avatarUrl = conversation.partnerUser?.avatarUrl,
+                    fallbackLetter = letter,
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 

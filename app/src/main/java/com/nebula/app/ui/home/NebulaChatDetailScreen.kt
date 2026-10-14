@@ -774,9 +774,12 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                     modifier = Modifier.size(12.dp)
                 )
             }
-            if (message.editedAt != null && message.deletedAt == null && message.editHistory.isNotEmpty()) {
+            // Prior edited text stays hidden until the reader explicitly taps
+            // "History". Unsent messages expose no history at all.
+            val historyAvailable = message.editedAt != null && message.deletedAt == null && message.editHistory.isNotEmpty()
+            if (historyAvailable) {
                 Text(
-                    text = "History",
+                    text = if (showHistory) "Hide history" else "History",
                     modifier = Modifier.clickable { showHistory = !showHistory },
                     style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp)
                 )
@@ -788,22 +791,93 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                 if (System.currentTimeMillis() - message.timestamp <= 2 * 60 * 1000L) Text("Unsend", modifier = Modifier.clickable { onUnsend() }, style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.5.sp))
             }
         }
-        androidx.compose.animation.AnimatedVisibility(visible = showHistory && message.deletedAt == null && message.editHistory.isNotEmpty()) {
-            Surface(
-                modifier = Modifier.padding(top = 5.dp).widthIn(max = 270.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = theme.colors.surfaceElevated,
-                border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
-                shadowElevation = 4.dp
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showHistory && message.deletedAt == null && message.editHistory.isNotEmpty(),
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(140)
+            ) + androidx.compose.animation.expandVertically(
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+                )
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(110)
+            ) + androidx.compose.animation.shrinkVertically(
+                animationSpec = androidx.compose.animation.core.tween(140)
+            )
+        ) {
+            HistoryPopup(
+                entries = message.editHistory,
+                onDismiss = { showHistory = false }
+            )
+        }
+        }
+    }
+}
+
+/**
+ * Compact animated popup listing the recipient-visible prior versions of an
+ * edited direct message, newest revision first. It is only composed when the
+ * reader explicitly asks for history, and unsent messages never reach it.
+ */
+@Composable
+private fun HistoryPopup(entries: List<String>, onDismiss: () -> Unit) {
+    val theme = Theme.current
+    Surface(
+        modifier = Modifier
+            .padding(top = 6.dp)
+            .widthIn(max = 276.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = theme.colors.surfaceElevated,
+        border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Edit history", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontWeight = FontWeight.SemiBold))
-                    message.editHistory.forEachIndexed { index, previous ->
-                        Text("${index + 1}. $previous", style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary))
-                    }
+                Text(
+                    text = "Previous versions",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+                Text(
+                    text = "Close",
+                    modifier = Modifier.clickable { onDismiss() },
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.primaryAccent,
+                        fontSize = 10.5.sp
+                    )
+                )
+            }
+            // Newest revision first so the most recent prior wording is on top.
+            entries.asReversed().forEachIndexed { index, previous ->
+                val revisionNumber = entries.size - index
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "$revisionNumber.",
+                        style = theme.typography.bodySmall.copy(
+                            color = theme.colors.textTertiary,
+                            fontSize = 11.5.sp
+                        )
+                    )
+                    Text(
+                        text = previous,
+                        style = theme.typography.bodySmall.copy(
+                            color = theme.colors.textPrimary,
+                            fontSize = 12.sp
+                        )
+                    )
                 }
             }
-        }
         }
     }
 }

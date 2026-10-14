@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.graphics.BitmapFactory
@@ -61,14 +64,7 @@ import com.nebula.app.domain.model.NebulaPresenceStatus
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaAvatarImage
-
-private val BANNER_PALETTES = listOf(
-    listOf(Color(0xFF1E1B4B), Color(0xFF312E81)), // Deep Indigo
-    listOf(Color(0xFF3B0764), Color(0xFF581C87)), // Nebula Violet
-    listOf(Color(0xFF042F2E), Color(0xFF115E59)), // Midnight Teal
-    listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)), // Cosmic Crimson
-    listOf(Color(0xFF090B10), Color(0xFF1E222D))  // Obsidian Glass
-)
+import com.nebula.app.ui.components.NebulaBannerPalettes
 
 @Composable
 fun NebulaPublicProfileScreen(
@@ -93,8 +89,8 @@ fun NebulaPublicProfileScreen(
     var showBlockConfirmation by remember { mutableStateOf(false) }
 
     val bannerGradient = remember(user.bannerIndex) {
-        val safeIndex = (user.bannerIndex).coerceIn(0, BANNER_PALETTES.lastIndex)
-        BANNER_PALETTES[safeIndex]
+        val safeIndex = (user.bannerIndex).coerceIn(0, NebulaBannerPalettes.lastIndex)
+        NebulaBannerPalettes[safeIndex]
     }
 
     Column(
@@ -103,7 +99,9 @@ fun NebulaPublicProfileScreen(
             .background(theme.colors.background)
             .statusBarsPadding()
     ) {
-        // 1. TOP BAR: Back Navigation + Title + Action
+        // 1. TOP BAR: Back Navigation + Action
+        // NOTE (N-033): there is deliberately NO centered username header here.
+        // The username is rendered with the name block next to the avatar below.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -122,15 +120,6 @@ fun NebulaPublicProfileScreen(
                     modifier = Modifier.size(22.dp)
                 )
             }
-
-            Text(
-                text = user.username,
-                style = theme.typography.titleMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp
-                )
-            )
 
             Box {
                 IconButton(onClick = { showProfileMenu = true }, modifier = Modifier.size(40.dp)) {
@@ -159,11 +148,15 @@ fun NebulaPublicProfileScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // HERO BANNER + OVERLAPPING AVATAR
+            // Fixed 164dp hero = 120dp banner + 44dp avatar overhang, so the
+            // overlapping avatar is fully contained inside this item and can
+            // never collide with (or be clipped by) the name/bio block below.
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
+                        .height(164.dp)
                 ) {
                     Column {
                         // Visible Profile Banner
@@ -209,37 +202,51 @@ fun NebulaPublicProfileScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(46.dp))
+                        // 120dp banner + 44dp spacer = 164dp = hero height.
+                        Spacer(modifier = Modifier.height(44.dp))
                     }
 
-                    // Overlapping Avatar
+                    // Overlapping Avatar: its vertical centre sits exactly on the
+                    // banner's bottom edge (120 - 44 = 76), so it overlaps the
+                    // banner by 44dp and stays 44dp inside the hero box.
+                    // x = 4dp (+ the 16dp hero padding) lines it up with the 20dp
+                    // content gutter used by the name/bio/tag blocks.
                     Box(
                         modifier = Modifier
-                            .offset(x = 16.dp, y = 72.dp)
-                            .size(88.dp)
-                            .clip(CircleShape)
-                            .background(theme.colors.surfaceElevated)
-                            .border(3.dp, theme.colors.background, CircleShape),
-                        contentAlignment = Alignment.Center
+                            .offset(x = 4.dp, y = 76.dp)
+                            .size(88.dp),
+                        contentAlignment = Alignment.BottomEnd
                     ) {
-                        NebulaAvatarImage(
-                            avatarUrl = user.avatarUrl,
-                            fallbackLetter = user.avatarLetter,
-                            modifier = Modifier.fillMaxSize(),
-                            fallbackTextSize = 32.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(theme.colors.surfaceElevated)
+                                .border(3.dp, theme.colors.background, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            NebulaAvatarImage(
+                                avatarUrl = user.avatarUrl,
+                                fallbackLetter = user.avatarLetter,
+                                modifier = Modifier.fillMaxSize(),
+                                fallbackTextSize = 32.sp
+                            )
+                        }
 
-                        // Status indicator dot
+                        // Status indicator dot — inset by 12dp on both axes so the
+                        // whole 18dp dot (radius 9) stays inside the 88dp avatar
+                        // circle: sqrt(23² + 23²) + 9 ≈ 41.5dp < 44dp radius.
+                        // The 3dp background-coloured ring matches the avatar
+                        // boundary ring and reads as attached in every theme.
                         val isUserOffline = user.status.equals("offline", ignoreCase = true) || user.presenceStatus == NebulaPresenceStatus.OFFLINE
                         val dotColor = if (isUserOffline) theme.colors.textTertiary else if (user.status.isNotBlank() && !user.status.equals("offline", ignoreCase = true)) theme.colors.successColor else Color(user.presenceStatus.hexColor)
                         Box(
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = (-4).dp, y = (-4).dp)
+                                .offset(x = (-12).dp, y = (-12).dp)
                                 .size(18.dp)
                                 .clip(CircleShape)
                                 .background(dotColor)
-                                .border(2.5.dp, theme.colors.background, CircleShape)
+                                .border(3.dp, theme.colors.background, CircleShape)
                         )
                     }
                 }
@@ -257,7 +264,9 @@ fun NebulaPublicProfileScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text(
                                 text = user.displayName,
                                 style = theme.typography.titleLarge.copy(
@@ -271,7 +280,9 @@ fun NebulaPublicProfileScreen(
                                 style = theme.typography.bodyMedium.copy(
                                     color = theme.colors.primaryAccent,
                                     fontSize = 14.sp
-                                )
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Friends ${user.friendsCount?.toString() ?: "Private"} · Joined ${user.roomsJoinedCount} · Hosted ${user.roomsHostedCount}",
@@ -292,8 +303,11 @@ fun NebulaPublicProfileScreen(
                             else -> theme.colors.successColor
                         }
 
+                        Spacer(modifier = Modifier.width(10.dp))
+
                         Box(
                             modifier = Modifier
+                                .widthIn(max = 132.dp)
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(statusColor.copy(alpha = 0.15f))
                                 .border(1.dp, statusColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
@@ -305,7 +319,9 @@ fun NebulaPublicProfileScreen(
                                     color = statusColor,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 11.5.sp
-                                )
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -316,6 +332,50 @@ fun NebulaPublicProfileScreen(
                         text = user.bio,
                         style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary, fontSize = 14.sp, lineHeight = 20.sp)
                     )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "TAGS",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                            fontSize = 11.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (user.interests.isEmpty()) {
+                        Text("No tags yet", style = theme.typography.caption.copy(color = theme.colors.textTertiary))
+                    } else {
+                        // FlowRow (same as the own-profile screen) so long or
+                        // numerous tags wrap onto new lines instead of being
+                        // clipped off the right edge.
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            user.interests.take(5).forEach { interest ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(theme.colors.surfaceElevated)
+                                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = interest,
+                                        style = theme.typography.caption.copy(
+                                            color = theme.colors.textPrimary,
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
@@ -458,53 +518,6 @@ fun NebulaPublicProfileScreen(
                     }
                 }
             }
-            }
-
-            // INTERESTS & ROOM CATEGORY BADGES
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                ) {
-                    Text(
-                        text = "TAGS",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            fontSize = 11.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    if (user.interests.isEmpty()) {
-                        Text("No tags yet", style = theme.typography.caption.copy(color = theme.colors.textTertiary))
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            user.interests.take(5).forEach { interest ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(theme.colors.surfaceElevated)
-                                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = interest,
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                            }
-                        }
-                    }
-                }
             }
 
             // PUBLIC STATS (Derived from user activity)

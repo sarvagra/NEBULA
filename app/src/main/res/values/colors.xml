@@ -2,4 +2,6 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="transparent">#00000000</color>
+    <!-- Matches the Nebula light theme background; dark override lives in values-night. -->
+    <color name="nebula_window_background">#F7F7FB</color>
 </resources>

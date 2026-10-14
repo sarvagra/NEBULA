@@ -11,6 +11,9 @@
     <style name="Theme.Nebula.Main" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
+        <!-- The platform Material window background is gray #FF303030; paint the
+             Nebula surface instead so cold-start frames match the selected theme. -->
+        <item name="android:windowBackground">@color/nebula_window_background</item>
         <item name="android:statusBarColor">@color/transparent</item>
         <item name="android:navigationBarColor">@color/transparent</item>
     </style>

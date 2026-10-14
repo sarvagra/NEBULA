@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.UserProfile
@@ -182,10 +183,21 @@ fun NebulaGoogleAccountScreen(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            text = "Disconnect & Sign Out",
+                            text = "Sign out of Nebula",
                             style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
+
+                    Text(
+                        text = "Signing out only ends your Nebula session on this device. You can sign back in with this Google Account at any time.",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        ),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                    )
                 }
             }
         }

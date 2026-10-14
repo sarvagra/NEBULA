@@ -31,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -156,10 +155,20 @@ fun NebulaOnboardingScreen(
         triggerUsernameCheck(username)
     }
 
+    // Whole-screen onboarding background, built ONLY from the active theme tokens so light, dark
+    // and both custom themes each render their own surface (no hardcoded gray).
+    val onboardingBackground = Brush.verticalGradient(
+        colors = listOf(
+            theme.colors.background,
+            theme.colors.background,
+            theme.colors.surface
+        )
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(theme.colors.background)
+            .background(onboardingBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -287,7 +296,10 @@ fun NebulaOnboardingScreen(
                                     .clip(CircleShape)
                                     .background(
                                         Brush.linearGradient(
-                                            listOf(Color(0xFF6366F1), Color(0xFFA855F7))
+                                            listOf(
+                                                theme.colors.primaryAccent,
+                                                theme.colors.secondaryAccent
+                                            )
                                         )
                                     ),
                                 contentAlignment = Alignment.Center
@@ -295,7 +307,7 @@ fun NebulaOnboardingScreen(
                                 Icon(
                                     imageVector = Icons.Default.AutoAwesome,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = theme.colors.onPrimaryAccent,
                                     modifier = Modifier.size(44.dp)
                                 )
                             }
@@ -838,7 +850,7 @@ fun NebulaOnboardingScreen(
                     (currentStep != 4 || isAtLeastSixteen()),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = theme.colors.primaryAccent,
-                    contentColor = Color.White
+                    contentColor = theme.colors.onPrimaryAccent
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -849,7 +861,7 @@ fun NebulaOnboardingScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
-                        color = Color.White
+                        color = theme.colors.onPrimaryAccent
                     )
                 } else {
                     Row(
@@ -1045,7 +1057,7 @@ fun WheelNumberColumn(
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             if (isSelected) theme.colors.primaryAccent
-                            else Color.Transparent
+                            else theme.colors.surface.copy(alpha = 0f)
                         )
                         .clickable { onSelectIndex(index) }
                         .padding(vertical = 6.dp),
@@ -1054,7 +1066,7 @@ fun WheelNumberColumn(
                     Text(
                         text = item,
                         style = theme.typography.bodyMedium.copy(
-                            color = if (isSelected) Color.White else theme.colors.textPrimary.copy(alpha = 0.75f),
+                            color = if (isSelected) theme.colors.onPrimaryAccent else theme.colors.textPrimary.copy(alpha = 0.75f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = if (isSelected) 15.sp else 13.sp
                         )

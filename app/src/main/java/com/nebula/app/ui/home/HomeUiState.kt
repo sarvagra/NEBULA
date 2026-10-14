@@ -69,6 +69,7 @@ sealed interface FullScreenDestination {
     data object Settings : FullScreenDestination
     data object Account : FullScreenDestination
     data object GoogleAccount : FullScreenDestination
+    data object BlockedUsers : FullScreenDestination
     data object About : FullScreenDestination
     data object PrivacyPolicy : FullScreenDestination
     data object Membership : FullScreenDestination

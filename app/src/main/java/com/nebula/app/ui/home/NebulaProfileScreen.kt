@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,10 +52,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.nebula.app.domain.model.NebulaPresenceStatus
 import com.nebula.app.domain.model.NebulaSubscriptionTier
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 
+/**
+ * Fixed, intentional banner height (dp). The banner is a proportional strip, not a stretched
+ * 16:9 block: at this height the avatar still overlaps it by ~32dp while the name/status block
+ * below starts immediately after the avatar without colliding.
+ */
+private val PROFILE_BANNER_HEIGHT = 156.dp
+
+/**
+ * User-selectable banner gradient palettes, indexed by the persisted `bannerIndex` payload field.
+ * These are deliberately hardcoded artwork, not theme tokens: the palette is part of the saved
+ * profile content (it travels with `bannerIndex`) and must look identical across all four themes.
+ */
 private val BANNER_PALETTES = listOf(
     listOf(Color(0xFF1E1B4B), Color(0xFF312E81)), // Deep Indigo
     listOf(Color(0xFF3B0764), Color(0xFF581C87)), // Nebula Violet
@@ -64,6 +76,45 @@ private val BANNER_PALETTES = listOf(
     listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)), // Cosmic Crimson
     listOf(Color(0xFF090B10), Color(0xFF1E222D))  // Obsidian Glass
 )
+
+/**
+ * Raw status modes persisted by the profile payload (mirrors `NebulaUser.status`).
+ * These are internal enum tokens and must NEVER be rendered as user-facing copy.
+ */
+private const val STATUS_MODE_DYNAMIC = "dynamic"
+private const val STATUS_MODE_OFFLINE = "offline"
+private const val STATUS_MODE_CUSTOM = "custom"
+
+/**
+ * Maps the raw persisted status mode onto human-readable display text.
+ *
+ * - the dynamic mode -> the effective presence label (`NebulaPresenceStatus.label`: "Online", "In a room", ...)
+ * - the offline mode -> "Offline"
+ * - the custom mode  -> the user's own text, falling back to the presence label when blank
+ * - anything else is already human-readable copy and is shown verbatim
+ *
+ * The raw mode token is never returned, so no screen can print it as a status label.
+ */
+private fun nebulaStatusDisplayText(user: NebulaUser): String =
+    when (user.status.trim().lowercase()) {
+        STATUS_MODE_CUSTOM -> user.customStatus.trim().ifBlank { user.presenceStatus.label }
+        STATUS_MODE_OFFLINE -> NebulaPresenceStatus.OFFLINE.label
+        STATUS_MODE_DYNAMIC -> user.presenceStatus.label
+        else -> user.status.trim().ifBlank { user.presenceStatus.label }
+    }
+
+/** Presence dot colour, derived from theme tokens only (never a hardcoded hex). */
+@Composable
+private fun nebulaStatusIndicatorColor(user: NebulaUser): Color {
+    val theme = Theme.current
+    return when {
+        !user.isOnline -> theme.colors.textTertiary
+        user.status.trim().equals(STATUS_MODE_OFFLINE, ignoreCase = true) -> theme.colors.textTertiary
+        user.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> theme.colors.secondaryAccent
+        user.presenceStatus == NebulaPresenceStatus.PRIVATE_CHAT -> theme.colors.primaryAccent
+        else -> theme.colors.successColor
+    }
+}
 
 /**
  * NebulaProfileScreen:
@@ -101,7 +152,6 @@ fun NebulaProfileScreen(
     var isPollsVotedPublic by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var isReactionsPublic by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var isTopContentPublic by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
-    var showQrDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val isPremiumUser = activeTier != NebulaSubscriptionTier.FREE
 
     val bannerColors = BANNER_PALETTES.getOrElse(user.bannerIndex.coerceIn(0, BANNER_PALETTES.lastIndex)) { BANNER_PALETTES[0] }
@@ -167,7 +217,7 @@ fun NebulaProfileScreen(
             contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // 2. PROFILE HERO & STATS with sleek 21:9 banner
+            // 2. PROFILE HERO & STATS with a fixed-height banner strip
             item {
             Column(
                 modifier = Modifier
@@ -176,14 +226,13 @@ fun NebulaProfileScreen(
                     .background(theme.colors.surface)
                     .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
             ) {
-                // Background Banner behind the avatar with sleek 16:9 aspect ratio
+                // Background Banner behind the avatar: fixed proportional height, rounded by the
+                // parent card clip. The banner carries no share affordance any more.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .background(
-                            androidx.compose.ui.graphics.Brush.horizontalGradient(bannerColors)
-                        )
+                        .height(PROFILE_BANNER_HEIGHT)
+                        .background(Brush.horizontalGradient(bannerColors))
                 ) {
                     if (!user.bannerUrl.isNullOrBlank()) {
                         AsyncImage(
@@ -192,30 +241,6 @@ fun NebulaProfileScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
-                    }
-                    // QR Code Share action button on banner
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(10.dp)
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f))
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                            .clickable { showQrDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Stylized 4-square QR mini emblem
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Box(Modifier.size(5.dp).border(1.2.dp, Color.White, RoundedCornerShape(1.dp)))
-                                Box(Modifier.size(5.dp).border(1.2.dp, Color.White, RoundedCornerShape(1.dp)))
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Box(Modifier.size(5.dp).border(1.2.dp, Color.White, RoundedCornerShape(1.dp)))
-                                Box(Modifier.size(5.dp).background(Color.White, RoundedCornerShape(1.dp)))
-                            }
-                        }
                     }
                 }
 
@@ -233,47 +258,27 @@ fun NebulaProfileScreen(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Avatar overlapping banner
+                        // Avatar overlapping banner. No edit badge is drawn on top of the
+                        // avatar; the edit entry point is the "Edit Profile" button below.
                         Box(
-                            modifier = Modifier.size(72.dp),
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(theme.colors.surfaceElevated)
+                                .border(
+                                    width = 1.dp,
+                                    color = theme.colors.surface,
+                                    shape = CircleShape
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(CircleShape)
-                                    .background(theme.colors.surfaceElevated)
-                                    .border(
-                                        width = 1.dp,
-                                        color = Color.Black,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                com.nebula.app.ui.components.NebulaAvatarImage(
-                                    avatarUrl = user.avatarUrl,
-                                    fallbackLetter = user.avatarLetter,
-                                    contentDescription = user.displayName,
-                                    modifier = Modifier.fillMaxSize(),
-                                    fallbackTextSize = 26.sp
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(theme.colors.primaryAccent)
-                                        .clickable(onClick = onOpenEditProfile),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Avatar",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                }
-                            }
+                            com.nebula.app.ui.components.NebulaAvatarImage(
+                                avatarUrl = user.avatarUrl,
+                                fallbackLetter = user.avatarLetter,
+                                contentDescription = user.displayName,
+                                modifier = Modifier.fillMaxSize(),
+                                fallbackTextSize = 26.sp
+                            )
                         }
 
                         // Stats strip positioned neatly on card surface
@@ -376,6 +381,26 @@ fun NebulaProfileScreen(
                                 fontSize = 13.sp
                             )
                         )
+                        // Human-readable status: the raw persisted mode token is never rendered,
+                        // it is always mapped through nebulaStatusDisplayText().
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(nebulaStatusIndicatorColor(user))
+                            )
+                            Text(
+                                text = nebulaStatusDisplayText(user),
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 12.5.sp
+                                )
+                            )
+                        }
                         if (user.bio.isNotBlank()) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
@@ -544,7 +569,7 @@ fun NebulaProfileScreen(
                                 .clip(RoundedCornerShape(5.dp))
                         ) {
                             Box(modifier = Modifier.weight(user.roomsJoinedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(theme.colors.primaryAccent))
-                            Box(modifier = Modifier.weight(user.roomsHostedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(Color(0xFF38BDF8)))
+                            Box(modifier = Modifier.weight(user.roomsHostedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(theme.colors.secondaryAccent))
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -555,7 +580,7 @@ fun NebulaProfileScreen(
                                 Text("Joined ${user.roomsJoinedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
+                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(theme.colors.secondaryAccent))
                                 Text("Hosted ${user.roomsHostedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
                             }
                         }
@@ -697,99 +722,6 @@ fun NebulaProfileScreen(
                 }
             }
         }
-    }
-    }
-
-    if (showQrDialog) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { showQrDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = "Nebula Profile QR",
-                        style = theme.typography.titleMedium.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                    )
-                    Text(
-                        text = "Scan to connect with ${user.displayName}",
-                        style = theme.typography.bodySmall.copy(
-                            color = theme.colors.textSecondary,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    )
-
-                    // Stylized QR code representation
-                    Box(
-                        modifier = Modifier
-                            .size(180.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Box(Modifier.size(36.dp).border(4.dp, Color.Black, RoundedCornerShape(4.dp)))
-                                Box(Modifier.size(36.dp).border(4.dp, Color.Black, RoundedCornerShape(4.dp)))
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = user.avatarLetter,
-                                    style = theme.typography.titleLarge.copy(
-                                        color = Color.Black,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 24.sp
-                                    )
-                                )
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Box(Modifier.size(36.dp).border(4.dp, Color.Black, RoundedCornerShape(4.dp)))
-                                Box(Modifier.size(36.dp).background(Color.Black, RoundedCornerShape(4.dp)))
-                            }
-                        }
-                    }
-
-                    Text(
-                        text = user.username,
-                        style = theme.typography.bodyMedium.copy(
-                            color = theme.colors.primaryAccent,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    )
-
-                    Button(
-                        onClick = { showQrDialog = false },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.surfaceElevated,
-                            contentColor = theme.colors.textPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Close")
-                    }
-                }
-            }
         }
     }
 }

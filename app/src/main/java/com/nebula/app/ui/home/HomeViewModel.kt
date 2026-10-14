@@ -768,6 +768,10 @@ class HomeViewModel(
         navigateTo(FullScreenDestination.GoogleAccount)
     }
 
+    fun onOpenBlockedUsers() {
+        navigateTo(FullScreenDestination.BlockedUsers)
+    }
+
     fun onOpenSettings() {
         navigateTo(FullScreenDestination.Settings)
     }

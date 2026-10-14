@@ -3,6 +3,7 @@ import { createApp } from './app';
 import { connectDatabase } from './config/database';
 import { initSocketServer } from './realtime/socketServer';
 import { config } from './config/env';
+import { purgeDueAccountDeletions } from './modules/users/accountLifecycleController';
 
 async function bootstrap() {
   console.log('----------------------------------------------------');
@@ -31,6 +32,21 @@ async function bootstrap() {
     console.log(`📡 Realtime WebSocket server attached.`);
     console.log(`✨ Ready for Android client connections.`);
   });
+
+  // 6. Purge accounts whose 30-day deletion grace period elapsed. The job re-checks
+  // each candidate immediately before deleting, so a login during the window wins.
+  const DELETION_SWEEP_MS = 6 * 60 * 60 * 1000;
+  const runDeletionSweep = async () => {
+    try {
+      const purged = await purgeDueAccountDeletions();
+      if (purged > 0) console.log(`[Lifecycle] Purged ${purged} account(s) past their deletion grace period`);
+    } catch (err: any) {
+      console.error('[Lifecycle] Deletion sweep failed:', err?.message || err);
+    }
+  };
+  void runDeletionSweep();
+  const deletionSweepTimer = setInterval(runDeletionSweep, DELETION_SWEEP_MS);
+  deletionSweepTimer.unref?.();
 }
 
 bootstrap().catch((err) => {

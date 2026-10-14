@@ -486,6 +486,17 @@ object NebulaApiClient {
         return request("/users/me/assets/$assetId", "DELETE")
     }
 
+    // --- Account deletion lifecycle (OTP-verified, 30-day grace period) ---
+
+    suspend fun getAccountDeletionStatus(): ApiResponse<JSONObject> = request("/users/me/deletion", "GET")
+
+    suspend fun requestAccountDeletion(): ApiResponse<JSONObject> = request("/users/me/deletion/request", "POST", JSONObject())
+
+    suspend fun confirmAccountDeletion(otp: String): ApiResponse<JSONObject> =
+        request("/users/me/deletion/confirm", "POST", JSONObject().put("otp", otp.trim()))
+
+    suspend fun cancelAccountDeletion(): ApiResponse<JSONObject> = request("/users/me/deletion/cancel", "POST", JSONObject())
+
     suspend fun uploadChatMedia(url: String, mimeType: String, mediaType: String, sizeBytes: Long = 0L, onProgress: (Int) -> Unit = {}): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("url", url)

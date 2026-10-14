@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -37,17 +36,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
-import com.nebula.app.data.backend.NebulaApiClient
 import com.nebula.app.data.local.SessionManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,15 +75,16 @@ fun NebulaSettingsScreen(
     onOpenPrivacyPolicy: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenNebulaPremium: () -> Unit,
+    // Caller-supplied navigation for the "Blocked users" row. When null (default) the
+    // screen opens NebulaBlockedUsersScreen in place so the row always works, even
+    // before the hosting navigation graph is wired up.
+    onOpenBlockedUsers: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
     val context = LocalContext.current
     val sessionManager = remember { SessionManager(context) }
-    val scope = rememberCoroutineScope()
-    var showBlockedUsers by remember { mutableStateOf(false) }
-    var blockedUsers by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var isLoadingBlocked by remember { mutableStateOf(false) }
+    var showBlockedUsersInPlace by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -191,20 +186,8 @@ fun NebulaSettingsScreen(
                         icon = Icons.Default.Block,
                         title = "Blocked users",
                         onClick = {
-                            showBlockedUsers = true
-                            isLoadingBlocked = true
-                            scope.launch {
-                                val response = NebulaApiClient.getBlockedUsers()
-                                if (response is NebulaApiClient.ApiResponse.Success) {
-                                    blockedUsers = buildList {
-                                        for (index in 0 until response.data.length()) {
-                                            val user = response.data.optJSONObject(index) ?: continue
-                                            add(user.optString("id") to "${user.optString("displayName", "User")} (@${user.optString("username", "")})")
-                                        }
-                                    }
-                                }
-                                isLoadingBlocked = false
-                            }
+                            val navigate = onOpenBlockedUsers
+                            if (navigate != null) navigate() else showBlockedUsersInPlace = true
                         }
                     )
 
@@ -230,29 +213,14 @@ fun NebulaSettingsScreen(
         }
     }
 
-    if (showBlockedUsers) AlertDialog(
-        onDismissRequest = { showBlockedUsers = false },
-        title = { Text("Blocked users") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isLoadingBlocked) Text("Loading…")
-                else if (blockedUsers.isEmpty()) Text("You have not blocked anyone.")
-                else blockedUsers.forEach { (id, label) ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(label, modifier = Modifier.weight(1f), maxLines = 1)
-                        TextButton(onClick = {
-                            scope.launch {
-                                if (NebulaApiClient.unblockUser(id) is NebulaApiClient.ApiResponse.Success) {
-                                    blockedUsers = blockedUsers.filterNot { it.first == id }
-                                }
-                            }
-                        }) { Text("Unblock") }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { showBlockedUsers = false }) { Text("Done") } }
-    )
+    // Dedicated settings screen (shares the host's layout slot, so it fully covers
+    // this screen without requiring the caller to add a navigation destination).
+    if (showBlockedUsersInPlace) {
+        NebulaBlockedUsersScreen(
+            onBack = { showBlockedUsersInPlace = false },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 @Composable

@@ -1,5 +1,6 @@
 package com.nebula.app.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -38,6 +39,11 @@ import com.nebula.app.theme.Theme
 
 /**
  * PABottomSheet: Minimalist bottom sheet with fluid spring slide and clean drag handle.
+ *
+ * @param heightFraction optional fraction (0f..1f) of the window height the whole sheet occupies.
+ *        When null the sheet wraps its content (default); when supplied the sheet is exactly that
+ *        fraction of the window, which lets callers animate it (e.g. 0.88f -> 1f) while their own
+ *        content uses `Modifier.weight(1f)` to fill the remaining space.
  */
 @Composable
 fun PABottomSheet(
@@ -45,10 +51,14 @@ fun PABottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     title: String? = null,
+    heightFraction: Float? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val theme = Theme.current
     val navBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    // System back must dismiss the sheet and leave the screen underneath untouched.
+    BackHandler(enabled = isVisible) { onDismissRequest() }
 
     if (isVisible) {
         Box(
@@ -65,6 +75,10 @@ fun PABottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (heightFraction != null) Modifier.fillMaxHeight(heightFraction)
+                        else Modifier
+                    )
                     .imePadding()
                     .clip(RoundedCornerShape(topStart = theme.radii.xl, topEnd = theme.radii.xl))
                     .background(theme.colors.surfaceElevated)

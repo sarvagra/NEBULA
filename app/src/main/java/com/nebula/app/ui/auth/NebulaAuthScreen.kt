@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -93,13 +92,24 @@ fun NebulaAuthScreen(
         onExitApp()
     }
 
+    // Whole-screen welcome background, built ONLY from the active theme tokens so that light,
+    // dark, lavender and red-hot-pink each get their own look (no hardcoded gray anywhere).
+    val welcomeBackground = Brush.verticalGradient(
+        colors = listOf(
+            theme.colors.background,
+            theme.colors.background,
+            theme.colors.surface
+        )
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(theme.colors.background)
+            .background(welcomeBackground)
             .statusBarsPadding()
     ) {
-        // Ambient background glow
+        // Ambient background glow (theme accent, fades out to fully transparent so the themed
+        // background below stays the visible surface in every theme)
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -110,7 +120,7 @@ fun NebulaAuthScreen(
                     Brush.radialGradient(
                         colors = listOf(
                             theme.colors.primaryAccent.copy(alpha = 0.22f),
-                            Color.Transparent
+                            theme.colors.primaryAccent.copy(alpha = 0f)
                         )
                     )
                 )
@@ -270,8 +280,8 @@ fun NebulaAuthScreen(
                         .fillMaxWidth()
                         .padding(top = 16.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .background(theme.colors.errorColor.copy(alpha = 0.12f))
+                        .border(1.dp, theme.colors.errorColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -282,7 +292,7 @@ fun NebulaAuthScreen(
                             errorMessage ?: ""
                         },
                         style = theme.typography.caption.copy(
-                            color = Color(0xFFFCA5A5),
+                            color = theme.colors.errorColor,
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center
                         ),
@@ -297,7 +307,7 @@ fun NebulaAuthScreen(
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = theme.colors.primaryAccent,
-                                contentColor = Color.White
+                                contentColor = theme.colors.onPrimaryAccent
                             ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp)
@@ -393,7 +403,7 @@ fun NebulaAuthScreen(
                         if (emailInput.isNotBlank() && !isGmailAddress) {
                             Text(
                                 text = "Only @gmail.com addresses are supported.",
-                                color = Color(0xFFFCA5A5),
+                                color = theme.colors.errorColor,
                                 fontSize = 12.sp
                             )
                         }
