@@ -8,6 +8,7 @@ import { UserModel } from '../models/User';
 import { RoomModel } from '../models/Room';
 import { FriendshipModel } from '../models/Friendship';
 import { NotificationModel } from '../models/Notification';
+import { MessageModel } from '../models/Message';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { resolveStoredObjectUrl } from '../services/objectStorage';
@@ -396,6 +397,24 @@ async function runSecurityTests() {
       throw new Error('DM notification expired immediately');
     }
 
+    const history = await makeRequest(`/api/v1/chat/conversation/${bobUserPayload.id}`, {
+      headers: { Authorization: `Bearer ${validToken}` },
+    });
+    if (history.status !== 200) throw new Error(`Recipient could not load DM history: ${history.status}`);
+    const beforeExplicitRead = await MessageModel.findById(sendJson.data.id);
+    if (beforeExplicitRead?.readAt) throw new Error('Loading conversation history marked the message as read automatically');
+    const read = await makeRequest(`/api/v1/chat/conversation/${bobUserPayload.id}/read`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${validToken}` },
+    });
+    if (read.status !== 200) throw new Error(`Explicit conversation read failed: ${read.status}`);
+    const afterExplicitRead = await MessageModel.findById(sendJson.data.id);
+    if (!afterExplicitRead?.readAt) throw new Error('Explicit conversation open did not persist read state');
+    const notificationAfterRead = await NotificationModel.findById(notification.id);
+    if (!notificationAfterRead || notificationAfterRead.isRead) {
+      throw new Error('Reading a DM incorrectly cleared its separate notification');
+    }
+
     const basicEdit = await makeRequest(`/api/v1/chat/${sendJson.data.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
@@ -443,6 +462,33 @@ async function runSecurityTests() {
       });
       if (thirdEdit.status !== 403) throw new Error(`${tier} third edit should be rejected, got ${thirdEdit.status}`);
     }
+  });
+
+  await assertTest('Chat upload limits use actual bytes and enforce the video size cap', async () => {
+    const oversizedImage = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+    const imageRes = await makeRequest('/api/v1/chat/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({
+        url: `data:image/jpeg;base64,${oversizedImage}`,
+        mimeType: 'image/jpeg',
+        mediaType: 'image',
+        sizeBytes: 1,
+      }),
+    });
+    if (imageRes.status !== 413) throw new Error(`Oversized image with spoofed size metadata should fail 413, got ${imageRes.status}`);
+
+    const videoRes = await makeRequest('/api/v1/chat/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({
+        url: 'data:video/mp4;base64,AA==',
+        mimeType: 'video/mp4',
+        mediaType: 'video',
+        sizeBytes: 30 * 1024 * 1024 + 1,
+      }),
+    });
+    if (videoRes.status !== 413) throw new Error(`Video over 30MB should fail 413, got ${videoRes.status}`);
   });
 
   await assertTest('Excessive OTP requests trigger rate limiting (429)', async () => {

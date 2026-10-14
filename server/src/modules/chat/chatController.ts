@@ -404,10 +404,20 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const dataUrlPayload = url.match(/^data:[^;,]+;base64,(.+)$/s)?.[1];
-    const resolvedSize = Number(sizeBytes) || (dataUrlPayload ? Math.floor(dataUrlPayload.length * 3 / 4) : 0);
+    const dataUrlMatch = url.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/s);
+    if (!dataUrlMatch) {
+      res.status(400).json({ success: false, error: 'Media must be uploaded as a base64 data URL' });
+      return;
+    }
+    if (dataUrlMatch[1].toLowerCase() !== resolvedMime) {
+      res.status(400).json({ success: false, error: 'Media MIME type does not match the uploaded file' });
+      return;
+    }
+
     const maxSize = resolvedMime.startsWith('video/') ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
-    if (resolvedSize > maxSize) {
+    const declaredSize = Number(sizeBytes);
+    const actualSize = Buffer.from(dataUrlMatch[2], 'base64').byteLength;
+    if ((Number.isFinite(declaredSize) && declaredSize > maxSize) || actualSize > maxSize) {
       res.status(413).json({
         success: false,
         error: `Media attachment exceeds maximum allowed size of ${maxSize / (1024 * 1024)}MB.`,

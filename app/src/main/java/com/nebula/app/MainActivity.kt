@@ -184,11 +184,12 @@ class MainActivity : ComponentActivity() {
 
     private fun notificationDestinationFrom(intent: android.content.Intent?): Pair<String, String>? {
         if (intent == null) return null
-        val type = intent.getStringExtra("nebula_type") ?: return null
+        fun payloadValue(key: String) = intent.getStringExtra("nebula_$key") ?: intent.getStringExtra(key)
+        val type = payloadValue("type") ?: return null
         val id = when (type) {
-            "dm" -> intent.getStringExtra("nebula_conversationId")
-            "room_invite", "room_activity" -> intent.getStringExtra("nebula_roomId")
-            "friend_request" -> intent.getStringExtra("nebula_userId")
+            "dm" -> payloadValue("conversationId")
+            "room_invite", "room_activity" -> payloadValue("roomId")
+            "friend_request" -> payloadValue("userId")
             else -> null
         }?.takeIf { it.isNotBlank() } ?: return null
         return type to id
