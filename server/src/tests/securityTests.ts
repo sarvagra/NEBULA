@@ -213,6 +213,35 @@ async function runSecurityTests() {
     if (res.status !== 400) throw new Error(`Expected 400 for malformed username, got ${res.status}`);
   });
 
+  await assertTest('Username rename is recorded and locked for six months across requests', async () => {
+    const userId = '507f1f77bcf86cd799439033';
+    const originalUsername = 'test_rename';
+    const renameToken = jwt.sign({ ...validUserPayload, id: userId, username: originalUsername }, config.auth.jwtSecret, { expiresIn: '1h' });
+    await UserModel.create({ _id: userId, username: originalUsername, displayName: 'Rename Test', tier: 'free' });
+    try {
+      const first = await makeRequest('/api/v1/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${renameToken}` },
+        body: JSON.stringify({ username: 'test_renamed' }),
+      });
+      if (first.status !== 200) throw new Error(`Expected first rename to succeed, got ${first.status}`);
+      const renamed = await UserModel.findById(userId);
+      if (renamed?.usernameHistory?.length !== 1 || renamed.usernameHistory[0].previousUsername !== originalUsername || renamed.usernameHistory[0].newUsername !== 'test_renamed' || !renamed.usernameHistory[0].eventId) {
+        throw new Error('First rename did not create a complete server-side ownership event');
+      }
+      const second = await makeRequest('/api/v1/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${renameToken}` },
+        body: JSON.stringify({ username: 'renamed_again' }),
+      });
+      if (second.status !== 403) throw new Error(`Expected six-month cooldown to return 403, got ${second.status}`);
+      const unchanged = await UserModel.findById(userId);
+      if (unchanged?.username !== 'test_renamed') throw new Error('Blocked rename still changed the public username');
+    } finally {
+      await UserModel.deleteOne({ _id: userId });
+    }
+  });
+
   // 8c. PROFILE ASSET AUTHORIZATION & OWNERSHIP ENFORCEMENT
   await assertTest('User B cannot delete User A profile asset (403)', async () => {
     // 1. Create asset for Alice
@@ -400,7 +429,7 @@ async function runSecurityTests() {
 
   // Teardown
   try {
-    await UserModel.deleteMany({ username: { $in: ['test_alice', 'test_bob'] } });
+    await UserModel.deleteMany({ username: { $in: ['test_alice', 'test_bob', 'test_rename', 'test_renamed', 'renamed_again'] } });
     await mongoose.disconnect();
     await testDatabase.stop();
   } catch {}

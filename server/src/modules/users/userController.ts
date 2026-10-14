@@ -6,6 +6,18 @@ import { toPrivateUserDTO, toPublicUserDTO } from '../../utils/dto';
 import { RoomModel } from '../../models/Room';
 import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
 
+function addCalendarMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  const day = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
+
+const USERNAME_CHANGE_COOLDOWN_MONTHS = 6;
+
 export async function updateProfile(req: Request, res: Response): Promise<void> {
   try {
     if (!req.user) {
@@ -18,6 +30,8 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     // STRICT SERVER AUTHORIZATION: Only mutate user-permitted properties.
     // NEVER accept tier, role, isBanned, or stats from client!
     const updateFields: Record<string, any> = {};
+    let usernameHistoryEntry: { previousUsername: string; newUsername: string; changedAt: Date; eventId: string } | null = null;
+    let currentUsernameForUpdate: { username: string; usernameChangedAt?: Date } | null = null;
 
     // Check if username is being changed, ensure uniqueness
     if (username) {
@@ -31,16 +45,39 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       }
 
       if (mongoose.connection.readyState === 1) {
-        const existing = await UserModel.findOne({
-          username: cleanUsername,
-          _id: { $ne: req.user.id },
-        });
-        if (existing) {
-          res.status(409).json({ success: false, error: 'Username is already taken' });
+        currentUsernameForUpdate = await UserModel.findById(req.user.id).select('username usernameChangedAt');
+        if (!currentUsernameForUpdate) {
+          res.status(404).json({ success: false, error: 'User not found' });
           return;
         }
+        if (cleanUsername !== currentUsernameForUpdate.username) {
+          if (currentUsernameForUpdate.usernameChangedAt) {
+            const nextChangeAt = addCalendarMonths(currentUsernameForUpdate.usernameChangedAt, USERNAME_CHANGE_COOLDOWN_MONTHS);
+            if (Date.now() < nextChangeAt.getTime()) {
+              res.status(403).json({
+                success: false,
+                error: 'Username can only be changed once every six months.',
+                data: { usernameChangeAvailableAt: nextChangeAt.toISOString() },
+              });
+              return;
+            }
+          }
+          const existing = await UserModel.findOne({ username: cleanUsername, _id: { $ne: req.user.id } }).select('_id');
+          if (existing) {
+            res.status(409).json({ success: false, error: 'Username is already taken' });
+            return;
+          }
+          const changedAt = new Date();
+          updateFields.username = cleanUsername;
+          updateFields.usernameChangedAt = changedAt;
+          usernameHistoryEntry = {
+            previousUsername: currentUsernameForUpdate.username,
+            newUsername: cleanUsername,
+            changedAt,
+            eventId: new mongoose.Types.ObjectId().toString(),
+          };
+        }
       }
-      updateFields.username = cleanUsername;
     }
 
     if (displayName) {
@@ -102,9 +139,16 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     }
 
     if (mongoose.connection.readyState === 1) {
-      const updated = await UserModel.findByIdAndUpdate(req.user.id, updateFields, { new: true });
+      const filter: Record<string, any> = { _id: req.user.id };
+      if (usernameHistoryEntry && currentUsernameForUpdate) {
+        filter.username = currentUsernameForUpdate.username;
+        filter.usernameChangedAt = currentUsernameForUpdate.usernameChangedAt || { $exists: false };
+      }
+      const update: Record<string, any> = { $set: updateFields };
+      if (usernameHistoryEntry) update.$push = { usernameHistory: usernameHistoryEntry };
+      const updated = await UserModel.findOneAndUpdate(filter, update, { new: true });
       if (!updated) {
-        res.status(404).json({ success: false, error: 'User not found' });
+        res.status(usernameHistoryEntry ? 409 : 404).json({ success: false, error: usernameHistoryEntry ? 'Username changed in another request; reload your profile and retry.' : 'User not found' });
         return;
       }
       if (['displayName', 'avatarLetter', 'avatarUrl', 'bannerUrl', 'bio', 'status', 'interests', 'username'].some((key) => key in updateFields)) {
@@ -128,6 +172,10 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       res.status(503).json({ success: false, error: 'Database unavailable' });
     }
   } catch (err: any) {
+    if (err?.code === 11000 && err?.keyPattern?.username) {
+      res.status(409).json({ success: false, error: 'Username is already taken' });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to update profile' });
   }
 }

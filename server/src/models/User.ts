@@ -9,6 +9,8 @@ export interface IUser extends Document {
   googleId?: string;
   firebaseUid?: string;
   username: string;
+  usernameChangedAt?: Date;
+  usernameHistory: { previousUsername: string; newUsername: string; changedAt: Date; eventId: string }[];
   displayName: string;
   bio: string;
   avatarUrl?: string;
@@ -48,6 +50,13 @@ const UserSchema = new Schema<IUser>(
     googleId: { type: String, sparse: true, index: true },
     firebaseUid: { type: String, sparse: true, index: true },
     username: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
+    usernameChangedAt: { type: Date },
+    usernameHistory: [{
+      previousUsername: { type: String, required: true },
+      newUsername: { type: String, required: true },
+      changedAt: { type: Date, required: true },
+      eventId: { type: String, required: true },
+    }],
     displayName: { type: String, default: '', trim: true },
     bio: { type: String, default: '' },
     avatarUrl: { type: String },
