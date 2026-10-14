@@ -3,6 +3,8 @@ package com.nebula.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.tasks.await
 
 import com.nebula.app.data.auth.NebulaAuthManager
 import com.nebula.app.data.repository.RoomRepositoryImpl
@@ -89,6 +92,22 @@ class MainActivity : ComponentActivity() {
             val activeTheme by themeRepository.activeTheme.collectAsState()
             val uiState by homeViewModel.uiState.collectAsState()
             val showWelcomeBack by homeViewModel.showWelcomeBack.collectAsState()
+            val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+            LaunchedEffect(uiState.userProfile.isLoggedIn, uiState.userProfile.id) {
+                if (uiState.userProfile.isLoggedIn && uiState.userProfile.id.isNotBlank()) {
+                    if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                        androidx.core.content.ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                        !getSharedPreferences("nebula_push", MODE_PRIVATE).getBoolean("notification_permission_requested", false)
+                    ) {
+                        getSharedPreferences("nebula_push", MODE_PRIVATE).edit().putBoolean("notification_permission_requested", true).apply()
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    runCatching {
+                        val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                        if (token.isNotBlank()) com.nebula.app.data.backend.NebulaApiClient.registerNotificationDevice(token)
+                    }
+                }
+            }
             var isSplashVisible by remember { mutableStateOf(true) }
 
             ProvideAppTheme(theme = activeTheme) {

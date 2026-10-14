@@ -1,5 +1,24 @@
 import { Request, Response } from 'express';
 import { NotificationModel } from '../../models/Notification';
+import { UserModel } from '../../models/User';
+import { sendDeviceNotification } from '../../services/pushNotificationService';
+
+export async function registerDeviceToken(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (token.length < 32 || token.length > 4096) { res.status(400).json({ success: false, error: 'Invalid device token' }); return; }
+    await UserModel.updateOne({ _id: req.user.id }, { $addToSet: { fcmTokens: token } });
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to register notification device' });
+  }
+}
+
+export async function notifyUser(userId: string, title: string, body: string, data: Record<string, string> = {}): Promise<void> {
+  const user = await UserModel.findById(userId).select('fcmTokens').lean();
+  if (user?.fcmTokens?.length) await sendDeviceNotification(user.fcmTokens, title, body, data);
+}
 
 export async function listNotifications(req: Request, res: Response): Promise<void> {
   try {
@@ -14,7 +33,10 @@ export async function listNotifications(req: Request, res: Response): Promise<vo
     await NotificationModel.deleteMany({ userId: req.user.id, expiresAt: { $lte: now } });
     const notifications = await NotificationModel.find({
       userId: req.user.id,
-      $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: now } }],
+      $or: [
+        { expiresAt: { $gt: now } },
+        { expiresAt: { $exists: false }, createdAt: { $gt: new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000) } },
+      ],
     })
       .sort({ createdAt: -1 })
       .limit(limit);

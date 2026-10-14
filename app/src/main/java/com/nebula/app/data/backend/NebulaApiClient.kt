@@ -46,7 +46,8 @@ object NebulaApiClient {
         endpoint: String,
         method: String = "GET",
         jsonBody: JSONObject? = null,
-        allowRefresh: Boolean = true
+        allowRefresh: Boolean = true,
+        uploadProgress: ((Int) -> Unit)? = null
     ): ApiResponse<JSONObject> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
@@ -62,9 +63,21 @@ object NebulaApiClient {
 
                 if (jsonBody != null && (method == "POST" || method == "PUT" || method == "PATCH")) {
                     doOutput = true
-                    OutputStreamWriter(outputStream).use { writer ->
-                        writer.write(jsonBody.toString())
-                        writer.flush()
+                    val bytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
+                    if (uploadProgress == null) {
+                        outputStream.use { it.write(bytes) }
+                    } else {
+                        outputStream.use { stream ->
+                            var sent = 0
+                            while (sent < bytes.size) {
+                                val end = minOf(sent + 16 * 1024, bytes.size)
+                                stream.write(bytes, sent, end - sent)
+                                sent = end
+                                val percent = (sent * 100L / bytes.size).toInt()
+                                android.os.Handler(android.os.Looper.getMainLooper()).post { uploadProgress(percent) }
+                            }
+                            stream.flush()
+                        }
                     }
                 }
             }
@@ -230,6 +243,9 @@ object NebulaApiClient {
             is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
         }
     }
+
+    suspend fun registerNotificationDevice(token: String): ApiResponse<JSONObject> =
+        request("/notifications/device-token", "POST", JSONObject().put("token", token))
 
     suspend fun markNotificationRead(id: String): ApiResponse<JSONObject> =
         request("/notifications/$id/read", "PUT")
@@ -467,13 +483,14 @@ object NebulaApiClient {
         return request("/users/me/assets/$assetId", "DELETE")
     }
 
-    suspend fun uploadChatMedia(url: String, mimeType: String, mediaType: String): ApiResponse<JSONObject> {
+    suspend fun uploadChatMedia(url: String, mimeType: String, mediaType: String, sizeBytes: Long = 0L, onProgress: (Int) -> Unit = {}): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("url", url)
             put("mimeType", mimeType)
             put("mediaType", mediaType)
+            put("sizeBytes", sizeBytes)
         }
-        return request("/chat/upload", "POST", body)
+        return request("/chat/upload", "POST", body, uploadProgress = onProgress)
     }
 
     suspend fun getFriends(): ApiResponse<JSONArray> {
@@ -541,13 +558,14 @@ object NebulaApiClient {
         request("/friends/request/withdraw/$userId", "DELETE")
     suspend fun removeFriend(userId: String): ApiResponse<JSONObject> = request("/friends/$userId", "DELETE")
 
-    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text"): ApiResponse<JSONObject> =
+    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null): ApiResponse<JSONObject> =
         request(
             "/chat",
             "POST",
-            JSONObject().put("conversationId", conversationId).put("text", text).apply {
+            JSONObject().put("conversationId", conversationId).put("text", text).put("isSpoiler", isSpoiler).apply {
                 mediaUrl?.let { put("mediaUrl", it) }
                 put("messageType", messageType)
+                mediaMimeType?.let { put("mediaMimeType", it) }
             }
         )
 

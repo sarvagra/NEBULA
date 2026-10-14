@@ -12,6 +12,7 @@ export interface PublicUserDTO {
   bannerUrl?: string;
   tier: string;
   status: string;
+  profileStatus: string;
   bio: string;
   interests: string[];
   customStatus?: string;
@@ -65,6 +66,7 @@ export function toPublicUserDTO(user: IUser, relationship: string = 'none'): Pub
     bannerUrl: user.bannerUrl,
     tier: user.tier,
     status: user.status === 'custom' ? (user.customStatus || 'Custom') : user.status === 'offline' || user.presenceStatus === 'offline' ? 'Offline' : user.presenceStatus === 'in_a_room' ? 'In a room' : 'Online',
+    profileStatus: ['dynamic', 'offline', 'custom'].includes(user.status) ? user.status : 'dynamic',
     customStatus: user.customStatus,
     bio: user.bio,
     interests: (user.interests || []).slice(0, 5),
@@ -172,6 +174,8 @@ export function toMessageDTO(message: IMessage) {
     senderAvatarUrl: message.senderAvatarUrl,
     text: message.text,
     mediaUrl: message.mediaUrl,
+    isSpoiler: message.isSpoiler,
+    mediaMimeType: message.mediaMimeType,
     messageType: message.messageType,
     reactions: message.reactions,
     readAt: message.readAt,

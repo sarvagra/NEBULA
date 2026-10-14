@@ -73,13 +73,15 @@ export function createApp(): express.Application {
     const isMediaUpload =
       req.path === '/api/v1/chat/upload' ||
       req.path === '/api/v1/users/me/assets';
-    express.json({ limit: isMediaUpload ? '30mb' : '100kb' })(req, res, next);
+    // A 30 MiB binary video grows to roughly 40 MiB as a JSON base64 data URL.
+    express.json({ limit: isMediaUpload ? '42mb' : '100kb' })(req, res, next);
   });
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
-  // 4. Request Timeout Middleware (15s)
+  // Media uploads can be 30 MiB; allow time for mobile uplinks while retaining a bounded timeout for other APIs.
   app.use((req, res, next) => {
-    req.setTimeout(15000, () => {
+    const uploadTimeoutMs = req.path === '/api/v1/chat/upload' ? 120000 : 15000;
+    req.setTimeout(uploadTimeoutMs, () => {
       res.status(504).json({ success: false, error: 'Gateway timeout: Request processing exceeded 15 seconds' });
     });
     next();

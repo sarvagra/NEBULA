@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -74,6 +75,7 @@ fun NotificationsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.88f)
                 .padding(horizontal = 18.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -93,7 +95,7 @@ fun NotificationsSheet(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 480.dp),
+                        .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(notifications, key = { it.id }) { notif ->
@@ -137,9 +139,10 @@ private fun TelegramSwipeableNotificationItem(
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         coroutineScope.launch {
-                            if (absOffset > swipeThreshold) {
+                            val releasedOffset = offsetX.value
+                            if (kotlin.math.abs(releasedOffset) > swipeThreshold) {
                                 // Swiped past threshold: dissolve off screen & dismiss synchronously
-                                val targetX = if (currentOffset > 0) targetDistance else -targetDistance
+                                val targetX = if (releasedOffset > 0) targetDistance else -targetDistance
                                 offsetX.animateTo(
                                     targetValue = targetX,
                                     animationSpec = androidx.compose.animation.core.tween(180)
@@ -256,11 +259,6 @@ private fun TelegramSwipeableNotificationItem(
                         )
                     }
                 }
-            }
-            // A visible clear action makes dismissal discoverable even when a notification
-            // contains its own tap target and intercepts a drag gesture.
-            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Close, contentDescription = "Clear notification", tint = theme.colors.textSecondary, modifier = Modifier.size(18.dp))
             }
         }
     }

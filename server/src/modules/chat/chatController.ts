@@ -5,9 +5,10 @@ import { RoomModel } from '../../models/Room';
 import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
+import { notifyUser } from '../notifications/notificationController';
 
 const UNSEND_WINDOW_MS = 2 * 60 * 1000;
-const editLimitForTier = (tier?: string) => tier === 'premium_plus' ? 2 : tier === 'premium' ? 1 : 1;
+const editLimitForTier = (tier?: string) => (tier === 'premium' || tier === 'premium_plus') ? 2 : 1;
 
 async function authorizedDirectMessage(req: Request, messageId: string) {
   const message = await MessageModel.findById(messageId);
@@ -43,7 +44,7 @@ export async function getRoomMessages(req: Request, res: Response): Promise<void
 
     res.json({
       success: true,
-      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: message.senderAvatarUrl || avatarByUserId.get(message.senderId) })),
+      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve messages' });
@@ -85,7 +86,7 @@ export async function getConversationMessages(req: Request, res: Response): Prom
     const avatarByUserId = new Map(senders.map((sender) => [sender._id.toString(), sender.avatarUrl]));
     res.json({
       success: true,
-      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: message.senderAvatarUrl || avatarByUserId.get(message.senderId) })),
+      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve direct conversation' });
@@ -157,7 +158,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { roomId, conversationId, text, mediaUrl, messageType } = req.body;
+    const { roomId, conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType } = req.body;
 
     // 1. If sending to a ROOM: verify that the user is an active participant in that room
     if (roomId) {
@@ -284,9 +285,15 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       senderAvatarUrl: (await UserModel.findById(req.user.id).select('avatarUrl'))?.avatarUrl,
       text: text?.trim() || '',
       mediaUrl,
+      isSpoiler: Boolean(isSpoiler),
+      mediaMimeType,
       messageType: messageType || 'text',
       reactions: [],
     });
+
+    if (conversationId && !roomId) {
+      void notifyUser(conversationId, req.user.displayName, text?.trim() || 'Sent you an attachment', { type: 'dm', conversationId, messageId: message._id.toString() });
+    }
 
     res.status(201).json({ success: true, data: toMessageDTO(message) });
   } catch (err: any) {
@@ -369,7 +376,8 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const resolvedSize = Number(sizeBytes) || 0;
+    const dataUrlPayload = url.match(/^data:[^;,]+;base64,(.+)$/s)?.[1];
+    const resolvedSize = Number(sizeBytes) || (dataUrlPayload ? Math.floor(dataUrlPayload.length * 3 / 4) : 0);
     const maxSize = resolvedMime.startsWith('video/') ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
     if (resolvedSize > maxSize) {
       res.status(413).json({

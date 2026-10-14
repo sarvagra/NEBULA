@@ -24,8 +24,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -42,21 +42,31 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
+import coil.ImageLoader
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
 import com.nebula.app.domain.model.NebulaConversation
@@ -77,7 +87,7 @@ fun NebulaChatDetailScreen(
     showInlineSuggestions: Boolean,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
-    onSendAttachment: (text: String, mediaUrl: String, messageType: String) -> Unit,
+    onSendAttachment: (text: String, mediaUrl: String, messageType: String, isSpoiler: Boolean, mimeType: String) -> Unit,
     onEditMessage: (messageId: String, text: String) -> Unit,
     onUnsendMessage: (messageId: String) -> Unit,
     onOpenProfile: () -> Unit,
@@ -156,7 +166,11 @@ fun NebulaChatDetailScreen(
                         )
                     )
 
-                    val statusText = if (conversation.isGroup) "${conversation.participants.size} members" else conversation.partnerUser?.status?.ifBlank { "Dynamic" } ?: "Dynamic"
+                    val statusText = if (conversation.isGroup) "${conversation.participants.size} members" else when (conversation.partnerUser?.profileStatus?.lowercase()) {
+                        "offline" -> "Offline"
+                        "custom" -> conversation.partnerUser.customStatus.ifBlank { "Custom" }
+                        else -> "Dynamic"
+                    }
 
                     Text(
                         text = statusText,
@@ -270,6 +284,8 @@ fun NebulaChatDetailScreen(
         val context = androidx.compose.ui.platform.LocalContext.current
         val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
         var isUploadingMedia by remember { mutableStateOf(false) }
+        var uploadProgress by remember { mutableIntStateOf(0) }
+        var attachmentIsSpoiler by remember { mutableStateOf(false) }
         var pendingImageBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
         var showImageCrop by remember { mutableStateOf(false) }
 
@@ -278,11 +294,35 @@ fun NebulaChatDetailScreen(
         ) { uri: android.net.Uri? ->
             uri?.let {
                 coroutineScope.launch {
+                    val mimeType = context.contentResolver.getType(it)?.lowercase().orEmpty()
                     val size = withContext(Dispatchers.IO) {
                         context.contentResolver.openFileDescriptor(it, "r")?.use { fd -> fd.statSize } ?: 0L
                     }
                     if (size > 5 * 1024 * 1024L) {
                         android.widget.Toast.makeText(context, "Image must be under 5MB", android.widget.Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    if (mimeType == "image/gif") {
+                        val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: ByteArray(0) }
+                        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) {
+                            android.widget.Toast.makeText(context, "GIF must be under 5MB", android.widget.Toast.LENGTH_LONG).show()
+                            return@launch
+                        }
+                        isUploadingMedia = true
+                        try {
+                            val dataUrl = "data:image/gif;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(dataUrl, "image/gif", "gif", bytes.size.toLong()) { uploadProgress = it }) {
+                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                                    val mediaUrl = res.data.optString("mediaUrl")
+                                    if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, "image/gif")
+                                    else android.widget.Toast.makeText(context, "GIF upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        } finally {
+                            isUploadingMedia = false
+                            showAttachments = false
+                        }
                         return@launch
                     }
                     val bitmap = withContext(Dispatchers.IO) {
@@ -308,15 +348,23 @@ fun NebulaChatDetailScreen(
                         try {
                             val output = java.io.ByteArrayOutputStream()
                             cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, output)
+                            val imageBytes = output.toByteArray()
+                            if (imageBytes.size > 5 * 1024 * 1024) {
+                                android.widget.Toast.makeText(context, "Image must be under 5MB after crop", android.widget.Toast.LENGTH_LONG).show()
+                                pendingImageBitmap = null
+                                return@launch
+                            }
                             val dataUrl = "data:image/jpeg;base64," +
-                                android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+                                android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
                             when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
                                 url = dataUrl,
                                 mimeType = "image/jpeg",
-                                mediaType = "image"
+                                mediaType = "image",
+                                sizeBytes = imageBytes.size.toLong(),
+                                onProgress = { uploadProgress = it }
                             )) {
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success ->
-                                    onSendAttachment("", res.data.optString("mediaUrl", dataUrl), "media")
+                                    onSendAttachment("", res.data.optString("mediaUrl", dataUrl), "media", attachmentIsSpoiler, "image/jpeg")
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
                                     android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
                             }
@@ -339,20 +387,13 @@ fun NebulaChatDetailScreen(
         ) { uri: android.net.Uri? ->
             uri?.let {
                 coroutineScope.launch {
+                    val mimeType = context.contentResolver.getType(it)?.lowercase() ?: "video/mp4"
+                    if (mimeType !in setOf("video/mp4", "video/webm")) {
+                        android.widget.Toast.makeText(context, "Choose an MP4 or WebM video", android.widget.Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
                     val size = withContext(Dispatchers.IO) {
                         context.contentResolver.openFileDescriptor(it, "r")?.use { fd -> fd.statSize } ?: 0L
-                    }
-                    val duration = withContext(Dispatchers.IO) {
-                        runCatching {
-                            android.media.MediaMetadataRetriever().let { retriever ->
-                                retriever.setDataSource(context, it)
-                                val value = retriever.extractMetadata(
-                                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
-                                )?.toLongOrNull() ?: 0L
-                                retriever.release()
-                                value
-                            }
-                        }.getOrDefault(Long.MAX_VALUE)
                     }
                     if (size > 30 * 1024 * 1024L) {
                         android.widget.Toast.makeText(
@@ -364,19 +405,25 @@ fun NebulaChatDetailScreen(
                     }
                     isUploadingMedia = true
                     try {
-                        val dataUrl = withContext(Dispatchers.IO) {
-                            val bytes = context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: ByteArray(0)
-                            "data:video/mp4;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        val videoBytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: ByteArray(0) }
+                        if (videoBytes.isEmpty() || videoBytes.size > 30 * 1024 * 1024) {
+                            android.widget.Toast.makeText(context, "Video must be under 30MB", android.widget.Toast.LENGTH_LONG).show()
+                            isUploadingMedia = false
+                            return@launch
                         }
+                        val dataUrl = "data:$mimeType;base64," + android.util.Base64.encodeToString(videoBytes, android.util.Base64.NO_WRAP)
                         val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
                             url = dataUrl,
-                            mimeType = "video/mp4",
-                            mediaType = "video"
+                            mimeType = mimeType,
+                            mediaType = "video",
+                            sizeBytes = videoBytes.size.toLong(),
+                            onProgress = { uploadProgress = it }
                         )
                         when (res) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
-                                val mediaUrl = res.data.optString("mediaUrl", it.toString())
-                                onSendAttachment("", mediaUrl, "media")
+                                val mediaUrl = res.data.optString("mediaUrl")
+                                if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
+                                else android.widget.Toast.makeText(context, "Video upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                             }
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
                                 android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
@@ -452,29 +499,17 @@ fun NebulaChatDetailScreen(
                     )
                 }
 
-                // GIF Quick Selection
-                listOf("🍿 Watchparty GIF", "🔥 Hype GIF", "🌌 Nebula GIF").forEach { gifLabel ->
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surfaceElevated)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable {
-                                onSendAttachment(gifLabel, "https://media.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.gif", "media")
-                                showAttachments = false
-                            }
-                            .padding(horizontal = 10.dp, vertical = 7.dp)
-                    ) {
-                        Text(
-                            text = gifLabel,
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.5.sp
-                            )
-                        )
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Hide as spoiler", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp))
+                    Switch(checked = attachmentIsSpoiler, onCheckedChange = { attachmentIsSpoiler = it })
                 }
+            }
+        }
+
+        AnimatedVisibility(visible = isUploadingMedia) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text("Uploading attachment · $uploadProgress%", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp))
+                LinearProgressIndicator(progress = { uploadProgress / 100f }, modifier = Modifier.fillMaxWidth())
             }
         }
 
@@ -571,7 +606,16 @@ fun NebulaChatDetailScreen(
 @Composable
 private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend: () -> Unit) {
     val theme = Theme.current
+    val context = LocalContext.current
+    val mediaImageLoader = remember(context) {
+        ImageLoader.Builder(context).components {
+            if (android.os.Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
+        }.build()
+    }
     val isMe = message.role == MessageRole.USER
+    var showHistory by remember(message.id) { mutableStateOf(false) }
+    var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
+    var videoStarted by remember(message.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -617,25 +661,50 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                         contentAlignment = Alignment.Center
                     ) {
                         val mediaUrl = message.mediaUrl.orEmpty()
-                        if ((mediaUrl.contains(".gif", ignoreCase = true) || message.messageType == "media") && mediaUrl.isNotBlank() && !mediaUrl.contains("video", ignoreCase = true)) {
+                        val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
+                        if (isVideo && mediaUrl.isNotBlank()) {
+                            AndroidView(
+                                factory = { context ->
+                                    android.widget.VideoView(context).apply {
+                                        setVideoURI(android.net.Uri.parse(mediaUrl))
+                                        setOnPreparedListener { player ->
+                                            player.isLooping = false
+                                            if (videoStarted) start()
+                                        }
+                                    }
+                                },
+                                update = { player -> if (videoStarted && !player.isPlaying) player.start() },
+                                modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
+                            )
+                        } else if (mediaUrl.isNotBlank()) {
                             AsyncImage(
                                 model = mediaUrl,
                                 contentDescription = "Shared image",
-                                modifier = Modifier.fillMaxSize(),
+                                imageLoader = mediaImageLoader,
+                                modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Fit
                             )
                         } else {
                             Text(
-                                text = when {
-                                    mediaUrl.contains(".gif", ignoreCase = true) -> "Shared GIF"
-                                    mediaUrl.contains("video", ignoreCase = true) -> "Video attachment"
-                                    else -> "Video attachment"
-                                },
+                                text = "Attachment unavailable",
                                 style = theme.typography.bodyMedium.copy(
                                     color = if (isMe) Color.White else theme.colors.textPrimary,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             )
+                        }
+                        if (!spoilerRevealed) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center).clickable { spoilerRevealed = true },
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color.Black.copy(alpha = 0.72f)
+                            ) { Text("Reveal spoiler", modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp), color = Color.White, fontSize = 12.sp) }
+                        } else if (isVideo && !videoStarted) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center).clickable { videoStarted = true },
+                                shape = CircleShape,
+                                color = Color.Black.copy(alpha = 0.72f)
+                            ) { Text("▶", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 20.sp) }
                         }
                     }
                     Text(
@@ -679,17 +748,34 @@ private fun ModernChatBubble(message: ChatMessage, onEdit: () -> Unit, onUnsend:
                     modifier = Modifier.size(12.dp)
                 )
             }
-            if (message.editedAt != null) Text("Edited", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
+            if (message.editedAt != null && message.deletedAt == null && message.editHistory.isNotEmpty()) {
+                Text(
+                    text = "History",
+                    modifier = Modifier.clickable { showHistory = !showHistory },
+                    style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp)
+                )
+            }
         }
         if (isMe && message.deletedAt == null) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Edit", modifier = Modifier.clickable { onEdit() }, style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp))
                 if (System.currentTimeMillis() - message.timestamp <= 2 * 60 * 1000L) Text("Unsend", modifier = Modifier.clickable { onUnsend() }, style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.5.sp))
             }
-        } else if (!isMe && message.editHistory.isNotEmpty()) {
-            Column {
-                Text("Edited ${message.editHistory.size} time${if (message.editHistory.size == 1) "" else "s"}", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
-                message.editHistory.forEach { previous -> Text("Previous: $previous", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp)) }
+        }
+        androidx.compose.animation.AnimatedVisibility(visible = showHistory && message.deletedAt == null && message.editHistory.isNotEmpty()) {
+            Surface(
+                modifier = Modifier.padding(top = 5.dp).widthIn(max = 270.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = theme.colors.surfaceElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
+                shadowElevation = 4.dp
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Edit history", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontWeight = FontWeight.SemiBold))
+                    message.editHistory.forEachIndexed { index, previous ->
+                        Text("${index + 1}. $previous", style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary))
+                    }
+                }
             }
         }
         }

@@ -627,10 +627,10 @@ class HomeViewModel(
         }
     }
 
-    fun onSendDirectAttachment(text: String, mediaUrl: String, messageType: String) {
+    fun onSendDirectAttachment(text: String, mediaUrl: String, messageType: String, isSpoiler: Boolean, mediaMimeType: String) {
         val conversationId = _uiState.value.activeSocialConversation?.id ?: return
         viewModelScope.launch {
-            if (!socialRepository.sendMessage(conversationId, text, mediaUrl, messageType)) showToast("Attachment could not be sent.")
+            if (!socialRepository.sendMessage(conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType)) showToast("Attachment could not be sent.")
         }
     }
 

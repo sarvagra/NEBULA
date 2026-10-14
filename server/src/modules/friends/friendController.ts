@@ -5,6 +5,7 @@ import { NotificationModel } from '../../models/Notification';
 import { toPublicUserDTO } from '../../utils/dto';
 import { notifyUserSocialChanged } from '../../realtime/socketServer';
 import { RoomModel } from '../../models/Room';
+import { notifyUser } from '../notifications/notificationController';
 
 export async function listFriends(req: Request, res: Response): Promise<void> {
   try {
@@ -136,6 +137,7 @@ export async function sendFriendRequest(req: Request, res: Response): Promise<vo
       body: `${req.user.displayName} sent you a friend request.`,
       actionData: { friendshipId: friendship._id.toString(), requesterId: req.user.id },
     });
+    void notifyUser(targetRecipientId, 'Friend request', `${req.user.displayName} sent you a friend request.`, { type: 'friend_request', userId: req.user.id });
     notifyUserSocialChanged([req.user.id, targetRecipientId]);
 
     res.status(201).json({
@@ -201,6 +203,16 @@ export async function acceptFriendRequest(req: Request, res: Response): Promise<
 
     friendship.status = 'accepted';
     await friendship.save();
+    const acceptedBy = await UserModel.findById(req.user.id).select('displayName');
+    await NotificationModel.create({
+      userId: friendship.requesterId,
+      type: 'system',
+      title: 'Friend request accepted',
+      body: `${acceptedBy?.displayName || 'Your friend'} accepted your friend request.`,
+      actionData: { userId: req.user.id },
+      expiresAt: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000),
+    });
+    void notifyUser(friendship.requesterId, 'Friend request accepted', `${acceptedBy?.displayName || 'Your friend'} accepted your friend request.`, { type: 'friend_accepted', userId: req.user.id });
     notifyUserSocialChanged([friendship.requesterId, friendship.recipientId]);
 
     res.json({ success: true, message: 'Friend request accepted' });

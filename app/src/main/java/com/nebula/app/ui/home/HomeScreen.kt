@@ -265,7 +265,7 @@ fun HomeScreen(
                 showInlineSuggestions = uiState.showInlineSuggestions,
                 onBack = { viewModel.onCloseSocialConversation() },
                 onSendMessage = { viewModel.onSendDirectMessage(it) },
-                onSendAttachment = { text, url, type -> viewModel.onSendDirectAttachment(text, url, type) },
+                onSendAttachment = { text, url, type, spoiler, mime -> viewModel.onSendDirectAttachment(text, url, type, spoiler, mime) },
                 onEditMessage = { id, text -> viewModel.onEditDirectMessage(id, text) },
                 onUnsendMessage = { id -> viewModel.onUnsendDirectMessage(id) },
                 onOpenProfile = { uiState.activeSocialConversation?.partnerUser?.let { viewModel.onOpenFriendProfile(it) } },

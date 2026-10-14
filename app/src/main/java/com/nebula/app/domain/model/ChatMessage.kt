@@ -47,4 +47,6 @@ data class ChatMessage(
     val editHistory: List<String> = emptyList(),
     val deletedAt: Long? = null,
     val readAt: Long? = null,
+    val isSpoiler: Boolean = false,
+    val mediaMimeType: String? = null,
 )

@@ -31,6 +31,7 @@ export interface IUser extends Document {
   isBanned: boolean;
   role: 'user' | 'moderator' | 'admin';
   activeRoomId?: string | null;
+  fcmTokens: string[];
   stats: {
     roomsJoinedCount: number;
     roomsHostedCount: number;
@@ -69,6 +70,7 @@ const UserSchema = new Schema<IUser>(
     isBanned: { type: Boolean, default: false, index: true },
     role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
     activeRoomId: { type: String, default: null, index: true },
+    fcmTokens: { type: [String], default: [] },
     stats: {
       roomsJoinedCount: { type: Number, default: 0 },
       roomsHostedCount: { type: Number, default: 0 },

@@ -70,9 +70,9 @@ class SocialRepositoryImpl(
         _activeConversation.value = null
     }
 
-    override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String): Boolean {
+    override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String, isSpoiler: Boolean, mediaMimeType: String?): Boolean {
         if (content.isBlank() && mediaUrl.isNullOrBlank()) return false
-        val response = apiClient.sendDirectMessage(conversationId, content.trim(), mediaUrl, messageType)
+        val response = apiClient.sendDirectMessage(conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType)
         if (response !is ApiResponse.Success) return false
         val currentConv = _conversations.value.firstOrNull { it.id == conversationId } ?: return false
         val newMsg = response.data.optJSONObject("data")?.let { messageFromJson(it, conversationId) } ?: ChatMessage(id = "msg_${UUID.randomUUID().toString().take(6)}", role = MessageRole.USER, content = content.trim(), timeLabel = "Just now", mediaUrl = mediaUrl, messageType = messageType)
@@ -253,6 +253,8 @@ class SocialRepositoryImpl(
                     avatarUrl = item.optString("avatarUrl").ifBlank { null },
                     bio = item.optString("bio"),
                     status = displayedStatus,
+                    profileStatus = item.optString("profileStatus", "dynamic"),
+                    customStatus = item.optString("customStatus"),
                     presenceStatus = presence,
                     isOnline = presence != com.nebula.app.domain.model.NebulaPresenceStatus.OFFLINE,
                     bannerUrl = item.optString("bannerUrl").ifBlank { null },
@@ -291,6 +293,8 @@ class SocialRepositoryImpl(
             editHistory = history,
             deletedAt = item.optString("deletedAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
             readAt = item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            isSpoiler = item.optBoolean("isSpoiler", false),
+            mediaMimeType = item.optString("mediaMimeType").ifBlank { null },
         )
     }
 

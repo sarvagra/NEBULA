@@ -22,7 +22,7 @@ const NotificationSchema = new Schema<INotification>(
     actionData: { type: Schema.Types.Mixed },
     isRead: { type: Boolean, default: false },
     // Invite records remain visible until acted on, then expire server-side after five minutes.
-    expiresAt: { type: Date, index: true },
+    expiresAt: { type: Date },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },
@@ -37,5 +37,11 @@ const NotificationSchema = new Schema<INotification>(
     },
   }
 );
+
+NotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+NotificationSchema.pre('validate', function setDefaultExpiry(next) {
+  if (!this.expiresAt) this.expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000);
+  next();
+});
 
 export const NotificationModel = mongoose.model<INotification>('Notification', NotificationSchema);

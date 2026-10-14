@@ -11,6 +11,8 @@ export interface IMessage extends Document {
   senderAvatarUrl?: string;
   text: string;
   mediaUrl?: string;
+  isSpoiler: boolean;
+  mediaMimeType?: string;
   messageType: MessageType;
   reactions: { emoji: string; count: number; userIds: string[] }[];
   /** Direct messages only.  The recipient explicitly marks these read. */
@@ -31,6 +33,8 @@ const MessageSchema = new Schema<IMessage>(
     senderAvatarUrl: { type: String },
     text: { type: String, default: '' },
     mediaUrl: { type: String },
+    isSpoiler: { type: Boolean, default: false },
+    mediaMimeType: { type: String },
     messageType: { type: String, enum: ['text', 'media', 'system'], default: 'text' },
     reactions: [
       {

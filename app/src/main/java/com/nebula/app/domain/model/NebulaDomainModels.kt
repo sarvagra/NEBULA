@@ -52,6 +52,8 @@ data class NebulaUser(
     val bannerUrl: String? = null,
     val bio: String,
     val status: String,
+    val profileStatus: String = "dynamic",
+    val customStatus: String = "",
     val presenceStatus: NebulaPresenceStatus = NebulaPresenceStatus.ONLINE,
     val isOnline: Boolean = presenceStatus != NebulaPresenceStatus.OFFLINE,
     val bannerIndex: Int = 0,

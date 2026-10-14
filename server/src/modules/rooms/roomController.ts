@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { RoomModel } from '../../models/Room';
+import { notifyUser } from '../notifications/notificationController';
 import { toPublicRoomDTO } from '../../utils/dto';
 import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
 import { UserModel } from '../../models/User';
@@ -333,6 +334,7 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
       actionData: { roomId: room._id.toString(), inviterId: req.user.id },
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
+    void notifyUser(userId, 'Room invitation', `${req.user.displayName} invited you to ${room.name}.`, { type: 'room_invite', roomId: room._id.toString() });
     res.status(201).json({ success: true, data: invite.toJSON() });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to invite participant' });
