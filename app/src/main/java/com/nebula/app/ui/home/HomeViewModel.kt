@@ -213,6 +213,21 @@ class HomeViewModel(
     }
 
     init {
+        // Follow whichever thread the repository considers open, no matter which
+        // navigation path opened it, and keep it synced while it stays open.
+        // This must live here: the state holder above has to exist first.
+        viewModelScope.launch {
+            socialRepository.activeConversation.collect { open ->
+                _uiState.value = _uiState.value.copy(activeSocialConversation = open)
+                if (open == null) {
+                    conversationSyncJob?.cancel()
+                    conversationSyncJob = null
+                } else {
+                    startConversationSync()
+                }
+            }
+        }
+
         // Collect Theme
         viewModelScope.launch {
             themeRepository.activeTheme.collect { activeTheme ->
@@ -629,7 +644,7 @@ class HomeViewModel(
         conversationSyncJob = viewModelScope.launch {
             while (true) {
                 delay(4_000)
-                val open = _uiState.value.activeSocialConversation ?: break
+                val open = socialRepository.activeConversation.value ?: break
                 socialRepository.refreshActiveConversation()
                 _uiState.value = _uiState.value.copy(
                     activeSocialConversation = socialRepository.activeConversation.value
