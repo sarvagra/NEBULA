@@ -8,6 +8,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -101,9 +105,18 @@ fun NebulaChatDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    var inputText by remember { mutableStateOf("") }
-    var showAttachments by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var inputText by remember { mutableStateOf("") }
+    val composerFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Editing re-uses the composer instead of spawning a dialog: the text comes
+    // back, the send button becomes an edit action, and sending rewrites the
+    // existing bubble rather than adding a new one.
+    androidx.compose.runtime.LaunchedEffect(editingMessage?.id) {
+        val editing = editingMessage ?: return@LaunchedEffect
+        inputText = editing.content
+        composerFocus.requestFocus()
+    }
+    var showAttachments by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(conversation.messages.size) {
@@ -273,6 +286,9 @@ fun NebulaChatDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val messages = conversation.messages
+                val lastOwnMessageId = messages.lastOrNull {
+                    it.role == MessageRole.USER && it.deletedAt == null
+                }?.id
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                     val previous = messages.getOrNull(index - 1)
                     val next = messages.getOrNull(index + 1)
@@ -291,6 +307,8 @@ fun NebulaChatDetailScreen(
                             showAvatar = startsGroup,
                             isGroupedWithPrevious = !startsGroup,
                             isGroupedWithNext = !endsGroup,
+                            // Receipts belong to the newest message the user sent only.
+                            showsReceipt = message.id == lastOwnMessageId,
                             onEdit = { editingMessage = message },
                             onUnsend = { onUnsendMessage(message.id) }
                         )
@@ -510,6 +528,44 @@ fun NebulaChatDetailScreen(
             }
         }
 
+        // Edit mode banner: shows what is being changed and offers a way out.
+        androidx.compose.animation.AnimatedVisibility(visible = editingMessage != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(3.dp, 16.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(theme.colors.successColor)
+                )
+                Text(
+                    text = "Editing message",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.successColor,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.5.sp
+                    )
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "Cancel",
+                    modifier = Modifier.clickable {
+                        editingMessage = null
+                        inputText = ""
+                    },
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontSize = 11.5.sp
+                    )
+                )
+            }
+        }
+
         // 4. CLEAN COMPOSER PINNED ABOVE KEYBOARD
         Box(
             modifier = Modifier
@@ -545,7 +601,9 @@ fun NebulaChatDetailScreen(
                 BasicTextField(
                     value = inputText,
                     onValueChange = { inputText = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(composerFocus),
                     textStyle = theme.typography.bodyMedium.copy(
                         color = theme.colors.textPrimary,
                         fontSize = 14.5.sp
@@ -555,7 +613,7 @@ fun NebulaChatDetailScreen(
                     decorationBox = { innerTextField ->
                         if (inputText.isEmpty()) {
                             Text(
-                                text = "Message...",
+                                text = if (editingMessage != null) "Edit message..." else "Message...",
                                 style = theme.typography.bodyMedium.copy(
                                     color = theme.colors.textTertiary,
                                     fontSize = 14.5.sp
@@ -571,9 +629,21 @@ fun NebulaChatDetailScreen(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(if (inputText.isNotBlank()) theme.colors.primaryAccent else theme.colors.surfaceElevated)
+                        .background(
+                            when {
+                                inputText.isBlank() -> theme.colors.surfaceElevated
+                                editingMessage != null -> theme.colors.successColor
+                                else -> theme.colors.primaryAccent
+                            }
+                        )
                         .clickable(enabled = inputText.isNotBlank()) {
-                            onSendMessage(inputText)
+                            val editing = editingMessage
+                            if (editing != null) {
+                                onEditMessage(editing.id, inputText.trim())
+                                editingMessage = null
+                            } else {
+                                onSendMessage(inputText)
+                            }
                             inputText = ""
                         },
                     contentAlignment = Alignment.Center
@@ -587,60 +657,8 @@ fun NebulaChatDetailScreen(
                 }
             }
         }
-        editingMessage?.let { message ->
-            var editedText by remember(message.id) { mutableStateOf(message.content) }
-            val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
-            androidx.compose.runtime.LaunchedEffect(message.id) {
-                focusRequester.requestFocus()
-            }
-            AlertDialog(
-                onDismissRequest = { editingMessage = null },
-                containerColor = theme.colors.surfaceElevated,
-                titleContentColor = theme.colors.textPrimary,
-                textContentColor = theme.colors.textSecondary,
-                shape = RoundedCornerShape(18.dp),
-                title = {
-                    Text(
-                        text = "Edit message",
-                        style = theme.typography.titleMedium.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    )
-                },
-                text = {
-                    BasicTextField(
-                        value = editedText,
-                        onValueChange = { editedText = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.primaryAccent, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        textStyle = theme.typography.bodyMedium.copy(color = theme.colors.textPrimary),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.colors.primaryAccent)
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (editedText.isNotBlank()) onEditMessage(message.id, editedText.trim())
-                        editingMessage = null
-                    }) {
-                        Text("Save", color = theme.colors.primaryAccent, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { editingMessage = null }) {
-                        Text("Cancel", color = theme.colors.textSecondary)
-                    }
-                }
-            )
-        }
     }
 }
-
 /** Identity used to decide whether two consecutive messages share a group. */
 private fun ChatMessage.senderKeyOrNull(): String? =
     senderId ?: senderName ?: if (role == MessageRole.USER) "me" else null
@@ -731,18 +749,20 @@ private fun DateSeparator(label: String) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ModernChatBubble(
     message: ChatMessage,
     showAvatar: Boolean,
     isGroupedWithPrevious: Boolean,
     isGroupedWithNext: Boolean,
+    showsReceipt: Boolean,
     onEdit: () -> Unit,
     onUnsend: () -> Unit
 ) {
+    var showActions by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
-    var showHistory by remember(message.id) { mutableStateOf(false) }
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
     var videoStarted by remember(message.id) { mutableStateOf(false) }
     var videoPrepared by remember(message.id) { mutableStateOf(false) }
@@ -750,10 +770,8 @@ private fun ModernChatBubble(
     var videoBufferPercent by remember(message.id) { mutableIntStateOf(0) }
     var videoFailed by remember(message.id) { mutableStateOf(false) }
     // Default to a landscape-ish box until the real dimensions arrive.
-    val isMediaMessage = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
     val isVideoMessage = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
     var mediaAspectRatio by remember(message.id) { mutableStateOf(4f / 3f) }
-    val previewContext = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(message.id, message.mediaUrl) {
         val url = message.mediaUrl
         if (!url.isNullOrBlank()) {
@@ -801,6 +819,14 @@ private fun ModernChatBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = 280.dp)
+                .combinedClickable(
+                    // Long press owns the actions now; a plain tap stays inert so
+                    // the thread is not full of buttons.
+                    onClick = {},
+                    onLongClick = {
+                        if (isMe && message.deletedAt == null) showActions = true
+                    }
+                )
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -983,7 +1009,7 @@ private fun ModernChatBubble(
                     fontSize = 10.5.sp
                 )
             )
-            if (isMe && message.deletedAt == null) {
+            if (isMe && message.deletedAt == null && showsReceipt) {
                 // One tick = delivered, two accent ticks = the recipient opened it.
                 val isRead = message.readAt != null
                 Icon(
@@ -993,42 +1019,19 @@ private fun ModernChatBubble(
                     modifier = Modifier.size(12.dp)
                 )
             }
-            // Prior edited text stays hidden until the reader explicitly taps
-            // "History". Unsent messages expose no history at all.
-            val historyAvailable = message.editedAt != null && message.deletedAt == null && message.editHistory.isNotEmpty()
-            if (historyAvailable) {
-                Text(
-                    text = if (showHistory) "Hide history" else "History",
-                    modifier = Modifier.clickable { showHistory = !showHistory },
-                    style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp)
-                )
-            }
         }
-        if (isMe && message.deletedAt == null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Edit", modifier = Modifier.clickable { onEdit() }, style = theme.typography.caption.copy(color = theme.colors.primaryAccent, fontSize = 10.5.sp))
-                if (System.currentTimeMillis() - message.timestamp <= 2 * 60 * 1000L) Text("Unsend", modifier = Modifier.clickable { onUnsend() }, style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.5.sp))
-            }
-        }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showHistory && message.deletedAt == null && message.editHistory.isNotEmpty(),
-            enter = androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(140)
-            ) + androidx.compose.animation.expandVertically(
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
-                )
-            ),
-            exit = androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(110)
-            ) + androidx.compose.animation.shrinkVertically(
-                animationSpec = androidx.compose.animation.core.tween(140)
-            )
-        ) {
-            HistoryPopup(
-                entries = message.editHistory,
-                onDismiss = { showHistory = false }
+        if (showActions) {
+            MessageActionSheet(
+                message = message,
+                onEdit = {
+                    showActions = false
+                    onEdit()
+                },
+                onUnsend = {
+                    showActions = false
+                    onUnsend()
+                },
+                onDismiss = { showActions = false }
             )
         }
         }
@@ -1036,67 +1039,122 @@ private fun ModernChatBubble(
 }
 
 /**
- * Compact animated popup listing the recipient-visible prior versions of an
- * edited direct message, newest revision first. It is only composed when the
- * reader explicitly asks for history, and unsent messages never reach it.
+ * Long-press action sheet for a message the user sent.
+ *
+ * Both actions are available only during the two-minute window and each is drawn
+ * with a progress bar that depletes over the remaining time, so the deadline is
+ * visible rather than implied. Edit is green because it keeps the message alive;
+ * unsend drains to red because it destroys it.
  */
 @Composable
-private fun HistoryPopup(entries: List<String>, onDismiss: () -> Unit) {
+private fun MessageActionSheet(
+    message: ChatMessage,
+    onEdit: () -> Unit,
+    onUnsend: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val theme = Theme.current
-    Surface(
-        modifier = Modifier
-            .padding(top = 6.dp)
-            .widthIn(max = 276.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = theme.colors.surfaceElevated,
-        border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
-        shadowElevation = 6.dp
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+    var remainingFraction by remember(message.id) {
+        mutableFloatStateOf(remainingFractionFor(message.timestamp))
+    }
+    androidx.compose.runtime.LaunchedEffect(message.id) {
+        while (remainingFraction > 0f) {
+            kotlinx.coroutines.delay(250)
+            remainingFraction = remainingFractionFor(message.timestamp)
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = theme.colors.surfaceElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
+            modifier = Modifier.widthIn(min = 240.dp, max = 300.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Previous versions",
+                    text = "Message",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.6.sp
+                    ),
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                 )
-                Text(
-                    text = "Close",
-                    modifier = Modifier.clickable { onDismiss() },
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.primaryAccent,
-                        fontSize = 10.5.sp
-                    )
+                CountdownAction(
+                    label = "Edit",
+                    subtitle = if (remainingFraction > 0f) "Send the corrected text" else "Edit window closed",
+                    fraction = remainingFraction,
+                    accent = theme.colors.successColor,
+                    enabled = remainingFraction > 0f,
+                    onClick = onEdit
+                )
+                CountdownAction(
+                    label = "Unsend",
+                    subtitle = if (remainingFraction > 0f) "Remove for everyone" else "Unsend window closed",
+                    fraction = remainingFraction,
+                    accent = theme.colors.errorColor,
+                    enabled = remainingFraction > 0f,
+                    onClick = onUnsend
                 )
             }
-            // Newest revision first so the most recent prior wording is on top.
-            entries.asReversed().forEachIndexed { index, previous ->
-                val revisionNumber = entries.size - index
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "$revisionNumber.",
-                        style = theme.typography.bodySmall.copy(
-                            color = theme.colors.textTertiary,
-                            fontSize = 11.5.sp
-                        )
-                    )
-                    Text(
-                        text = previous,
-                        style = theme.typography.bodySmall.copy(
-                            color = theme.colors.textPrimary,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
-            }
+        }
+    }
+}
+
+/** 1f at send time, draining to 0f when the two-minute window expires. */
+private fun remainingFractionFor(timestampMs: Long): Float {
+    val elapsed = System.currentTimeMillis() - timestampMs
+    return (1f - (elapsed.toFloat() / (2 * 60 * 1000f))).coerceIn(0f, 1f)
+}
+
+@Composable
+private fun CountdownAction(
+    label: String,
+    subtitle: String,
+    fraction: Float,
+    accent: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val theme = Theme.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(theme.colors.surface)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = label,
+            style = theme.typography.bodyMedium.copy(
+                color = if (enabled) theme.colors.textPrimary else theme.colors.textTertiary,
+                fontWeight = FontWeight.SemiBold
+            )
+        )
+        Text(
+            text = subtitle,
+            style = theme.typography.caption.copy(
+                color = theme.colors.textTertiary,
+                fontSize = 11.sp
+            )
+        )
+        // Depleting bar: full accent at send time, empty when the window closes.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(theme.colors.surfaceBorder.copy(alpha = 0.4f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(if (enabled) accent else theme.colors.textTertiary.copy(alpha = 0.4f))
+            )
         }
     }
 }
