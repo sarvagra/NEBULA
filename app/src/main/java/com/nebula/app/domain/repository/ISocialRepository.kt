@@ -14,6 +14,11 @@ interface ISocialRepository {
     val activeConversation: StateFlow<NebulaConversation?>
 
     suspend fun selectConversation(id: String)
+    /**
+     * Re-pulls the currently open thread. Used to pick up read receipts and
+     * messages the other side sent while this screen stayed open.
+     */
+    suspend fun refreshActiveConversation()
     suspend fun closeConversation()
     suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null): Boolean
     suspend fun editMessage(messageId: String, content: String): Boolean

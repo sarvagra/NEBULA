@@ -39,6 +39,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
@@ -432,66 +438,57 @@ fun NebulaChatDetailScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
+            // Same horizontal inset as the composer so the row lines up with the
+            // input field instead of floating at its own margin.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Image Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surfaceElevated)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .clickable {
-                            imagePickerLauncher.launch(
-                                androidx.activity.result.PickVisualMediaRequest(
-                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
-                                )
+                AttachmentAction(
+                    icon = Icons.Default.Image,
+                    label = "Image",
+                    onClick = {
+                        imagePickerLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
                             )
-                        }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = "📷 Image",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
                         )
-                    )
-                }
-
-                // Video Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surfaceElevated)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .clickable {
-                            videoPickerLauncher.launch(
-                                androidx.activity.result.PickVisualMediaRequest(
-                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly
-                                )
+                    }
+                )
+                AttachmentAction(
+                    icon = Icons.Default.Videocam,
+                    label = "Video",
+                    onClick = {
+                        videoPickerLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly
                             )
-                        }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = "🎥 Video",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
                         )
+                    }
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "Spoiler",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontSize = 11.5.sp
                     )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Hide as spoiler", style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp))
-                    Switch(checked = attachmentIsSpoiler, onCheckedChange = { attachmentIsSpoiler = it })
-                }
+                )
+                Switch(
+                    checked = attachmentIsSpoiler,
+                    onCheckedChange = { attachmentIsSpoiler = it },
+                    modifier = Modifier.scale(0.8f),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = theme.colors.onPrimaryAccent,
+                        checkedTrackColor = theme.colors.primaryAccent,
+                        uncheckedThumbColor = theme.colors.textSecondary,
+                        uncheckedTrackColor = theme.colors.surfaceElevated,
+                        uncheckedBorderColor = theme.colors.surfaceBorder
+                    )
+                )
             }
         }
 
@@ -592,12 +589,53 @@ fun NebulaChatDetailScreen(
         }
         editingMessage?.let { message ->
             var editedText by remember(message.id) { mutableStateOf(message.content) }
+            val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+            androidx.compose.runtime.LaunchedEffect(message.id) {
+                focusRequester.requestFocus()
+            }
             AlertDialog(
                 onDismissRequest = { editingMessage = null },
-                title = { Text("Edit message") },
-                text = { BasicTextField(value = editedText, onValueChange = { editedText = it }, modifier = Modifier.fillMaxWidth(), textStyle = theme.typography.bodyMedium.copy(color = theme.colors.textPrimary)) },
-                confirmButton = { TextButton(onClick = { if (editedText.isNotBlank()) onEditMessage(message.id, editedText.trim()); editingMessage = null }) { Text("Save") } },
-                dismissButton = { TextButton(onClick = { editingMessage = null }) { Text("Cancel") } }
+                containerColor = theme.colors.surfaceElevated,
+                titleContentColor = theme.colors.textPrimary,
+                textContentColor = theme.colors.textSecondary,
+                shape = RoundedCornerShape(18.dp),
+                title = {
+                    Text(
+                        text = "Edit message",
+                        style = theme.typography.titleMedium.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                },
+                text = {
+                    BasicTextField(
+                        value = editedText,
+                        onValueChange = { editedText = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.primaryAccent, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        textStyle = theme.typography.bodyMedium.copy(color = theme.colors.textPrimary),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.colors.primaryAccent)
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (editedText.isNotBlank()) onEditMessage(message.id, editedText.trim())
+                        editingMessage = null
+                    }) {
+                        Text("Save", color = theme.colors.primaryAccent, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingMessage = null }) {
+                        Text("Cancel", color = theme.colors.textSecondary)
+                    }
+                }
             )
         }
     }
@@ -630,6 +668,40 @@ private fun ChatMessage.dateLabel(): String {
     if (sameDay(messageDay, yesterday)) return "YESTERDAY"
     return java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault())
         .format(java.util.Date(timestamp)).uppercase(java.util.Locale.getDefault())
+}
+
+@Composable
+private fun AttachmentAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(theme.colors.surface)
+            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = theme.colors.primaryAccent,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = label,
+            style = theme.typography.caption.copy(
+                color = theme.colors.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp
+            )
+        )
+    }
 }
 
 @Composable
@@ -911,11 +983,13 @@ private fun ModernChatBubble(
                     fontSize = 10.5.sp
                 )
             )
-            if (isMe) {
+            if (isMe && message.deletedAt == null) {
+                // One tick = delivered, two accent ticks = the recipient opened it.
+                val isRead = message.readAt != null
                 Icon(
-                    imageVector = Icons.Default.DoneAll,
-                    contentDescription = null,
-                    tint = theme.colors.primaryAccent,
+                    imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Done,
+                    contentDescription = if (isRead) "Read" else "Delivered",
+                    tint = if (isRead) theme.colors.primaryAccent else theme.colors.textTertiary,
                     modifier = Modifier.size(12.dp)
                 )
             }

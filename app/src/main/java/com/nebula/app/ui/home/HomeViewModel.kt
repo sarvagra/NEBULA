@@ -42,6 +42,7 @@ class HomeViewModel(
 ) : ViewModel() {
 
     private var presencePulseJob: Job? = null
+    private var conversationSyncJob: Job? = null
 
     private val _showWelcomeBack = MutableStateFlow(false)
     val showWelcomeBack: StateFlow<Boolean> = _showWelcomeBack.asStateFlow()
@@ -614,6 +615,27 @@ class HomeViewModel(
                 activeRoom = null,
                 activeSocialConversation = socialRepository.conversations.value.firstOrNull { it.id == id }
             )
+            startConversationSync()
+        }
+    }
+
+    /**
+     * Keeps the open thread live: read receipts, edits and messages the other
+     * side sends arrive without the user leaving the screen. Cancelled as soon
+     * as the conversation closes so nothing polls in the background.
+     */
+    private fun startConversationSync() {
+        conversationSyncJob?.cancel()
+        conversationSyncJob = viewModelScope.launch {
+            while (true) {
+                delay(4_000)
+                val open = _uiState.value.activeSocialConversation ?: break
+                socialRepository.refreshActiveConversation()
+                _uiState.value = _uiState.value.copy(
+                    activeSocialConversation = socialRepository.activeConversation.value
+                        ?: socialRepository.conversations.value.firstOrNull { it.id == open.id }
+                )
+            }
         }
     }
 
@@ -661,6 +683,8 @@ class HomeViewModel(
     }
 
     fun onCloseSocialConversation() {
+        conversationSyncJob?.cancel()
+        conversationSyncJob = null
         viewModelScope.launch {
             socialRepository.closeConversation()
             _uiState.value = _uiState.value.copy(activeSocialConversation = null)

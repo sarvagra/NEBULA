@@ -84,6 +84,29 @@ class SocialRepositoryImpl(
         }
     }
 
+    override suspend fun refreshActiveConversation() {
+        val current = _activeConversation.value ?: return
+        val history = apiClient.getConversationMessages(current.id)
+        if (history !is ApiResponse.Success) return
+        val fresh = buildList {
+            for (index in 0 until history.data.length()) {
+                val item = history.data.optJSONObject(index) ?: continue
+                add(messageFromJson(item, current.id))
+            }
+        }
+        // Only swap the list in when something actually changed, so the ticking
+        // refresh does not fight the user's scroll or re-trigger recomposition.
+        val unchanged = fresh.size == current.messages.size &&
+            fresh.zip(current.messages).all { (a, b) ->
+                a.id == b.id && a.readAt == b.readAt && a.editedAt == b.editedAt &&
+                    a.deletedAt == b.deletedAt && a.content == b.content && a.mediaUrl == b.mediaUrl
+            }
+        if (unchanged) return
+        val updated = current.copy(messages = fresh)
+        _activeConversation.value = updated
+        _conversations.value = _conversations.value.map { if (it.id == current.id) updated else it }
+    }
+
     override suspend fun closeConversation() {
         _activeConversation.value = null
     }
