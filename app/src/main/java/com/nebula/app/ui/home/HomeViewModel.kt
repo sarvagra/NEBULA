@@ -708,9 +708,17 @@ class HomeViewModel(
 
     fun onSendDirectMessage(content: String) {
         val convId = _uiState.value.activeSocialConversation?.id ?: return
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return
+        // Validate locally so an over-length message is never sent and the user is
+        // told exactly what is wrong, instead of a generic connectivity message.
+        if (trimmed.length > MAX_DIRECT_MESSAGE_CHARS) {
+            showToast("Message is too long. Keep it under $MAX_DIRECT_MESSAGE_CHARS characters.")
+            return
+        }
         viewModelScope.launch {
-            if (!socialRepository.sendMessage(convId, content)) {
-                showToast("Message could not be sent. Check your connection and friendship status.")
+            if (!socialRepository.sendMessage(convId, trimmed)) {
+                showToast("Message could not be sent. Check your connection and try again.")
             }
         }
     }

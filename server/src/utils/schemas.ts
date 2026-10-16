@@ -92,7 +92,7 @@ export const UpdateMediaSchema = z.object({
 export const SendMessageSchema = z.object({
   roomId: z.string().trim().max(100).optional(),
   conversationId: z.string().trim().max(100).optional(),
-  text: z.string().trim().max(2000, 'Message cannot exceed 2000 characters').optional(),
+  text: z.string().trim().max(500, 'Message cannot exceed 500 characters').optional(),
   mediaUrl: z.string().trim().max(500).optional(),
   messageType: z.enum(['text', 'media', 'system']).default('text'),
   isSpoiler: z.boolean().optional().default(false),

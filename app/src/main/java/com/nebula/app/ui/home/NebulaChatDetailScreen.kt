@@ -611,7 +611,16 @@ fun NebulaChatDetailScreen(
                     cursorBrush = SolidColor(theme.colors.primaryAccent),
                     singleLine = true,
                     decorationBox = { innerTextField ->
-                        if (inputText.isEmpty()) {
+                        if (inputText.length > MAX_DIRECT_MESSAGE_CHARS) {
+                            Text(
+                                text = "${inputText.length}/$MAX_DIRECT_MESSAGE_CHARS",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.errorColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        } else if (inputText.isEmpty()) {
                             Text(
                                 text = if (editingMessage != null) "Edit message..." else "Message...",
                                 style = theme.typography.bodyMedium.copy(
@@ -631,12 +640,12 @@ fun NebulaChatDetailScreen(
                         .clip(CircleShape)
                         .background(
                             when {
-                                inputText.isBlank() -> theme.colors.surfaceElevated
+                                inputText.isBlank() || inputText.length > MAX_DIRECT_MESSAGE_CHARS -> theme.colors.surfaceElevated
                                 editingMessage != null -> theme.colors.successColor
                                 else -> theme.colors.primaryAccent
                             }
                         )
-                        .clickable(enabled = inputText.isNotBlank()) {
+                        .clickable(enabled = inputText.isNotBlank() && inputText.length <= MAX_DIRECT_MESSAGE_CHARS) {
                             val editing = editingMessage
                             if (editing != null) {
                                 onEditMessage(editing.id, inputText.trim())
@@ -1158,3 +1167,6 @@ private fun CountdownAction(
         }
     }
 }
+
+/** Hard ceiling for a direct message body, mirrored by the server schema. */
+internal const val MAX_DIRECT_MESSAGE_CHARS = 500

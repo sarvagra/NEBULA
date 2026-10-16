@@ -856,6 +856,35 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Direct message text is capped at 500 characters', async () => {
+    await FriendshipModel.findOneAndUpdate(
+      { requesterId: validUserPayload.id, recipientId: bobUserPayload.id },
+      { $set: { status: 'accepted' } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
+    const atLimit = await makeRequest('/api/v1/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+      body: JSON.stringify({ conversationId: validUserPayload.id, text: 'a'.repeat(500) }),
+    });
+    if (atLimit.status !== 201) throw new Error(`A 500-character message must send, got ${atLimit.status}`);
+
+    const overLimit = await makeRequest('/api/v1/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobToken}` },
+      body: JSON.stringify({ conversationId: validUserPayload.id, text: 'b'.repeat(501) }),
+    });
+    if (overLimit.status !== 400) throw new Error(`A 501-character message must be rejected with 400, got ${overLimit.status}`);
+    const overJson = (await overLimit.json()) as any;
+    if (!String(overJson.error || '').toLowerCase().includes('500')) {
+      throw new Error(`Over-length rejection did not name the limit: ${JSON.stringify(overJson.error)}`);
+    }
+
+    const stored = await MessageModel.countDocuments({ senderId: bobUserPayload.id, text: 'b'.repeat(501) });
+    if (stored !== 0) throw new Error('An over-length message was persisted anyway');
+  });
+
   await assertTest('Chat upload limits use actual bytes and enforce the video size cap', async () => {
     const oversizedImage = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
     const imageRes = await makeRequest('/api/v1/chat/upload', {
@@ -966,7 +995,8 @@ async function runSecurityTests() {
       if (prefsJson.data?.policy?.cooldownHours !== 72) throw new Error('Cadence policy was not exposed');
 
       // The sweep must never touch a user without consent.
-      const drySweep = await runReengagementSweep(new Date(), { dryRun: true });
+      const daytime = new Date(); daytime.setHours(15, 0, 0, 0);
+      const drySweep = await runReengagementSweep(daytime, { dryRun: true });
       if (drySweep.considered !== 2) {
         throw new Error(`Sweep considered ${drySweep.considered} accounts; only the 2 opted-in ones are eligible`);
       }

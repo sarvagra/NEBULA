@@ -13,9 +13,12 @@ export function validateBody<T>(schema: ZodSchema<T>) {
       next();
     } catch (err: any) {
       if (err instanceof ZodError) {
+        // Lead with the concrete field message so clients can show the real reason
+        // ("Message cannot exceed 500 characters") instead of a generic failure.
+        const firstMessage = err.errors[0]?.message;
         res.status(400).json({
           success: false,
-          error: 'Validation failed',
+          error: firstMessage || 'Validation failed',
           details: err.errors.map((e) => ({
             field: e.path.join('.'),
             message: e.message,
