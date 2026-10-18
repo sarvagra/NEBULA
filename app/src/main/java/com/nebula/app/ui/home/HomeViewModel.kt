@@ -1178,8 +1178,10 @@ class HomeViewModel(
         viewModelScope.launch {
             delay(2200)
             if (_uiState.value.activeModalSheet != ActiveModalSheet.Notifications) return@launch
+            // Anything the user has had on screen counts as seen, whether or not
+            // it was already read. Actions on friend requests stay put.
             val seen = _uiState.value.notifications.filter {
-                !it.isRead && it.type != NotificationType.FRIEND_REQUEST
+                it.type != NotificationType.FRIEND_REQUEST
             }
             for (notif in seen) {
                 val marked = com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)
