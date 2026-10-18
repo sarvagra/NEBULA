@@ -11,6 +11,9 @@ import com.nebula.app.data.backend.NebulaApiClient.ApiResponse
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
@@ -181,8 +184,17 @@ class SocialRepositoryImpl(
         if (friends is ApiResponse.Success) {
             val friendUsers = parseUsers(friends.data)
             _friends.value = attachRoomPresence(friendUsers)
+            // One round-trip per friend, but issued concurrently: the previous
+            // sequential loop made the Chats list wait on every friend in turn.
+            val histories: Map<String, ApiResponse<JSONArray>> = coroutineScope {
+                _friends.value.map { friend ->
+                    async(kotlinx.coroutines.Dispatchers.IO) {
+                        friend.id to apiClient.getConversationMessages(friend.id)
+                    }
+                }.awaitAll().toMap()
+            }
             _conversations.value = _friends.value.map { friend ->
-                val history = apiClient.getConversationMessages(friend.id)
+                val history = histories[friend.id]
                 val messages = if (history is ApiResponse.Success) buildList {
                     for (index in 0 until history.data.length()) {
                         history.data.optJSONObject(index)?.let { add(messageFromJson(it, friend.id)) }
@@ -197,7 +209,7 @@ class SocialRepositoryImpl(
                     partnerUser = friend,
                     participants = listOf(NebulaUser.CurrentUser, friend),
                     lastMessageText = latest?.content ?: "",
-                    lastMessageTime = if (latest != null) "Recent" else "",
+                    lastMessageTime = latest?.let { compactTimeLabel(it.timestamp) } ?: "",
                     unreadCount = unread,
                     messages = messages,
                 )
@@ -209,6 +221,24 @@ class SocialRepositoryImpl(
         if (requests is ApiResponse.Success) {
             _friendRequests.value = parseRequests(requests.data)
         }
+    }
+
+    /** Chat-list timestamp: time for today, "Yesterday", else a short date. */
+    private fun compactTimeLabel(timestampMs: Long): String {
+        val message = java.util.Calendar.getInstance().apply { timeInMillis = timestampMs }
+        val today = java.util.Calendar.getInstance()
+        val sameDay = message.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+            message.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+        if (sameDay) {
+            return java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(timestampMs))
+        }
+        val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+        val isYesterday = message.get(java.util.Calendar.YEAR) == yesterday.get(java.util.Calendar.YEAR) &&
+            message.get(java.util.Calendar.DAY_OF_YEAR) == yesterday.get(java.util.Calendar.DAY_OF_YEAR)
+        if (isYesterday) return "Yesterday"
+        return java.text.SimpleDateFormat("dd/MM", java.util.Locale.getDefault())
+            .format(java.util.Date(timestampMs))
     }
 
     private suspend fun attachRoomPresence(users: List<NebulaUser>): List<NebulaUser> {
@@ -324,7 +354,7 @@ class SocialRepositoryImpl(
         return ChatMessage(
             id = item.optString("id"),
             role = if (item.optString("senderId") == partnerId) MessageRole.ASSISTANT else MessageRole.USER,
-            content = item.optString("text"), timeLabel = "Recent",
+            content = item.optString("text"), timeLabel = "",
             timestamp = item.optString("createdAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrDefault(System.currentTimeMillis()) } ?: System.currentTimeMillis(),
             senderId = item.optString("senderId"), senderName = item.optString("senderName"),
             senderAvatarUrl = item.optString("senderAvatarUrl").ifBlank { null },

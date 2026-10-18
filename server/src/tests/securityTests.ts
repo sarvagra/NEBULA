@@ -912,6 +912,49 @@ async function runSecurityTests() {
     if (videoRes.status !== 413) throw new Error(`Video over 30MB should fail 413, got ${videoRes.status}`);
   });
 
+  await assertTest('Basic account edits unrelated fields while its presence stays offline', async () => {
+    const userId = '507f1f77bcf86cd7994390d4';
+    const token = jwt.sign({ ...validUserPayload, id: userId, username: 'presence_free' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    try {
+      // A Basic account can end up with a non-dynamic presence (e.g. after a
+      // downgrade). Saving a name/bio/banner must still work.
+      await UserModel.create({
+        _id: userId,
+        username: 'presence_free',
+        displayName: 'Presence Free',
+        tier: 'free',
+        status: 'offline',
+        bio: 'old bio',
+      });
+
+      const editOtherFields = await makeRequest('/api/v1/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ displayName: 'Renamed Free', bio: 'new bio', bannerIndex: 2, interests: ['music'] }),
+      });
+      if (editOtherFields.status !== 200) {
+        throw new Error(`Editing unrelated fields on a Basic account failed with ${editOtherFields.status}`);
+      }
+      const after = await UserModel.findById(userId).select('displayName bio bannerIndex status');
+      if (after?.displayName !== 'Renamed Free' || after?.bio !== 'new bio' || after?.bannerIndex !== 2) {
+        throw new Error('Unrelated profile fields were not persisted');
+      }
+      if (after?.status !== 'offline') {
+        throw new Error('Presence changed even though it was not part of the request');
+      }
+
+      // Explicitly re-asserting a gated presence is still refused.
+      const gated = await makeRequest('/api/v1/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'offline' }),
+      });
+      if (gated.status !== 403) throw new Error(`Basic offline should still be 403, got ${gated.status}`);
+    } finally {
+      await UserModel.deleteOne({ _id: userId });
+    }
+  });
+
   await assertTest('Entitlement matrix isolates Basic, Premium, and Premium Plus server rules', async () => {
     const gateUserId = '507f1f77bcf86cd799439055';
     const gateToken = jwt.sign({ ...validUserPayload, id: gateUserId, username: 'test_gates' }, config.auth.jwtSecret, { expiresIn: '1h' });

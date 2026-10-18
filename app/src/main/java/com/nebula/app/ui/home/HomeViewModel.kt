@@ -875,12 +875,18 @@ class HomeViewModel(
                 return@launch
             }
 
+            // Only send the tier-gated presence fields when they actually changed.
+            // Otherwise an untouched "offline" value blocks every other edit on a
+            // Basic account, which is exactly what users were hitting.
+            val current = _uiState.value.userProfile
+            val statusChanged = !status.equals(current.status, ignoreCase = true)
+            val customStatusChanged = customStatus != current.customStatus
             val apiRes = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
                 displayName = displayName,
                 username = cleanUsername,
                 bio = bio,
-                status = status,
-                customStatus = customStatus,
+                status = if (statusChanged) status else null,
+                customStatus = if (customStatusChanged) customStatus else null,
                 bannerIndex = bannerIndex,
                 interests = interests,
                 avatarUrl = avatarUrl,

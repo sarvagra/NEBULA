@@ -399,7 +399,7 @@ object NebulaApiClient {
         displayName: String,
         username: String? = null,
         bio: String = "",
-        status: String = "dynamic",
+        status: String? = null,
         customStatus: String? = null,
         bannerIndex: Int = 0,
         interests: List<String> = emptyList(),
@@ -417,12 +417,16 @@ object NebulaApiClient {
                 put("username", clean)
             }
             put("bio", bio)
-            put("status", when (status.trim().lowercase()) {
-                "online", "dynamic" -> "dynamic"
-                "offline" -> "offline"
-                "custom" -> "custom"
-                else -> "dynamic"
-            })
+            // Omitted unless the user actually edits presence settings, so a
+            // free-tier account can still save its name, bio, banner and avatar.
+            status?.let { raw ->
+                put("status", when (raw.trim().lowercase()) {
+                    "online", "dynamic" -> "dynamic"
+                    "offline" -> "offline"
+                    "custom" -> "custom"
+                    else -> "dynamic"
+                })
+            }
             customStatus?.let { put("customStatus", it) }
             put("bannerIndex", bannerIndex)
             put("interests", JSONArray(interests))

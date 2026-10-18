@@ -2,6 +2,7 @@ package com.nebula.app.ui.home
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import kotlinx.coroutines.launch
@@ -10,6 +11,8 @@ import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,6 +66,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -106,6 +110,14 @@ fun NebulaChatDetailScreen(
 ) {
     val theme = Theme.current
     var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var showTimestamps by remember { mutableStateOf(false) }
+    // A finished upload waits here until the user confirms spoiler state and sends.
+    var pendingMediaUrl by remember { mutableStateOf<String?>(null) }
+    var pendingMediaMime by remember { mutableStateOf("image/jpeg") }
+    var pendingMediaIsVideo by remember { mutableStateOf(false) }
+    var pendingSpoiler by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var timestampRevealJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var inputText by remember { mutableStateOf("") }
     val composerFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // Editing re-uses the composer instead of spawning a dialog: the text comes
@@ -281,7 +293,27 @@ fun NebulaChatDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 14.dp)
+                    .pointerInput(conversation.id) {
+                        // Instagram-style peek: sliding left uncovers the per-message
+                        // time without permanently occupying space under every bubble.
+                        var dragged = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragged = 0f },
+                            onDragEnd = {
+                                if (dragged < -48f) {
+                                    showTimestamps = true
+                                    timestampRevealJob?.cancel()
+                                    timestampRevealJob = scope.launch {
+                                        kotlinx.coroutines.delay(2600)
+                                        showTimestamps = false
+                                    }
+                                }
+                                dragged = 0f
+                            },
+                            onHorizontalDrag = { _, delta -> dragged += delta }
+                        )
+                    },
                 contentPadding = PaddingValues(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -309,6 +341,7 @@ fun NebulaChatDetailScreen(
                             isGroupedWithNext = !endsGroup,
                             // Receipts belong to the newest message the user sent only.
                             showsReceipt = message.id == lastOwnMessageId,
+                            showTimestamp = showTimestamps,
                             onEdit = { editingMessage = message },
                             onUnsend = { onUnsendMessage(message.id) }
                         )
@@ -349,7 +382,11 @@ fun NebulaChatDetailScreen(
                             when (val res = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(dataUrl, "image/gif", "gif", bytes.size.toLong()) { uploadProgress = it }) {
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
                                     val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
-                                    if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, "image/gif")
+                                    if (mediaUrl.isNotBlank()) {
+                                        pendingMediaUrl = mediaUrl
+                                        pendingMediaMime = "image/gif"
+                                        pendingMediaIsVideo = false
+                                    }
                                     else android.widget.Toast.makeText(context, "GIF upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                                 }
                                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
@@ -379,8 +416,11 @@ fun NebulaChatDetailScreen(
                         )) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
                                 val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
-                                if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
-                                else android.widget.Toast.makeText(context, "Image upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
+                                if (mediaUrl.isNotBlank()) {
+                                    pendingMediaUrl = mediaUrl
+                                    pendingMediaMime = mimeType
+                                    pendingMediaIsVideo = false
+                                } else android.widget.Toast.makeText(context, "Image upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                             }
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
                                 android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
@@ -435,8 +475,11 @@ fun NebulaChatDetailScreen(
                         when (res) {
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
                                 val mediaUrl = res.data.optJSONObject("data")?.optString("mediaUrl").orEmpty().ifBlank { res.data.optString("mediaUrl") }
-                                if (mediaUrl.isNotBlank()) onSendAttachment("", mediaUrl, "media", attachmentIsSpoiler, mimeType)
-                                else android.widget.Toast.makeText(context, "Video upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
+                                if (mediaUrl.isNotBlank()) {
+                                    pendingMediaUrl = mediaUrl
+                                    pendingMediaMime = mimeType
+                                    pendingMediaIsVideo = true
+                                } else android.widget.Toast.makeText(context, "Video upload returned no saved file", android.widget.Toast.LENGTH_LONG).show()
                             }
                             is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
                                 android.widget.Toast.makeText(context, res.message, android.widget.Toast.LENGTH_LONG).show()
@@ -525,6 +568,85 @@ fun NebulaChatDetailScreen(
                         .fillMaxHeight()
                         .background(theme.colors.successColor)
                 )
+            }
+        }
+
+        // Upload finished: show what will be sent, let the user set the spoiler,
+        // then send deliberately. Previously the file was dispatched the instant
+        // the upload completed.
+        pendingMediaUrl?.let { mediaUrl ->
+            androidx.compose.material3.Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = theme.colors.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder)
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (pendingMediaIsVideo) "Video ready to send" else "Photo ready to send",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = "Cancel",
+                            modifier = Modifier.clickable {
+                                pendingMediaUrl = null
+                                pendingSpoiler = false
+                            },
+                            style = theme.typography.caption.copy(color = theme.colors.textSecondary)
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Hide as spoiler",
+                            style = theme.typography.caption.copy(color = theme.colors.textPrimary, fontSize = 12.sp)
+                        )
+                        androidx.compose.material3.Switch(
+                            checked = pendingSpoiler,
+                            onCheckedChange = { pendingSpoiler = it },
+                            modifier = Modifier.scale(0.8f),
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedThumbColor = theme.colors.onPrimaryAccent,
+                                checkedTrackColor = theme.colors.primaryAccent,
+                                uncheckedThumbColor = theme.colors.textSecondary,
+                                uncheckedTrackColor = theme.colors.surfaceElevated,
+                                uncheckedBorderColor = theme.colors.surfaceBorder
+                            )
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(theme.colors.primaryAccent)
+                                .clickable {
+                                    onSendAttachment(
+                                        "",
+                                        mediaUrl,
+                                        if (pendingMediaIsVideo) "video" else "media",
+                                        pendingSpoiler,
+                                        pendingMediaMime
+                                    )
+                                    pendingMediaUrl = null
+                                    pendingSpoiler = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                "Send",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.onPrimaryAccent,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -766,12 +888,15 @@ private fun ModernChatBubble(
     isGroupedWithPrevious: Boolean,
     isGroupedWithNext: Boolean,
     showsReceipt: Boolean,
+    showTimestamp: Boolean,
     onEdit: () -> Unit,
     onUnsend: () -> Unit
 ) {
     var showActions by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
+    val isMediaMessage = message.deletedAt == null &&
+        (message.mediaUrl != null || message.messageType == "media" || message.messageType == "video")
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
     var videoStarted by remember(message.id) { mutableStateOf(false) }
     var videoPrepared by remember(message.id) { mutableStateOf(false) }
@@ -844,18 +969,27 @@ private fun ModernChatBubble(
                         bottomEnd = if (isMe) 4.dp else 16.dp
                     )
                 )
-                .background(if (isMe) theme.colors.primaryAccent else theme.colors.surface)
-                .border(
-                    width = 1.dp,
-                    color = if (isMe) Color.Transparent else theme.colors.surfaceBorder,
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isMe) 16.dp else 4.dp,
-                        bottomEnd = if (isMe) 4.dp else 16.dp
+                .then(
+                    if (isMediaMessage) Modifier
+                    else Modifier.background(if (isMe) theme.colors.primaryAccent else theme.colors.surface)
+                )
+                .then(
+                    if (isMediaMessage) Modifier
+                    else Modifier.border(
+                        width = 1.dp,
+                        color = if (isMe) Color.Transparent else theme.colors.surfaceBorder,
+                        shape = RoundedCornerShape(
+                            topStart = 16.dp,
+                            topEnd = 16.dp,
+                            bottomStart = if (isMe) 16.dp else 4.dp,
+                            bottomEnd = if (isMe) 4.dp else 16.dp
+                        )
                     )
                 )
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(
+                    horizontal = if (isMediaMessage) 0.dp else 14.dp,
+                    vertical = if (isMediaMessage) 0.dp else 10.dp
+                )
         ) {
             val isMedia = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
             if (isMedia) {
@@ -921,8 +1055,40 @@ private fun ModernChatBubble(
                                 modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                 loading = {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("Loading image…", color = if (isMe) Color.White else theme.colors.textSecondary, fontSize = 12.sp)
+                                    // Real loading feedback: a shimmering sweep plus an
+                                    // indeterminate spinner, so a slow image is visibly
+                                    // working rather than looking stuck.
+                                    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "img-load")
+                                    val shimmer by transition.animateFloat(
+                                        initialValue = 0f,
+                                        targetValue = 1f,
+                                        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                                            animation = androidx.compose.animation.core.tween(1100),
+                                            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+                                        ),
+                                        label = "shimmer"
+                                    )
+                                    Box(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        theme.colors.surfaceElevated.copy(alpha = 0.55f),
+                                                        theme.colors.surfaceBorder.copy(alpha = 0.75f),
+                                                        theme.colors.surfaceElevated.copy(alpha = 0.55f)
+                                                    ),
+                                                    startX = shimmer * 900f - 450f,
+                                                    endX = shimmer * 900f + 450f
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            modifier = Modifier.size(22.dp),
+                                            strokeWidth = 2.dp,
+                                            color = theme.colors.primaryAccent
+                                        )
                                     }
                                 },
                                 error = {
@@ -1004,13 +1170,19 @@ private fun ModernChatBubble(
             }
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
-
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showTimestamp,
+            enter = androidx.compose.animation.fadeIn() +
+                androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.fadeOut() +
+                androidx.compose.animation.shrinkVertically()
+        ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(top = 2.dp)
         ) {
-            // Real clock time, not a relative "Recent"/"Just now" label.
+            // Revealed by sliding the thread; hidden otherwise to keep it clean.
             Text(
                 text = message.timestamp.clockLabel(),
                 style = theme.typography.caption.copy(
@@ -1028,6 +1200,7 @@ private fun ModernChatBubble(
                     modifier = Modifier.size(12.dp)
                 )
             }
+        }
         }
         if (showActions) {
             MessageActionSheet(
