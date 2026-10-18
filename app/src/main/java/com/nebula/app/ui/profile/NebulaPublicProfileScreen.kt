@@ -284,10 +284,6 @@ fun NebulaPublicProfileScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                text = "Friends ${user.friendsCount?.toString() ?: "Private"} · Joined ${user.roomsJoinedCount} · Hosted ${user.roomsHostedCount}",
-                                style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp)
-                            )
                         }
 
                         // Presence Badge Pill (supports custom text up to 8 chars for premium, defaults like online/offline)

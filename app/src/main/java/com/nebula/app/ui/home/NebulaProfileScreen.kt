@@ -281,83 +281,6 @@ fun NebulaProfileScreen(
                             )
                         }
 
-                        // Stats strip positioned neatly on card surface
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 16.dp)
-                                .offset(y = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            // Friends stat
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(onClick = onNavigateFriends)
-                                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (isFriendCountPublic) "$friendsCount" else "—",
-                                    style = theme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = theme.colors.textPrimary
-                                    )
-                                )
-                                Text(
-                                    text = "Friends",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                )
-                            }
-
-                            // Rooms Joined stat
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "${user.roomsJoinedCount}",
-                                    style = theme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = theme.colors.textPrimary
-                                    )
-                                )
-                                Text(
-                                    text = "Joined",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                )
-                            }
-
-                            // Rooms Hosted stat
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "${user.roomsHostedCount}",
-                                    style = theme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = theme.colors.textPrimary
-                                    )
-                                )
-                                Text(
-                                    text = "Hosted",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                )
-                            }
-                        }
                     }
 
                     // Display Name + Handle underneath + Bio with clean breathing room
@@ -562,28 +485,6 @@ fun NebulaProfileScreen(
                             )
                         }
                     } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(10.dp)
-                                .clip(RoundedCornerShape(5.dp))
-                        ) {
-                            Box(modifier = Modifier.weight(user.roomsJoinedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(theme.colors.primaryAccent))
-                            Box(modifier = Modifier.weight(user.roomsHostedCount.toFloat().coerceAtLeast(0.01f)).fillMaxSize().background(theme.colors.secondaryAccent))
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(theme.colors.primaryAccent))
-                                Text("Joined ${user.roomsJoinedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(theme.colors.secondaryAccent))
-                                Text("Hosted ${user.roomsHostedCount}", style = theme.typography.caption.copy(fontSize = 10.5.sp, color = theme.colors.textSecondary))
-                            }
-                        }
                     }
                 }
 
