@@ -124,12 +124,14 @@ fun LiquidGlassProfileOverlay(
                 // Liquid-glass backdrop, layer 1+2: the translucent theme scrim
                 // token dims whatever is behind the overlay, and a theme-tinted
                 // vertical vignette adds depth without ever going fully opaque.
-                .background(theme.colors.overlayScrim)
+                // Fully opaque themed backdrop: the overlay is a screen, not a
+                // translucent sheet, so nothing underneath may bleed through.
+                .background(theme.colors.background)
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            theme.colors.background.copy(alpha = if (theme.colors.isDark) 0.42f else 0.26f),
-                            theme.colors.background.copy(alpha = if (theme.colors.isDark) 0.78f else 0.58f)
+                            theme.colors.background,
+                            theme.colors.background.copy(alpha = 0.96f)
                         )
                     )
                 )
@@ -217,9 +219,10 @@ fun LiquidGlassProfileOverlay(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                // Guarantees the banner-backed card has real presence
-                                // even when the profile has no bio or stats.
-                                .heightIn(min = 210.dp)
+                                // The banner is the card background, so it takes the
+                                // card's full height instead of stopping at a fixed
+                                // strip (which left a visible horizontal seam).
+                                .heightIn(min = 260.dp)
                         ) {
                             ProfileOverlayBanner(
                                 bannerUrl = userProfile.bannerUrl,
@@ -624,7 +627,17 @@ private fun ProfileOverlayBanner(
         NebulaBannerPalettes[bannerIndex.coerceIn(0, NebulaBannerPalettes.lastIndex)]
     }
 
-    Box(modifier = modifier.background(Brush.horizontalGradient(palette))) {
+    // Vertical gradient across the whole card: the previous horizontal band left a
+    // hard seam where it stopped, which looked like a broken header image.
+    Box(
+        modifier = modifier.background(
+            Brush.verticalGradient(
+                colors = palette + listOf(palette.last().copy(alpha = 0.85f)),
+                startY = 0f,
+                endY = Float.POSITIVE_INFINITY
+            )
+        )
+    ) {
         if (!bannerUrl.isNullOrBlank()) {
             val base64Bitmap = remember(bannerUrl) { decodeBase64Image(bannerUrl) }
             if (base64Bitmap != null) {
