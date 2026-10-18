@@ -14,11 +14,10 @@ import androidx.compose.ui.draw.clip
 
 @Composable
 fun NebulaLogo(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color.Black)
-    ) {
+    // No extra black wrapper: the dark disc is part of the mark itself (see
+    // ic_launcher_foreground.xml), so the splash icon and this composable render
+    // the same shape at the same proportions.
+    Box(modifier = modifier) {
         Canvas(Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
             val radius = size.minDimension * 0.42f

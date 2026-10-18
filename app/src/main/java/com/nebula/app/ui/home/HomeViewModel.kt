@@ -109,9 +109,16 @@ class HomeViewModel(
                                     NotificationType.ROOM_INVITE, NotificationType.ROOM_STARTED -> "Open"
                                     NotificationType.NOTICE -> null
                                 }
+                                val actor = item.optJSONObject("actor")
                                 NebulaNotification(
                                     id = item.optString("id"),
                                     type = type,
+                                    actorName = actor?.optString("displayName")?.ifBlank { null },
+                                    actorAvatarUrl = actor?.optString("avatarUrl")?.ifBlank { null },
+                                    actorAvatarLetter = actor?.optString("avatarLetter")?.ifBlank { "U" } ?: "U",
+                                    createdAtMs = item.optString("createdAt").takeIf { it.isNotBlank() }
+                                        ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+                                        ?: System.currentTimeMillis(),
                                     title = item.optString("title"),
                                     subtitle = item.optString("body"),
                                     timeLabel = "Recent",
@@ -1139,6 +1146,30 @@ class HomeViewModel(
     fun onOpenNotifications() {
         _uiState.value = _uiState.value.copy(activeModalSheet = ActiveModalSheet.Notifications)
         refreshAll(showIndicator = false)
+        markVisibleNotificationsSeen()
+    }
+
+    /**
+     * Seen notifications clear themselves: once the sheet has been open long
+     * enough for a row to be read, it is marked read and dropped from the list.
+     * Friend requests stay because they are still actionable.
+     */
+    private fun markVisibleNotificationsSeen() {
+        viewModelScope.launch {
+            delay(2200)
+            if (_uiState.value.activeModalSheet != ActiveModalSheet.Notifications) return@launch
+            val seen = _uiState.value.notifications.filter {
+                !it.isRead && it.type != NotificationType.FRIEND_REQUEST
+            }
+            for (notif in seen) {
+                val marked = com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)
+                if (marked is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                    _uiState.value = _uiState.value.copy(
+                        notifications = _uiState.value.notifications.filterNot { it.id == notif.id }
+                    )
+                }
+            }
+        }
     }
 
 

@@ -9,6 +9,18 @@ import {
   runReengagementSweep,
 } from '../../services/reengagementService';
 
+function notificationPrefsDTO(user: any) {
+  const defaults = {
+    emailUpdates: false,
+    promotions: false,
+    textUpdates: true,
+    invites: true,
+    friendRequests: true,
+    directMessages: true,
+  };
+  return { ...defaults, ...(user.notificationPrefs || {}) };
+}
+
 function preferencesDTO(user: {
   reengagementOptIn?: boolean;
   reengagementOptInAt?: Date;
@@ -33,9 +45,10 @@ function preferencesDTO(user: {
 export async function getReengagementPreferences(req: Request, res: Response): Promise<void> {
   try {
     if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
-    const user = await UserModel.findById(req.user.id).select('reengagementOptIn reengagementOptInAt reengagementLastSentAt');
+    const user = await UserModel.findById(req.user.id)
+      .select('reengagementOptIn reengagementOptInAt reengagementLastSentAt notificationPrefs');
     if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
-    res.json({ success: true, data: preferencesDTO(user) });
+    res.json({ success: true, data: { ...preferencesDTO(user), categories: notificationPrefsDTO(user) } });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to read re-engagement preferences' });
   }
@@ -98,5 +111,47 @@ export async function runReengagementNow(req: Request, res: Response): Promise<v
     res.json({ success: true, data: { ...result, dryRun } });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to run the re-engagement sweep' });
+  }
+}
+
+const NOTIFICATION_CATEGORY_KEYS = [
+  'emailUpdates',
+  'promotions',
+  'textUpdates',
+  'invites',
+  'friendRequests',
+  'directMessages',
+] as const;
+
+/** PUT /notifications/preferences — per-category notification consent. */
+export async function updateNotificationPreferences(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
+    const incoming = req.body?.categories;
+    if (!incoming || typeof incoming !== 'object') {
+      res.status(400).json({ success: false, error: 'categories object is required' });
+      return;
+    }
+
+    const update: Record<string, boolean> = {};
+    for (const key of NOTIFICATION_CATEGORY_KEYS) {
+      if (typeof incoming[key] === 'boolean') update[`notificationPrefs.${key}`] = incoming[key];
+    }
+    if (Object.keys(update).length === 0) {
+      res.status(400).json({ success: false, error: 'No valid notification categories were provided' });
+      return;
+    }
+
+    const updated = await UserModel.findByIdAndUpdate(req.user.id, { $set: update }, { new: true })
+      .select('reengagementOptIn reengagementOptInAt reengagementLastSentAt notificationPrefs');
+    if (!updated) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+
+    res.json({
+      success: true,
+      message: 'Notification preferences updated',
+      data: { ...preferencesDTO(updated), categories: notificationPrefsDTO(updated) },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to update notification preferences' });
   }
 }

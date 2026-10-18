@@ -99,13 +99,17 @@ fun NebulaSettingsScreen(
     // is the only thing that turns it on.
     var reengagementOptIn by remember { mutableStateOf(false) }
     var reengagementLoading by remember { mutableStateOf(true) }
+    // Per-category notification consent, loaded with the re-engagement flag.
+    var notificationCategories by remember { mutableStateOf<org.json.JSONObject?>(null) }
     var reengagementUpdating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         when (val res = NebulaApiClient.getReengagementPreferences()) {
             is NebulaApiClient.ApiResponse.Success -> {
-                reengagementOptIn = res.data.optJSONObject("data")?.optBoolean("optIn", false) ?: false
+                val data = res.data.optJSONObject("data")
+                reengagementOptIn = data?.optBoolean("optIn", false) ?: false
+                notificationCategories = data?.optJSONObject("categories")
             }
             is NebulaApiClient.ApiResponse.Error -> Unit
         }
@@ -249,6 +253,52 @@ fun NebulaSettingsScreen(
                     )
 
                     SettingsDivider()
+
+                    // 6b. Per-category notification consent. Every row is opt-in
+                    // and persisted server-side; re-engagement above is one of them.
+                    val categorySpecs = listOf(
+                        Triple("directMessages", "Direct messages", "Alerts when someone messages you"),
+                        Triple("friendRequests", "Friend requests", "Alerts for new friend requests"),
+                        Triple("invites", "Room invites", "Alerts when you are invited to a room"),
+                        Triple("textUpdates", "Text updates", "Important account and safety notices"),
+                        Triple("emailUpdates", "Email updates", "Occasional account emails"),
+                        Triple("promotions", "Promotions", "Offers and product news")
+                    )
+                    categorySpecs.forEach { (key, label, description) ->
+                        val categories = notificationCategories
+                        val checked = categories?.optBoolean(key, key == "textUpdates") ?: (key == "textUpdates")
+                        SettingToggleRow(
+                            icon = Icons.Default.NotificationsNone,
+                            title = label,
+                            subtitle = description,
+                            checked = checked,
+                            enabled = categories != null && !reengagementUpdating,
+                            onCheckedChange = { next ->
+                                val current = notificationCategories ?: org.json.JSONObject()
+                                current.put(key, next)
+                                notificationCategories = current
+                                scope.launch {
+                                    when (val res = NebulaApiClient.updateNotificationPreferences(org.json.JSONObject().apply { put(key, next) })) {
+                                        is NebulaApiClient.ApiResponse.Success -> {
+                                            notificationCategories =
+                                                res.data.optJSONObject("data")?.optJSONObject("categories") ?: current
+                                            Toast.makeText(
+                                                context,
+                                                "$label ${if (next) "on" else "off"}",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                        is NebulaApiClient.ApiResponse.Error -> {
+                                            current.put(key, !next)
+                                            notificationCategories = current
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                        SettingsDivider()
+                    }
 
                     // 7. About
                     SettingNavRow(

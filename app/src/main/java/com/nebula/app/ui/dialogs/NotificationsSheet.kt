@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.NebulaNotification
 import com.nebula.app.domain.model.NotificationType
 import com.nebula.app.theme.Theme
+import com.nebula.app.ui.components.NebulaAvatarImage
 import com.nebula.app.ui.components.PABottomSheet
 import kotlin.math.abs
 
@@ -150,6 +151,12 @@ fun NotificationsSheet(
                 .padding(horizontal = 18.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            val dayMs = 24 * 60 * 60 * 1000L
+            val now = System.currentTimeMillis()
+            val pendingRequests = notifications.filter {
+                it.type == NotificationType.FRIEND_REQUEST && now - it.createdAtMs <= dayMs
+            }
+            val feed = notifications.filterNot { it in pendingRequests }
             if (notifications.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -171,7 +178,43 @@ fun NotificationsSheet(
                         .nestedScroll(expandOnScrollConnection),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(notifications, key = { it.id }) { notif ->
+                    if (pendingRequests.isNotEmpty()) {
+                        item(key = "pending-header") {
+                            Text(
+                                text = "REQUESTS",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.1.sp,
+                                    fontSize = 10.5.sp
+                                ),
+                                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+                            )
+                        }
+                        items(pendingRequests, key = { "pending-${it.id}" }) { notif ->
+                            TelegramSwipeableNotificationItem(
+                                notif = notif,
+                                onAccept = { onAcceptNotification(notif) },
+                                onDismiss = { onDismissNotification(notif.id) },
+                                modifier = Modifier.animateItemPlacement()
+                            )
+                        }
+                        if (feed.isNotEmpty()) {
+                            item(key = "feed-header") {
+                                Text(
+                                    text = "EARLIER",
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.textSecondary,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.1.sp,
+                                        fontSize = 10.5.sp
+                                    ),
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    items(feed, key = { it.id }) { notif ->
                         TelegramSwipeableNotificationItem(
                             notif = notif,
                             onAccept = { onAcceptNotification(notif) },
@@ -288,19 +331,28 @@ private fun TelegramSwipeableNotificationItem(
                 NotificationType.NOTICE -> Icons.Default.Info to theme.colors.successColor
             }
 
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(iconTint.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = iconVector,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
+            if (notif.actorName != null) {
+                // Who it came from matters more than the category icon.
+                NebulaAvatarImage(
+                    avatarUrl = notif.actorAvatarUrl,
+                    fallbackLetter = notif.actorAvatarLetter,
+                    modifier = Modifier.size(40.dp)
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(iconTint.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = iconVector,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
             // Notification content. Invitation cards stay minimal: no X / close / dismiss button,

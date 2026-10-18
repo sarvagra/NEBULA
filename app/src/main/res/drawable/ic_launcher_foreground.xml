@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nebula mark. This is the single source of truth for the splash, the launcher
+  icon and (by matching geometry) the in-app NebulaLogo, so opening the app shows
+  one continuous identity instead of two different logos.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Dark disc behind the orb, matching the in-app logo's black wrapper. -->
+    <path
+        android:fillColor="#FF0C0D11"
+        android:pathData="M54,10 A44,44 0 1,0 54,98 A44,44 0 1,0 54,10 Z" />
+    <!-- Purple orb. -->
     <path
         android:fillColor="#FF5B1FA8"
         android:pathData="M54,28 A26,26 0 1,0 54,80 A26,26 0 1,0 54,28 Z" />
+    <!-- Ember grains. -->
     <path android:fillColor="#FFFF6B5E" android:pathData="M42,43 A3,3 0 1,0 42,49 A3,3 0 1,0 42,43 Z" />
     <path android:fillColor="#FFE83D73" android:pathData="M63,37 A2,2 0 1,0 63,41 A2,2 0 1,0 63,37 Z" />
     <path android:fillColor="#FFFF6B5E" android:pathData="M66,59 A3,3 0 1,0 66,65 A3,3 0 1,0 66,59 Z" />
     <path android:fillColor="#FFE83D73" android:pathData="M45,64 A2,2 0 1,0 45,68 A2,2 0 1,0 45,64 Z" />
+    <path android:fillColor="#FFFF6B5E" android:pathData="M54,33 A2.5,2.5 0 1,0 54,38 A2.5,2.5 0 1,0 54,33 Z" />
+    <path android:fillColor="#FFE83D73" android:pathData="M37,55 A2.5,2.5 0 1,0 37,60 A2.5,2.5 0 1,0 37,55 Z" />
+    <path android:fillColor="#FFFF6B5E" android:pathData="M71,47 A2,2 0 1,0 71,51 A2,2 0 1,0 71,47 Z" />
 </vector>

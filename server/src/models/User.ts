@@ -47,6 +47,15 @@ export interface IUser extends Document {
   reengagementOptIn: boolean;
   reengagementOptInAt?: Date;
   reengagementLastSentAt?: { [key: string]: Date };
+  /** Per-category notification preferences, all opt-in and all user-controlled. */
+  notificationPrefs?: {
+    emailUpdates: boolean;
+    promotions: boolean;
+    textUpdates: boolean;
+    invites: boolean;
+    friendRequests: boolean;
+    directMessages: boolean;
+  };
   stats: {
     roomsJoinedCount: number;
     roomsHostedCount: number;
@@ -106,6 +115,14 @@ const UserSchema = new Schema<IUser>(
     reengagementOptIn: { type: Boolean, default: false },
     reengagementOptInAt: { type: Date },
     reengagementLastSentAt: { type: Schema.Types.Mixed, default: {} },
+    notificationPrefs: {
+      emailUpdates: { type: Boolean, default: false },
+      promotions: { type: Boolean, default: false },
+      textUpdates: { type: Boolean, default: true },
+      invites: { type: Boolean, default: true },
+      friendRequests: { type: Boolean, default: true },
+      directMessages: { type: Boolean, default: true },
+    },
     stats: {
       roomsJoinedCount: { type: Number, default: 0 },
       roomsHostedCount: { type: Number, default: 0 },

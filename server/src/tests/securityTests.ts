@@ -1100,6 +1100,51 @@ async function runSecurityTests() {
     }
   });
 
+  await assertTest('Notification categories are user-controlled and validated', async () => {
+    const userId = '507f1f77bcf86cd7994390e5';
+    const token = jwt.sign({ ...validUserPayload, id: userId, username: 'prefs_user' }, config.auth.jwtSecret, { expiresIn: '1h' });
+    try {
+      await UserModel.create({ _id: userId, username: 'prefs_user', displayName: 'Prefs', tier: 'free' });
+
+      const initial = await makeRequest('/api/v1/notifications/reengagement', { headers: { Authorization: `Bearer ${token}` } });
+      if (initial.status !== 200) throw new Error(`Preference read failed with ${initial.status}`);
+      const initialJson = (await initial.json()) as any;
+      const defaults = initialJson.data?.categories;
+      if (!defaults) throw new Error('Category preferences were not returned');
+      if (defaults.emailUpdates !== false || defaults.promotions !== false) {
+        throw new Error('Email and promotions must default to off');
+      }
+
+      const updated = await makeRequest('/api/v1/notifications/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ categories: { emailUpdates: true, promotions: true, invites: false } }),
+      });
+      if (updated.status !== 200) throw new Error(`Preference update failed with ${updated.status}`);
+      const updatedJson = (await updated.json()) as any;
+      if (updatedJson.data?.categories?.emailUpdates !== true || updatedJson.data?.categories?.invites !== false) {
+        throw new Error('Preference update did not persist the requested categories');
+      }
+      const stored = await UserModel.findById(userId).select('notificationPrefs');
+      if (stored?.notificationPrefs?.emailUpdates !== true || stored?.notificationPrefs?.invites !== false) {
+        throw new Error('Preference change was not stored on the user');
+      }
+      // Untouched categories keep their value.
+      if (stored?.notificationPrefs?.directMessages !== true) {
+        throw new Error('An unmentioned category was reset');
+      }
+
+      const bad = await makeRequest('/api/v1/notifications/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ categories: { nonsense: true } }),
+      });
+      if (bad.status !== 400) throw new Error(`Unknown categories should be rejected with 400, got ${bad.status}`);
+    } finally {
+      await UserModel.deleteOne({ _id: userId });
+    }
+  });
+
   await assertTest('Account deletion requires OTP, schedules 30 days out, and a login suspends it', async () => {
     const lifecycleUserId = '507f1f77bcf86cd799439066';
     const lifecycleEmail = 'nebula.lifecycle.test@example.com';

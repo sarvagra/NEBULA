@@ -591,7 +591,13 @@ data class NebulaNotification(
     val timeLabel: String,
     val actionLabel: String? = null,
     val relatedId: String? = null,
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    /** Who caused this notification, so the row can show their avatar. */
+    val actorName: String? = null,
+    val actorAvatarUrl: String? = null,
+    val actorAvatarLetter: String = "U",
+    /** Requests stay pinned in the top section for a day, then join the feed. */
+    val createdAtMs: Long = System.currentTimeMillis()
 ) {
     companion object {
         val SampleNotifications = listOf(

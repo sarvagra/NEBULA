@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationModel } from '../../models/Notification';
 import { UserModel } from '../../models/User';
 import { sendDeviceNotification } from '../../services/pushNotificationService';
+import { resolveStoredObjectUrl } from '../../services/objectStorage';
 
 export async function registerDeviceToken(req: Request, res: Response): Promise<void> {
   try {
@@ -41,9 +42,40 @@ export async function listNotifications(req: Request, res: Response): Promise<vo
       .sort({ createdAt: -1 })
       .limit(limit);
 
+    // Resolve the actor behind each notification so the client can show who sent
+    // it ("Sarvagra S sent you a friend request") instead of a generic icon.
+    const actorIds = new Set<string>();
+    for (const n of notifications) {
+      for (const key of ['requesterId', 'senderId', 'userId', 'fromUserId']) {
+        const value = (n.actionData as any)?.[key];
+        if (typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value)) actorIds.add(value);
+      }
+    }
+    const actors = actorIds.size
+      ? await UserModel.find({ _id: { $in: [...actorIds] } }).select('_id displayName username avatarUrl avatarLetter')
+      : [];
+    const actorById = new Map(actors.map((u) => [u._id.toString(), u]));
+
     res.json({
       success: true,
-      data: notifications.map((n) => n.toJSON()),
+      data: notifications.map((n) => {
+        const json = n.toJSON() as any;
+        const action = (n.actionData || {}) as any;
+        const actorId = ['requesterId', 'senderId', 'userId', 'fromUserId']
+          .map((key) => action[key])
+          .find((value) => typeof value === 'string' && actorById.has(value));
+        if (actorId) {
+          const actor = actorById.get(actorId)!;
+          json.actor = {
+            id: actor._id.toString(),
+            displayName: actor.displayName || actor.username,
+            username: actor.username,
+            avatarUrl: resolveStoredObjectUrl(actor.avatarUrl),
+            avatarLetter: actor.avatarLetter || (actor.username || 'U').charAt(0).toUpperCase(),
+          };
+        }
+        return json;
+      }),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve notifications' });

@@ -507,6 +507,10 @@ object NebulaApiClient {
     suspend fun setReengagementOptIn(optIn: Boolean): ApiResponse<JSONObject> =
         request("/notifications/reengagement", "PUT", JSONObject().put("optIn", optIn))
 
+    /** Per-category notification consent, shown in Settings > Notifications. */
+    suspend fun updateNotificationPreferences(categories: JSONObject): ApiResponse<JSONObject> =
+        request("/notifications/preferences", "PUT", JSONObject().put("categories", categories))
+
     suspend fun getAccountDeletionStatus(): ApiResponse<JSONObject> = request("/users/me/deletion", "GET")
 
     suspend fun requestAccountDeletion(): ApiResponse<JSONObject> = request("/users/me/deletion/request", "POST", JSONObject())

@@ -60,7 +60,24 @@ fun PABottomSheet(
     // System back must dismiss the sheet and leave the screen underneath untouched.
     BackHandler(enabled = isVisible) { onDismissRequest() }
 
-    if (isVisible) {
+    // Animate the whole sheet: backdrop fades, panel slides up on a spring. The
+    // previous version snapped into place with no transition, which read as a jolt.
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(140)) +
+            slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+        exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(120)) +
+            slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = androidx.compose.animation.core.tween(160)
+            )
+    ) {
         Box(
             modifier = modifier
                 .fillMaxSize()

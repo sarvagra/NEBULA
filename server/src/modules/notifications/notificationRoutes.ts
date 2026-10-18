@@ -4,6 +4,7 @@ import {
   getReengagementPreferences,
   updateReengagementPreferences,
   runReengagementNow,
+  updateNotificationPreferences,
 } from './reengagementController';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { validateObjectIdParam } from '../../middlewares/validation';
@@ -19,3 +20,4 @@ notificationRouter.delete('/:id', validateObjectIdParam('id'), authMiddleware, d
 notificationRouter.get('/reengagement', authMiddleware, getReengagementPreferences);
 notificationRouter.put('/reengagement', authMiddleware, updateReengagementPreferences);
 notificationRouter.post('/reengagement/run', authMiddleware, runReengagementNow);
+notificationRouter.put('/preferences', authMiddleware, updateNotificationPreferences);

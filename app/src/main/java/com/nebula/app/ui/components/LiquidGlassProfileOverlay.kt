@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -211,16 +212,33 @@ fun LiquidGlassProfileOverlay(
                         .liquidGlassSurface(RoundedCornerShape(20.dp), theme.colors)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Banner + avatar hero. The avatar is bottom-centred on the
-                        // banner and pushed down by half its own height, so it
-                        // overlaps the banner's bottom edge symmetrically.
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        // Banner fills the entire identity card as its background;
+                        // the avatar and copy sit on top of it.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // Guarantees the banner-backed card has real presence
+                                // even when the profile has no bio or stats.
+                                .heightIn(min = 210.dp)
+                        ) {
                             ProfileOverlayBanner(
                                 bannerUrl = userProfile.bannerUrl,
                                 bannerIndex = userProfile.bannerIndex,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(96.dp)
+                                    .matchParentSize()
+                            )
+
+                            // Legibility scrim: the banner now runs edge to edge, so
+                            // the card copy needs a guaranteed contrast floor.
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0f to theme.colors.background.copy(alpha = 0.15f),
+                                            1f to theme.colors.background.copy(alpha = 0.72f)
+                                        )
+                                    )
                             )
 
                             Box(
@@ -572,7 +590,9 @@ private fun Modifier.liquidGlassSurface(shape: Shape, colors: PAColors): Modifie
 
     return this
         .clip(shape)
-        .background(colors.surface.copy(alpha = 0.72f))
+        // Opaque theme surface: the translucent version let the banner bleed
+        // through the menu rows and looked unreadable next to the rest of the app.
+        .background(colors.surfaceElevated)
         .background(
             Brush.verticalGradient(
                 0.0f to Color.White.copy(alpha = sheenAlpha),
