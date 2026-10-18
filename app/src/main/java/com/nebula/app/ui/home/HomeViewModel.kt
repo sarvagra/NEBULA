@@ -83,6 +83,22 @@ class HomeViewModel(
      * completing an action must not flash a spinner. Only a real pull-to-refresh
      * gesture asks for the indicator.
      */
+    /** "just now" / "12m" / "3h" / "2d" — a real age instead of a fixed label. */
+    private fun relativeNotificationTime(timestampMs: Long): String {
+        val delta = (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
+        val minutes = delta / 60_000
+        val hours = minutes / 60
+        val days = hours / 24
+        return when {
+            minutes < 1 -> "just now"
+            minutes < 60 -> "${minutes}m"
+            hours < 24 -> "${hours}h"
+            days < 7 -> "${days}d"
+            else -> java.text.SimpleDateFormat("dd/MM", java.util.Locale.getDefault())
+                .format(java.util.Date(timestampMs))
+        }
+    }
+
     fun refreshAll(showIndicator: Boolean = false) {
         if (_uiState.value.isRefreshing) return
         viewModelScope.launch {
@@ -121,7 +137,11 @@ class HomeViewModel(
                                         ?: System.currentTimeMillis(),
                                     title = item.optString("title"),
                                     subtitle = item.optString("body"),
-                                    timeLabel = "Recent",
+                                    timeLabel = relativeNotificationTime(
+                                        item.optString("createdAt").takeIf { it.isNotBlank() }
+                                            ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+                                            ?: System.currentTimeMillis()
+                                    ),
                                     actionLabel = actionLabel,
                                     relatedId = action?.optString("friendshipId")?.ifBlank { null }
                                         ?: action?.optString("conversationId")?.ifBlank { null }

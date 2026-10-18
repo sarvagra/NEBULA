@@ -213,37 +213,31 @@ fun LiquidGlassProfileOverlay(
                         .fillMaxWidth()
                         .liquidGlassSurface(RoundedCornerShape(20.dp), theme.colors)
                 ) {
+                    // The banner is the card's background: it spans the full card,
+                    // and the avatar/name/actions are content drawn on top of it.
+                    ProfileOverlayBanner(
+                        bannerUrl = userProfile.bannerUrl,
+                        bannerIndex = userProfile.bannerIndex,
+                        modifier = Modifier.matchParentSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to theme.colors.background.copy(alpha = 0.10f),
+                                    0.45f to theme.colors.background.copy(alpha = 0.25f),
+                                    1f to theme.colors.background.copy(alpha = 0.82f)
+                                )
+                            )
+                    )
+
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Banner fills the entire identity card as its background;
-                        // the avatar and copy sit on top of it.
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                // The banner is the card background, so it takes the
-                                // card's full height instead of stopping at a fixed
-                                // strip (which left a visible horizontal seam).
-                                .heightIn(min = 260.dp)
+                                .heightIn(min = 150.dp)
                         ) {
-                            ProfileOverlayBanner(
-                                bannerUrl = userProfile.bannerUrl,
-                                bannerIndex = userProfile.bannerIndex,
-                                modifier = Modifier
-                                    .matchParentSize()
-                            )
-
-                            // Legibility scrim: the banner now runs edge to edge, so
-                            // the card copy needs a guaranteed contrast floor.
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            0f to theme.colors.background.copy(alpha = 0.15f),
-                                            1f to theme.colors.background.copy(alpha = 0.72f)
-                                        )
-                                    )
-                            )
-
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)

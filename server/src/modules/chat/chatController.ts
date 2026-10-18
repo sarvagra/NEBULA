@@ -409,7 +409,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
           title: req.user.displayName,
           body: notificationBody,
           // The recipient opens the sender's conversation, not their own ID.
-          actionData: { conversationId: req.user.id, messageId: message._id.toString() },
+          actionData: { conversationId: req.user.id, messageId: message._id.toString(), fromUserId: req.user.id },
         });
       } catch (error) {
         console.warn('[DM notification] Could not persist notification:', error instanceof Error ? error.message : 'unknown error');
