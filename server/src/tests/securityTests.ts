@@ -1,4 +1,5 @@
 import http from 'http';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { io as ClientSocket } from 'socket.io-client';
 import { createApp } from '../app';
@@ -13,6 +14,8 @@ import { ProfileAssetModel } from '../models/ProfileAsset';
 import { issueOtp, consumeOtp, clearOtp } from '../modules/auth/authController';
 import { purgeDueAccountDeletions } from '../modules/users/accountLifecycleController';
 import { runReengagementSweep } from '../services/reengagementService';
+import { AuthService } from '../services/authService';
+import { sendAutomatedNotificationEmail } from '../services/emailService';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { resolveStoredObjectUrl } from '../services/objectStorage';
@@ -692,16 +695,16 @@ async function runSecurityTests() {
     }
   });
 
-  await assertTest('Direct message retention follows the tier window (4 weeks / 6 weeks / 12 months)', async () => {
+  await assertTest('Direct message retention follows the tier window (6 months / 6 months / 12 months)', async () => {
     const now = Date.now();
     const daysAgo = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000);
     // Retention is bounded by the shorter participant window. Bob (sender) is
     // upgraded per case while Alice (reader) stays Basic, so every case keeps the
-    // 4-week window and the tier-specific windows are proven from the sender side.
+    // 6-month (180-day) window and the tier-specific windows are proven from the sender side.
     const tiers: { tier: string; visibleDays: number; hiddenDays: number }[] = [
-      { tier: 'free', visibleDays: 27, hiddenDays: 29 },
-      { tier: 'premium', visibleDays: 27, hiddenDays: 29 },
-      { tier: 'premium_plus', visibleDays: 27, hiddenDays: 29 },
+      { tier: 'free', visibleDays: 170, hiddenDays: 190 },
+      { tier: 'premium', visibleDays: 170, hiddenDays: 190 },
+      { tier: 'premium_plus', visibleDays: 170, hiddenDays: 190 },
     ];
 
     for (const { tier, visibleDays, hiddenDays } of tiers) {
@@ -737,8 +740,8 @@ async function runSecurityTests() {
       if (ids.includes(hidden._id.toString())) {
         throw new Error(`${tier} (${hiddenDays}d) message outside the retention window was still returned`);
       }
-      if (json.meta?.retentionDays !== 28) {
-        throw new Error(`${tier} shared thread reported retention ${json.meta?.retentionDays} days instead of the shorter 28-day window`);
+      if (json.meta?.retentionDays !== 180) {
+        throw new Error(`${tier} shared thread reported retention ${json.meta?.retentionDays} days instead of the shorter 180-day window`);
       }
       await MessageModel.deleteMany({ _id: { $in: [visible._id, hidden._id] } });
     }
@@ -746,8 +749,8 @@ async function runSecurityTests() {
     // Now prove each tier's own window end-to-end: upgrade Alice (the reader) and
     // confirm the declared retention window follows her entitlement.
     const readerWindows: { tier: string; days: number; expected: number }[] = [
-      { tier: 'free', days: 28, expected: 28 },
-      { tier: 'premium', days: 42, expected: 42 },
+      { tier: 'free', days: 180, expected: 180 },
+      { tier: 'premium', days: 180, expected: 180 },
       { tier: 'premium_plus', days: 365, expected: 365 },
     ];
     for (const { tier, days, expected } of readerWindows) {
@@ -980,7 +983,7 @@ async function runSecurityTests() {
       const basicDynamic = await putProfile({ status: 'dynamic' });
       if (basicDynamic.status !== 200) throw new Error(`Basic dynamic status should pass, got ${basicDynamic.status}`);
       const basicLimits = await entitlement();
-      if (basicLimits.tier !== 'free' || basicLimits.dmRetentionDays !== 28 || basicLimits.messageEditLimit !== 1) {
+      if (basicLimits.tier !== 'free' || basicLimits.dmRetentionDays !== 180 || basicLimits.messageEditLimit !== 1) {
         throw new Error(`Basic entitlements are wrong: ${JSON.stringify(basicLimits)}`);
       }
       if (basicLimits.customStatusAllowed !== false || basicLimits.profileAssetHistoryLimit !== 1) {
@@ -993,7 +996,7 @@ async function runSecurityTests() {
       const premiumOffline = await putProfile({ status: 'offline' });
       if (premiumOffline.status !== 200) throw new Error(`Premium offline status should pass, got ${premiumOffline.status}`);
       const premiumLimits = await entitlement();
-      if (premiumLimits.dmRetentionDays !== 42 || premiumLimits.messageEditLimit !== 2 || premiumLimits.profileAssetHistoryLimit !== 3) {
+      if (premiumLimits.dmRetentionDays !== 180 || premiumLimits.messageEditLimit !== 2 || premiumLimits.profileAssetHistoryLimit !== 3) {
         throw new Error(`Premium entitlements are wrong: ${JSON.stringify(premiumLimits)}`);
       }
       if (premiumLimits.customStatusAllowed !== false) {
@@ -1386,7 +1389,144 @@ async function runSecurityTests() {
     }
   });
 
-  // 11. SOCKET.IO UNAUTHORIZED CONNECTION REJECTION
+  // 11. DEVICE CONCURRENCY & SESSION INTEGRITY (MAX 2 CONCURRENT DEVICES)
+  await assertTest('Strict 2-device concurrency limit: 3rd device is rejected with 403 DEVICE_LIMIT_REACHED', async () => {
+    const multiDeviceUser = await UserModel.create({
+      username: 'test_multidevice',
+      displayName: 'Multi Device User',
+      tier: 'free',
+      status: 'online',
+    });
+
+    try {
+      // Device 1 login -> should succeed
+      const session1 = await AuthService.issueSessionTokens(multiDeviceUser, 'Pixel 8 (Android 14)', '192.168.1.10', 'device_alpha');
+      if (!session1.token || !session1.refreshToken) throw new Error('Session 1 token issuance failed');
+
+      // Device 2 login -> should succeed
+      const session2 = await AuthService.issueSessionTokens(multiDeviceUser, 'Galaxy S24 (Android 14)', '192.168.1.11', 'device_beta');
+      if (!session2.token || !session2.refreshToken) throw new Error('Session 2 token issuance failed');
+
+      // Device 3 login (different deviceId) -> must be rejected with DEVICE_LIMIT_REACHED
+      let rejected = false;
+      try {
+        await AuthService.issueSessionTokens(multiDeviceUser, 'iPad Pro (iOS 17)', '192.168.1.12', 'device_gamma');
+      } catch (err: any) {
+        if (err.statusCode === 403 && (err.code === 'DEVICE_LIMIT_REACHED' || err.message.includes('Device limit reached'))) {
+          rejected = true;
+        } else {
+          throw new Error(`Expected 403 DEVICE_LIMIT_REACHED, got ${err.statusCode}: ${err.message}`);
+        }
+      }
+      if (!rejected) throw new Error('3rd concurrent device was not rejected!');
+
+      // Active devices list should show exactly 2 devices
+      const sessions = await AuthService.getActiveSessions(multiDeviceUser._id.toString());
+      if (sessions.length !== 2) throw new Error(`Expected 2 active sessions, found ${sessions.length}`);
+
+      // Revoking Device 1 should release a slot
+      const revoked = await AuthService.revokeSessionById(multiDeviceUser._id.toString(), sessions[0].id);
+      if (!revoked) throw new Error('Failed to revoke session 1');
+
+      // Now Device 3 login should succeed!
+      const session3 = await AuthService.issueSessionTokens(multiDeviceUser, 'iPad Pro (iOS 17)', '192.168.1.12', 'device_gamma');
+      if (!session3.token) throw new Error('Device 3 login failed after revoking device 1 slot');
+    } finally {
+      await UserModel.deleteOne({ _id: multiDeviceUser._id });
+    }
+  });
+
+  // 12. RAZORPAY PAYMENT CRYPTOGRAPHIC SIGNATURE VERIFICATION
+  await assertTest('Razorpay payment verification rejects forged/invalid HMAC-SHA256 signature (400)', async () => {
+    const fakeOrder = 'order_998877665544';
+    const fakePayment = 'pay_112233445566';
+    const forgedSignature = 'forged_fake_signature_hash_value_1234567890abcdef';
+
+    const prevSecret = config.billing.razorpayKeySecret;
+    (config.billing as any).razorpayKeySecret = 'test_razorpay_secret_override';
+
+    try {
+      const res = await makeRequest('/api/v1/billing/razorpay/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+        body: JSON.stringify({
+          razorpay_order_id: fakeOrder,
+          razorpay_payment_id: fakePayment,
+          razorpay_signature: forgedSignature,
+          tier: 'premium',
+        }),
+      });
+
+      if (res.status !== 400) {
+        throw new Error(`Expected forged payment signature to be rejected with 400, got ${res.status}`);
+      }
+    } finally {
+      (config.billing as any).razorpayKeySecret = prevSecret;
+    }
+  });
+
+  await assertTest('Authoritative Razorpay signature successfully upgrades tier to Premium', async () => {
+    const buyer = await UserModel.create({
+      username: 'test_buyer',
+      displayName: 'Buyer Test',
+      tier: 'free',
+      status: 'online',
+    });
+    const buyerToken = jwt.sign({ id: buyer._id.toString(), username: buyer.username, tier: 'free' }, config.auth.jwtSecret, { expiresIn: '1h' });
+
+    try {
+      const orderId = 'order_test_verified_123';
+      const paymentId = 'pay_test_verified_456';
+      const secret = config.billing.razorpayKeySecret || 'test_razorpay_secret_override';
+
+      // Temporarily ensure secret is set for test
+      const prevSecret = config.billing.razorpayKeySecret;
+      (config.billing as any).razorpayKeySecret = secret;
+
+      const validSignature = crypto
+        .createHmac('sha256', secret)
+        .update(`${orderId}|${paymentId}`)
+        .digest('hex');
+
+      const res = await makeRequest('/api/v1/billing/razorpay/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${buyerToken}` },
+        body: JSON.stringify({
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: validSignature,
+          tier: 'premium',
+        }),
+      });
+
+      (config.billing as any).razorpayKeySecret = prevSecret;
+
+      if (res.status !== 200) {
+        throw new Error(`Expected 200 for valid Razorpay signature, got ${res.status}`);
+      }
+
+      const updated = await UserModel.findById(buyer._id);
+      if (updated?.tier !== 'premium') {
+        throw new Error(`User tier was not upgraded to premium in database (actual: ${updated?.tier})`);
+      }
+    } finally {
+      await UserModel.deleteOne({ _id: buyer._id });
+    }
+  });
+
+  // 13. CLOUD NOTIFICATION SUPPRESSION
+  await assertTest('Automated notification email strictly suppresses delivery when emailUpdates is disabled', async () => {
+    const disabledUser = {
+      email: 'user_suppressed@example.com',
+      notificationPrefs: { emailUpdates: false },
+    };
+    const resultDisabled = await sendAutomatedNotificationEmail(disabledUser, 'Weekly Digest', '<p>Hello</p>');
+    if (resultDisabled.sent !== false || resultDisabled.reason !== 'email_updates_disabled_by_user') {
+      throw new Error(`Expected email suppression with reason 'email_updates_disabled_by_user', got ${JSON.stringify(resultDisabled)}`);
+    }
+  });
+
+  // 14. SOCKET.IO UNAUTHORIZED CONNECTION REJECTION
   await assertTest('Socket.IO connection without token is rejected', async () => {
     await new Promise<void>((resolve, reject) => {
       const socket = ClientSocket(baseUrl, {
