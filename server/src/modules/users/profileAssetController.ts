@@ -6,6 +6,7 @@ import { uploadObject } from '../../services/objectStorage';
 import { RoomModel } from '../../models/Room';
 import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
 import { profileAssetHistoryLimitForTier } from '../../utils/entitlements';
+import { validateImageResolution } from '../../utils/imageSecurity';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'];
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
@@ -94,6 +95,21 @@ export async function uploadAsset(req: Request, res: Response): Promise<void> {
     if (resolvedSize > maxSize) {
       res.status(413).json({ success: false, error: `Asset exceeds maximum allowed file size of ${maxSize / (1024 * 1024)}MB.` });
       return;
+    }
+
+    if (url.startsWith('data:') && !resolvedMime.startsWith('video/')) {
+      const match = url.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/s);
+      if (match) {
+        const imageBuffer = Buffer.from(match[2], 'base64');
+        const resolutionCheck = validateImageResolution(imageBuffer);
+        if (!resolutionCheck.valid) {
+          res.status(400).json({
+            success: false,
+            error: resolutionCheck.error || 'Image resolution exceeds maximum allowable dimensions (max 4096 x 4096 pixels)',
+          });
+          return;
+        }
+      }
     }
 
     if (mongoose.connection.readyState !== 1) {

@@ -106,7 +106,7 @@ export const AddReactionSchema = z.object({
 });
 
 export const EditMessageSchema = z.object({
-  text: z.string().trim().min(1).max(2000, 'Message cannot exceed 2000 characters'),
+  text: z.string().trim().min(1).max(500, 'Message cannot exceed 500 characters'),
 });
 
 export const SendFriendRequestSchema = z.object({

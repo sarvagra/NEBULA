@@ -116,6 +116,34 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
         res.status(400).json({ success: false, error: 'Date of birth cannot exceed 60 characters' });
         return;
       }
+      if (trimmed.length > 0) {
+        const parsedDob = new Date(trimmed);
+        if (isNaN(parsedDob.getTime())) {
+          res.status(400).json({ success: false, error: 'Invalid date of birth format' });
+          return;
+        }
+        // Authoritative age verification: user must be at least 16 years old
+        const today = new Date();
+        let age = today.getFullYear() - parsedDob.getFullYear();
+        const m = today.getMonth() - parsedDob.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < parsedDob.getDate())) {
+          age--;
+        }
+        if (age < 16) {
+          res.status(400).json({
+            success: false,
+            error: 'You must be at least 16 years old to use Nebula.',
+          });
+          return;
+        }
+        if (age > 120) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid date of birth.',
+          });
+          return;
+        }
+      }
       updateFields.dateOfBirth = trimmed;
     }
     if (gender !== undefined) {

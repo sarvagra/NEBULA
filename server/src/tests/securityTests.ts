@@ -1526,7 +1526,87 @@ async function runSecurityTests() {
     }
   });
 
-  // 14. SOCKET.IO UNAUTHORIZED CONNECTION REJECTION
+  // 14. DECOMPRESSION BOMB & PIXEL FLOOD DEFENSE
+  await assertTest('Pixel flood decompression bomb (>4096px) is detected and rejected with 400', async () => {
+    // Construct a simulated PNG header with width: 10,000 and height: 10,000 in only 33 bytes
+    const bombPng = Buffer.alloc(33);
+    // PNG signature
+    bombPng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    // IHDR chunk length = 13
+    bombPng.writeUInt32BE(13, 8);
+    // 'IHDR'
+    bombPng.write('IHDR', 12, 'ascii');
+    // Width = 10000, Height = 10000
+    bombPng.writeUInt32BE(10000, 16);
+    bombPng.writeUInt32BE(10000, 20);
+
+    const bombDataUrl = `data:image/png;base64,${bombPng.toString('base64')}`;
+
+    const res = await makeRequest('/api/v1/chat/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({
+        url: bombDataUrl,
+        mimeType: 'image/png',
+        sizeBytes: bombPng.byteLength,
+      }),
+    });
+
+    if (res.status !== 400) {
+      throw new Error(`Expected pixel bomb image to be rejected with 400, got ${res.status}`);
+    }
+    const json = (await res.json()) as any;
+    if (!String(json.error || '').includes('4096')) {
+      throw new Error(`Expected pixel limit error message, got: ${json.error}`);
+    }
+  });
+
+  // 15. AUTHORITATIVE CLIENT TAMPERING DEFENSE: DOB MINIMUM AGE (16 YEARS)
+  await assertTest('Client-tampered underage dateOfBirth (<16 years) is rejected by backend with 400', async () => {
+    const res = await makeRequest('/api/v1/users/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({
+        dateOfBirth: '2020-01-01', // 4-6 years old
+      }),
+    });
+
+    if (res.status !== 400) {
+      throw new Error(`Expected underage DOB to be rejected with 400, got ${res.status}`);
+    }
+    const json = (await res.json()) as any;
+    if (!String(json.error || '').includes('16 years')) {
+      throw new Error(`Expected 16-year minimum age error, got: ${json.error}`);
+    }
+  });
+
+  // 16. AUTHORITATIVE CLIENT TAMPERING DEFENSE: MESSAGE EDIT OVER 500 CHARS
+  await assertTest('Client-tampered message edit exceeding 500 characters is rejected with 400', async () => {
+    const msg = await MessageModel.create({
+      senderId: validUserPayload.id,
+      conversationId: bobUserPayload.id,
+      senderName: 'Alice Test',
+      text: 'Original message',
+    });
+
+    try {
+      const res = await makeRequest(`/api/v1/chat/${msg._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+        body: JSON.stringify({
+          text: 'x'.repeat(501),
+        }),
+      });
+
+      if (res.status !== 400) {
+        throw new Error(`Expected >500 character edited message to be rejected with 400, got ${res.status}`);
+      }
+    } finally {
+      await MessageModel.deleteOne({ _id: msg._id });
+    }
+  });
+
+  // 17. SOCKET.IO UNAUTHORIZED CONNECTION REJECTION
   await assertTest('Socket.IO connection without token is rejected', async () => {
     await new Promise<void>((resolve, reject) => {
       const socket = ClientSocket(baseUrl, {

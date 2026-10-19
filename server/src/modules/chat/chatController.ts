@@ -9,6 +9,7 @@ import { notifyUser } from '../notifications/notificationController';
 import { notifyConversationRead } from '../../realtime/socketServer';
 import { NotificationModel } from '../../models/Notification';
 import { dmRetentionCutoff, dmRetentionCutoffForDays, entitlementsForTier, messageEditLimitForTier } from '../../utils/entitlements';
+import { validateImageResolution } from '../../utils/imageSecurity';
 
 const UNSEND_WINDOW_MS = 2 * 60 * 1000;
 
@@ -510,13 +511,25 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
 
     const maxSize = resolvedMime.startsWith('video/') ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
     const declaredSize = Number(sizeBytes);
-    const actualSize = Buffer.from(dataUrlMatch[2], 'base64').byteLength;
+    const imageBuffer = Buffer.from(dataUrlMatch[2], 'base64');
+    const actualSize = imageBuffer.byteLength;
     if ((Number.isFinite(declaredSize) && declaredSize > maxSize) || actualSize > maxSize) {
       res.status(413).json({
         success: false,
         error: `Media attachment exceeds maximum allowed size of ${maxSize / (1024 * 1024)}MB.`,
       });
       return;
+    }
+
+    if (!resolvedMime.startsWith('video/')) {
+      const resolutionCheck = validateImageResolution(imageBuffer);
+      if (!resolutionCheck.valid) {
+        res.status(400).json({
+          success: false,
+          error: resolutionCheck.error || 'Image resolution exceeds maximum allowable dimensions (max 4096 x 4096 pixels)',
+        });
+        return;
+      }
     }
 
     const type = mediaType || (resolvedMime.startsWith('video/') ? 'video' : resolvedMime.includes('gif') ? 'gif' : 'image');
