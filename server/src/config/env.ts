@@ -83,6 +83,8 @@ export const config = {
   billing: {
     packageName: process.env.PLAY_PACKAGE_NAME || 'com.nebula.app',
     serviceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
+    razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
   },
   media: {
     youtubeApiKey: process.env.YOUTUBE_API_KEY || '',

@@ -162,3 +162,61 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendOtpRes
     };
   }
 }
+
+/**
+ * Sends automated update / notification email ONLY if the user has emailUpdates enabled in their profile.
+ * Retains absolute user sovereignty over automated email dispatch.
+ */
+export async function sendAutomatedNotificationEmail(
+  user: { email?: string; notificationPrefs?: { emailUpdates?: boolean } },
+  subject: string,
+  html: string
+): Promise<SendOtpResult> {
+  if (!user.email) {
+    return { sent: false, reason: 'no_email' };
+  }
+
+  // Strict cloud-level check on notification preferences
+  if (user.notificationPrefs?.emailUpdates !== true) {
+    console.log(`[Email Service] Automated email suppressed for ${user.email}: user has emailUpdates disabled in settings.`);
+    return { sent: false, reason: 'email_updates_disabled_by_user' };
+  }
+
+  const resend = getResendClient();
+  if (resend) {
+    try {
+      const fromAddress = config.email.fromEmail || 'Nebula <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
+        from: fromAddress,
+        to: [user.email],
+        subject,
+        html,
+      });
+
+      if (!error) {
+        console.log(`[Email Service] Dispatched automated email to ${user.email} (ID: ${data?.id})`);
+        return { sent: true };
+      }
+    } catch (err: any) {
+      console.warn('[Email Service] Resend error:', err.message);
+    }
+  }
+
+  const mailer = getTransporter();
+  if (mailer) {
+    try {
+      await mailer.sendMail({
+        from: config.email.fromEmail || 'no-reply@nebula.app',
+        to: user.email,
+        subject,
+        html,
+      });
+      return { sent: true };
+    } catch (err: any) {
+      return { sent: false, reason: err.message };
+    }
+  }
+
+  return { sent: false, reason: 'no_email_transporter' };
+}
+

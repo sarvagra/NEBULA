@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import { AuthService } from '../../services/authService';
+import { AuthService, hashToken } from '../../services/authService';
 import { UserModel } from '../../models/User';
 import { toPrivateUserDTO } from '../../utils/dto';
 import { config } from '../../config/env';
@@ -131,8 +131,9 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
     }
 
     const ip = req.ip || req.socket.remoteAddress;
-    const deviceInfo = req.headers['user-agent'] || 'Android Client';
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const deviceInfo = (req.body.deviceInfo || req.headers['x-device-info'] || req.headers['user-agent'] || 'Android Client').toString();
+    const deviceId = (req.body.deviceId || req.headers['x-device-id'] || '').toString();
+    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
     const grace = await applyLoginDeletionGrace(user);
 
     res.json({
@@ -145,7 +146,12 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (err: any) {
-    res.status(401).json({ success: false, error: err.message || 'Google authentication failed' });
+    const status = err.statusCode || 401;
+    res.status(status).json({
+      success: false,
+      error: err.message || 'Google authentication failed',
+      code: err.code || 'AUTH_FAILED',
+    });
   }
 }
 
@@ -257,8 +263,9 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     }
 
     const ip = req.ip || req.socket.remoteAddress;
-    const deviceInfo = req.headers['user-agent'] || 'Android Client';
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const deviceInfo = (req.body.deviceInfo || req.headers['x-device-info'] || req.headers['user-agent'] || 'Android Client').toString();
+    const deviceId = (req.body.deviceId || req.headers['x-device-id'] || '').toString();
+    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
     const grace = await applyLoginDeletionGrace(user);
 
     res.json({
@@ -272,7 +279,12 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: 'OTP verification failed' });
+    const status = err.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      error: err.message || 'OTP verification failed',
+      code: err.code || 'AUTH_FAILED',
+    });
   }
 }
 
@@ -367,8 +379,9 @@ export async function devLogin(req: Request, res: Response): Promise<void> {
     }
 
     const ip = req.ip || req.socket.remoteAddress;
-    const deviceInfo = req.headers['user-agent'] || 'Android Client Emulator';
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip);
+    const deviceInfo = (req.body.deviceInfo || req.headers['user-agent'] || 'Android Client Emulator').toString();
+    const deviceId = (req.body.deviceId || '').toString();
+    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
     const grace = await applyLoginDeletionGrace(user);
 
     res.json({
@@ -381,6 +394,53 @@ export async function devLogin(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message || 'Developer login failed' });
+    const status = err.statusCode || 500;
+    res.status(status).json({ success: false, error: err.message || 'Developer login failed', code: err.code });
+  }
+}
+
+export async function getActiveSessions(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const currentToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    const currentTokenHash = currentToken ? hashToken(currentToken) : undefined;
+    const sessions = await AuthService.getActiveSessions(req.user.id, currentTokenHash);
+
+    res.json({
+      success: true,
+      data: sessions,
+      maxAllowedDevices: 2,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Failed to retrieve active sessions' });
+  }
+}
+
+export async function revokeSessionById(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Session ID is required' });
+      return;
+    }
+
+    const revoked = await AuthService.revokeSessionById(req.user.id, sessionId);
+    if (!revoked) {
+      res.status(404).json({ success: false, error: 'Session not found or already revoked' });
+      return;
+    }
+
+    res.json({ success: true, message: 'Device session revoked successfully' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Failed to revoke device session' });
   }
 }

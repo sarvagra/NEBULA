@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -290,7 +291,7 @@ fun LiquidGlassProfileOverlay(
                             // Profile Action Buttons (Public View & Edit Profile)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Button(
                                     onClick = {
@@ -299,12 +300,13 @@ fun LiquidGlassProfileOverlay(
                                     },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(40.dp),
+                                        .height(42.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = theme.colors.surfaceElevated,
                                         contentColor = theme.colors.textPrimary
                                     ),
-                                    shape = RoundedCornerShape(10.dp)
+                                    border = BorderStroke(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.65f)),
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -320,7 +322,7 @@ fun LiquidGlassProfileOverlay(
                                             text = "Public View",
                                             style = theme.typography.bodySmall.copy(
                                                 fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.5.sp
+                                                fontSize = 13.sp
                                             )
                                         )
                                     }
@@ -333,12 +335,13 @@ fun LiquidGlassProfileOverlay(
                                     },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(40.dp),
+                                        .height(42.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = theme.colors.primaryAccent.copy(alpha = 0.15f),
-                                        contentColor = theme.colors.primaryAccent
+                                        containerColor = theme.colors.surfaceElevated,
+                                        contentColor = theme.colors.textPrimary
                                     ),
-                                    shape = RoundedCornerShape(10.dp)
+                                    border = BorderStroke(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.65f)),
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -354,7 +357,7 @@ fun LiquidGlassProfileOverlay(
                                             text = "Edit Profile",
                                             style = theme.typography.bodySmall.copy(
                                                 fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.5.sp
+                                                fontSize = 13.sp
                                             )
                                         )
                                     }
@@ -364,29 +367,11 @@ fun LiquidGlassProfileOverlay(
                     }
                 }
 
-                // 2. NEBULA MEMBERSHIP CARD (Clean: strictly Icon + Title + Indicator, no explanatory subtitles)
+                // 2. NEBULA MEMBERSHIP CARD (Uniform greyish liquidGlassSurface matching other options)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(
-                                    theme.colors.primaryAccent.copy(alpha = 0.22f),
-                                    theme.colors.secondaryAccent.copy(alpha = 0.12f)
-                                )
-                            )
-                        )
-                        .border(
-                            1.2.dp,
-                            Brush.linearGradient(
-                                listOf(
-                                    theme.colors.primaryAccent.copy(alpha = 0.65f),
-                                    theme.colors.secondaryAccent.copy(alpha = 0.35f)
-                                )
-                            ),
-                            RoundedCornerShape(18.dp)
-                        )
+                        .liquidGlassSurface(RoundedCornerShape(16.dp), theme.colors)
                         .clickable {
                             onDismissRequest()
                             onOpenPremiumPlans()
@@ -406,7 +391,7 @@ fun LiquidGlassProfileOverlay(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(theme.colors.primaryAccent.copy(alpha = 0.22f)),
+                                    .background(theme.colors.primaryAccent.copy(alpha = 0.18f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -472,10 +457,10 @@ fun LiquidGlassProfileOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(theme.colors.errorColor.copy(alpha = 0.12f))
+                        .background(theme.colors.surfaceElevated)
                         .border(
                             1.dp,
-                            theme.colors.errorColor.copy(alpha = 0.28f),
+                            theme.colors.surfaceBorder.copy(alpha = 0.65f),
                             RoundedCornerShape(14.dp)
                         )
                         .clickable(onClick = onLogoutClick)

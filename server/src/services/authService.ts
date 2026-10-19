@@ -21,10 +21,48 @@ export function hashToken(token: string): string {
 export class AuthService {
   /**
    * Generates a signed JWT access token and creates a tracked, revocable refresh token session in MongoDB.
+   * Strictly enforces a MAXIMUM OF 2 CONCURRENT ACTIVE DEVICES PER ACCOUNT.
+   * Attempting to log into a 3rd distinct device without revoking an existing session is rejected.
    */
-  static async issueSessionTokens(user: IUser, deviceInfo?: string, ipAddress?: string): Promise<AuthTokens> {
+  static async issueSessionTokens(
+    user: IUser,
+    deviceInfo?: string,
+    ipAddress?: string,
+    deviceId?: string
+  ): Promise<AuthTokens> {
+    const userId = user._id.toString();
+
+    // 1. Query current active (non-revoked, unexpired) sessions
+    const activeSessions = await RefreshTokenModel.find({
+      userId,
+      revoked: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ updatedAt: -1 });
+
+    // Check if the current device matches an existing session (same deviceId or exact deviceInfo)
+    const existingSameDeviceSession = deviceId
+      ? activeSessions.find((s) => s.deviceId === deviceId)
+      : activeSessions.find((s) => s.deviceInfo === deviceInfo);
+
+    if (!existingSameDeviceSession && activeSessions.length >= 2) {
+      const error: any = new Error(
+        'Device limit reached. Your account is already logged into 2 devices. Please log out from another device in Settings > Account before signing in on a new device.'
+      );
+      error.statusCode = 403;
+      error.code = 'DEVICE_LIMIT_REACHED';
+      throw error;
+    }
+
+    // If re-authenticating from the same device, retire the previous token for this device
+    if (existingSameDeviceSession) {
+      await RefreshTokenModel.updateOne(
+        { _id: existingSameDeviceSession._id },
+        { revoked: true, revokedAt: new Date() }
+      );
+    }
+
     const payload = {
-      id: user._id.toString(),
+      id: userId,
       username: user.username,
       displayName: user.displayName,
       tier: user.tier,
@@ -39,11 +77,13 @@ export class AuthService {
     expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
 
     await RefreshTokenModel.create({
-      userId: user._id.toString(),
+      userId,
       tokenHash,
+      deviceId: deviceId || crypto.randomUUID(),
       deviceInfo: deviceInfo || 'Android Device',
       ipAddress: ipAddress || 'unknown',
       expiresAt,
+      lastActiveAt: new Date(),
       revoked: false,
     });
 
@@ -56,6 +96,7 @@ export class AuthService {
 
   /**
    * Refreshes an access token using a valid, non-revoked refresh token.
+   * Updates lastActiveAt timestamp to keep session activity up to date.
    */
   static async refreshSession(rawRefreshToken: string, ipAddress?: string): Promise<{ token: string; user: IUser }> {
     const tokenHash = hashToken(rawRefreshToken);
@@ -70,6 +111,10 @@ export class AuthService {
       throw new Error('User not found or account has been suspended');
     }
 
+    session.lastActiveAt = new Date();
+    if (ipAddress) session.ipAddress = ipAddress;
+    await session.save();
+
     const payload = {
       id: user._id.toString(),
       username: user.username,
@@ -80,6 +125,48 @@ export class AuthService {
 
     const token = jwt.sign(payload, config.auth.jwtSecret, { expiresIn: config.auth.jwtExpiresIn as any });
     return { token, user };
+  }
+
+  /**
+   * Returns active sessions for user (up to 2), with device details and activity timestamps.
+   */
+  static async getActiveSessions(userId: string, currentTokenHash?: string): Promise<Array<{
+    id: string;
+    deviceId?: string;
+    deviceInfo: string;
+    ipAddress: string;
+    lastActiveAt: Date;
+    createdAt: Date;
+    isCurrent: boolean;
+  }>> {
+    const sessions = await RefreshTokenModel.find({
+      userId,
+      revoked: false,
+      expiresAt: { $gt: new Date() },
+    })
+      .sort({ lastActiveAt: -1, createdAt: -1 })
+      .limit(2);
+
+    return sessions.map((s) => ({
+      id: s._id.toString(),
+      deviceId: s.deviceId,
+      deviceInfo: s.deviceInfo || 'Android Device',
+      ipAddress: s.ipAddress || 'unknown',
+      lastActiveAt: s.lastActiveAt || s.createdAt,
+      createdAt: s.createdAt,
+      isCurrent: Boolean(currentTokenHash && s.tokenHash === currentTokenHash),
+    }));
+  }
+
+  /**
+   * Revokes a specific session by session ID (e.g. remote logout from Settings > Account).
+   */
+  static async revokeSessionById(userId: string, sessionId: string): Promise<boolean> {
+    const res = await RefreshTokenModel.updateOne(
+      { _id: sessionId, userId, revoked: false },
+      { $set: { revoked: true, revokedAt: new Date() } }
+    );
+    return res.modifiedCount > 0;
   }
 
   /**

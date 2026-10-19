@@ -282,6 +282,10 @@ class SocialRepositoryImpl(
         _suggestedPeople.value = _suggestedPeople.value.filterNot { it.id == userId }
         _searchResults.value = _searchResults.value.filterNot { it.id == userId }
         _friendRequests.value = _friendRequests.value.filterNot { it.sender.id == userId }
+        _conversations.value = _conversations.value.filterNot { it.id == userId || it.partnerUser?.id == userId }
+        if (_activeConversation.value?.id == userId || _activeConversation.value?.partnerUser?.id == userId) {
+            _activeConversation.value = null
+        }
         return true
     }
 

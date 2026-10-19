@@ -538,3 +538,13 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
     res.status(500).json({ success: false, error: 'Failed to upload chat media' });
   }
 }
+
+export async function triggerChatArchive(req: Request, res: Response): Promise<void> {
+  try {
+    const { runMonthlyChatRetentionArchive } = await import('../../services/chatArchiveService');
+    const report = await runMonthlyChatRetentionArchive();
+    res.json({ success: true, data: report });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Archival cycle failed' });
+  }
+}

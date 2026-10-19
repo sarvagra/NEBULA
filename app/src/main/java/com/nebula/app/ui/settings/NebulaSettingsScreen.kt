@@ -92,29 +92,9 @@ fun NebulaSettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    val context = LocalContext.current
-    val sessionManager = remember { SessionManager(context) }
     var showBlockedUsersInPlace by remember { mutableStateOf(false) }
-    // Re-engagement messaging is opt-in: the switch reflects the server value and
-    // is the only thing that turns it on.
-    var reengagementOptIn by remember { mutableStateOf(false) }
-    var reengagementLoading by remember { mutableStateOf(true) }
-    // Per-category notification consent, loaded with the re-engagement flag.
-    var notificationCategories by remember { mutableStateOf<org.json.JSONObject?>(null) }
-    var reengagementUpdating by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        when (val res = NebulaApiClient.getReengagementPreferences()) {
-            is NebulaApiClient.ApiResponse.Success -> {
-                val data = res.data.optJSONObject("data")
-                reengagementOptIn = data?.optBoolean("optIn", false) ?: false
-                notificationCategories = data?.optJSONObject("categories")
-            }
-            is NebulaApiClient.ApiResponse.Error -> Unit
-        }
-        reengagementLoading = false
-    }
+    var showNotificationsInPlace by remember { mutableStateOf(false) }
+    // Notification switches now live on NebulaNotificationSettingsScreen.
 
     Column(
         modifier = modifier
@@ -223,82 +203,14 @@ fun NebulaSettingsScreen(
 
                     SettingsDivider()
 
-                    // 6. Re-engagement messaging (explicit consent, server-enforced)
-                    SettingToggleRow(
+                    // 6. Notifications (all switches live on their own screen)
+                    SettingNavRow(
                         icon = Icons.Default.NotificationsNone,
-                        title = "Re-engagement messages",
-                        subtitle = "Occasional reminders when you have been away. Off unless you turn it on.",
-                        checked = reengagementOptIn,
-                        enabled = !reengagementLoading && !reengagementUpdating,
-                        onCheckedChange = { next ->
-                            reengagementUpdating = true
-                            scope.launch {
-                                when (val res = NebulaApiClient.setReengagementOptIn(next)) {
-                                    is NebulaApiClient.ApiResponse.Success -> {
-                                        reengagementOptIn =
-                                            res.data.optJSONObject("data")?.optBoolean("optIn", next) ?: next
-                                        Toast.makeText(
-                                            context,
-                                            if (next) "Re-engagement messages on" else "Re-engagement messages off",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                    is NebulaApiClient.ApiResponse.Error -> {
-                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                reengagementUpdating = false
-                            }
-                        }
+                        title = "Notifications",
+                        onClick = { showNotificationsInPlace = true }
                     )
 
                     SettingsDivider()
-
-                    // 6b. Per-category notification consent. Every row is opt-in
-                    // and persisted server-side; re-engagement above is one of them.
-                    val categorySpecs = listOf(
-                        Triple("directMessages", "Direct messages", "Alerts when someone messages you"),
-                        Triple("friendRequests", "Friend requests", "Alerts for new friend requests"),
-                        Triple("invites", "Room invites", "Alerts when you are invited to a room"),
-                        Triple("textUpdates", "Text updates", "Important account and safety notices"),
-                        Triple("emailUpdates", "Email updates", "Occasional account emails"),
-                        Triple("promotions", "Promotions", "Offers and product news")
-                    )
-                    categorySpecs.forEach { (key, label, description) ->
-                        val categories = notificationCategories
-                        val checked = categories?.optBoolean(key, key == "textUpdates") ?: (key == "textUpdates")
-                        SettingToggleRow(
-                            icon = Icons.Default.NotificationsNone,
-                            title = label,
-                            subtitle = description,
-                            checked = checked,
-                            enabled = categories != null && !reengagementUpdating,
-                            onCheckedChange = { next ->
-                                val current = notificationCategories ?: org.json.JSONObject()
-                                current.put(key, next)
-                                notificationCategories = current
-                                scope.launch {
-                                    when (val res = NebulaApiClient.updateNotificationPreferences(org.json.JSONObject().apply { put(key, next) })) {
-                                        is NebulaApiClient.ApiResponse.Success -> {
-                                            notificationCategories =
-                                                res.data.optJSONObject("data")?.optJSONObject("categories") ?: current
-                                            Toast.makeText(
-                                                context,
-                                                "$label ${if (next) "on" else "off"}",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                        is NebulaApiClient.ApiResponse.Error -> {
-                                            current.put(key, !next)
-                                            notificationCategories = current
-                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                        SettingsDivider()
-                    }
 
                     // 7. About
                     SettingNavRow(
@@ -322,6 +234,13 @@ fun NebulaSettingsScreen(
 
     // Dedicated settings screen (shares the host's layout slot, so it fully covers
     // this screen without requiring the caller to add a navigation destination).
+    if (showNotificationsInPlace) {
+        NebulaNotificationSettingsScreen(
+            onBack = { showNotificationsInPlace = false },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
     if (showBlockedUsersInPlace) {
         NebulaBlockedUsersScreen(
             onBack = { showBlockedUsersInPlace = false },
@@ -330,62 +249,6 @@ fun NebulaSettingsScreen(
     }
 }
 
-@Composable
-private fun SettingToggleRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    val theme = Theme.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = theme.colors.textSecondary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = theme.typography.bodyMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 14.5.sp
-                )
-            )
-            Text(
-                text = subtitle,
-                style = theme.typography.caption.copy(
-                    color = theme.colors.textSecondary,
-                    fontSize = 11.5.sp,
-                    lineHeight = 15.sp
-                )
-            )
-        }
-        Spacer(modifier = Modifier.width(10.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = theme.colors.onPrimaryAccent,
-                checkedTrackColor = theme.colors.primaryAccent,
-                uncheckedThumbColor = theme.colors.textSecondary,
-                uncheckedTrackColor = theme.colors.surfaceElevated,
-                uncheckedBorderColor = theme.colors.surfaceBorder
-            )
-        )
-    }
-}
 
 @Composable
 private fun SettingNavRow(

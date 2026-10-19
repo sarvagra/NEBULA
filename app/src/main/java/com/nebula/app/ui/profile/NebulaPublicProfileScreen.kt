@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
@@ -38,6 +39,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +68,7 @@ import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaAvatarImage
 import com.nebula.app.ui.components.NebulaBannerPalettes
+import com.nebula.app.ui.components.PABottomSheet
 
 @Composable
 fun NebulaPublicProfileScreen(
@@ -121,21 +125,8 @@ fun NebulaPublicProfileScreen(
                 )
             }
 
-            Box {
-                IconButton(onClick = { showProfileMenu = true }, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Default.Settings, contentDescription = "Profile settings", tint = theme.colors.textSecondary, modifier = Modifier.size(20.dp))
-                }
-                DropdownMenu(expanded = showProfileMenu, onDismissRequest = { showProfileMenu = false }) {
-                    if (isCurrentUser) DropdownMenuItem(
-                        text = { Text("Edit profile") },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                        onClick = { showProfileMenu = false; onOpenEditProfile() }
-                    ) else DropdownMenuItem(
-                        text = { Text("Block user") },
-                        leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
-                        onClick = { showProfileMenu = false; showBlockConfirmation = true }
-                    )
-                }
+            IconButton(onClick = { showProfileMenu = true }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Settings, contentDescription = "Profile settings", tint = theme.colors.textSecondary, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -172,7 +163,7 @@ fun NebulaPublicProfileScreen(
                                 .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(18.dp))
                         ) {
                             if (!user.bannerUrl.isNullOrBlank()) {
-                                val bannerUri = user.bannerUrl!!
+                                val bannerUri = user.bannerUrl
                                 val base64Bitmap = remember(bannerUri) {
                                     if (bannerUri.startsWith("data:image")) {
                                         try {
@@ -777,15 +768,206 @@ fun NebulaPublicProfileScreen(
             }
         }
 
-    if (showBlockConfirmation) AlertDialog(
-        onDismissRequest = { showBlockConfirmation = false },
-        title = { Text("Block ${user.displayName}?") },
-        text = { Text("They will no longer be able to find or contact you. You can unblock them from your blocked users list in settings.") },
-        confirmButton = {
-            TextButton(onClick = { showBlockConfirmation = false; onBlockUser(user) }) { Text("Block") }
-        },
-        dismissButton = {
-            TextButton(onClick = { showBlockConfirmation = false }) { Text("Cancel") }
-        }
+    ProfileActionSheet(
+        isVisible = showProfileMenu,
+        isCurrentUser = isCurrentUser,
+        displayName = user.displayName,
+        onEditProfile = { showProfileMenu = false; onOpenEditProfile() },
+        onBlock = { showProfileMenu = false; showBlockConfirmation = true },
+        onDismiss = { showProfileMenu = false }
     )
+
+    if (showBlockConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirmation = false },
+            containerColor = theme.colors.surfaceElevated,
+            titleContentColor = theme.colors.textPrimary,
+            textContentColor = theme.colors.textSecondary,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(theme.colors.errorColor.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Block,
+                        contentDescription = null,
+                        tint = theme.colors.errorColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            },
+            title = {
+                Text(
+                    text = "Block ${user.displayName}?",
+                    style = theme.typography.titleMedium.copy(
+                        color = theme.colors.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                )
+            },
+            text = {
+                Text(
+                    text = "They will no longer be able to message you, invite you to rooms, or find your profile. You can undo this at any time from Settings > Blocked users.",
+                    style = theme.typography.bodySmall.copy(
+                        color = theme.colors.textSecondary,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBlockConfirmation = false
+                        onBlockUser(user)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.colors.errorColor,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Block", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirmation = false }) {
+                    Text("Cancel", color = theme.colors.textSecondary)
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Profile options sheet, rendering through Nebula's unified PABottomSheet
+ * matching all other action sheets across the application.
+ */
+@Composable
+private fun ProfileActionSheet(
+    isVisible: Boolean,
+    isCurrentUser: Boolean,
+    displayName: String,
+    onEditProfile: () -> Unit,
+    onBlock: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val theme = Theme.current
+
+    PABottomSheet(
+        isVisible = isVisible,
+        onDismissRequest = onDismiss,
+        title = if (isCurrentUser) "Profile Options" else "User Options"
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(theme.colors.surface)
+                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+            ) {
+                if (isCurrentUser) {
+                    ProfileActionRow(
+                        icon = Icons.Default.Edit,
+                        title = "Edit Profile",
+                        subtitle = "Customize your avatar, banner, bio, and interests",
+                        tint = theme.colors.primaryAccent,
+                        onClick = onEditProfile
+                    )
+                } else {
+                    ProfileActionRow(
+                        icon = Icons.Default.Block,
+                        title = "Block ${displayName.substringBefore(' ')}",
+                        subtitle = "They won't be able to message you or invite you to rooms",
+                        tint = theme.colors.errorColor,
+                        titleColor = theme.colors.errorColor,
+                        onClick = onBlock
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun ProfileActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String? = null,
+    tint: Color,
+    titleColor: Color = Theme.current.colors.textPrimary,
+    onClick: () -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (tint == theme.colors.errorColor) theme.colors.errorColor.copy(alpha = 0.12f) else theme.colors.surfaceElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = theme.typography.bodyMedium.copy(
+                        color = titleColor,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
+                    )
+                )
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = theme.colors.textTertiary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
 }

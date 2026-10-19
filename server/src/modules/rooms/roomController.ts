@@ -237,9 +237,20 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
     }
 
     const alreadyIn = room.participants.some((p) => p.userId === req.user!.id);
+    if (alreadyIn) {
+      res.status(409).json({
+        success: false,
+        error: 'Your account is already active in this room on another device. Only one device per account is allowed to join a room at any time.',
+      });
+      return;
+    }
+
     const joiningProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
     if (!(await claimActiveRoom(req.user.id, room._id.toString()))) {
-      res.status(409).json({ success: false, error: 'Leave your current room before joining another one' });
+      res.status(409).json({
+        success: false,
+        error: 'Your account is currently active in another room on another device. Only one device per account is allowed to join a room at any time.',
+      });
       return;
     }
     if (!alreadyIn) {

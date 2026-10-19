@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { googleSignIn, requestOtp, verifyOtp, refreshToken, logout, getMe, devLogin } from './authController';
+import { googleSignIn, requestOtp, verifyOtp, refreshToken, logout, getMe, devLogin, getActiveSessions, revokeSessionById } from './authController';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody } from '../../middlewares/validation';
 import {
@@ -24,4 +24,6 @@ authRouter.post('/otp/verify', otpVerifyRateLimiter, validateBody(OtpVerifySchem
 authRouter.post('/refresh', refreshTokenRateLimiter, validateBody(RefreshTokenSchema), refreshToken);
 authRouter.post('/logout', authMiddleware, logout);
 authRouter.get('/me', authMiddleware, getMe);
+authRouter.get('/sessions', authMiddleware, getActiveSessions);
+authRouter.delete('/sessions/:sessionId', authMiddleware, revokeSessionById);
 authRouter.post('/dev-login', devLogin);

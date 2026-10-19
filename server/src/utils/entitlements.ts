@@ -29,8 +29,8 @@ export const DAY_MS = DAY;
 
 const ENTITLEMENTS: Record<SubscriptionTier, TierEntitlements> = {
   free: {
-    dmRetentionDays: 28,
-    dmRetentionLabel: '4 weeks',
+    dmRetentionDays: 180,
+    dmRetentionLabel: '6 months',
     messageEditLimit: 1,
     profileAssetHistoryLimit: 1,
     maxRoomParticipants: 20,
@@ -40,8 +40,8 @@ const ENTITLEMENTS: Record<SubscriptionTier, TierEntitlements> = {
     suggestionPageSize: 5,
   },
   premium: {
-    dmRetentionDays: 42,
-    dmRetentionLabel: '6 weeks',
+    dmRetentionDays: 180,
+    dmRetentionLabel: '6 months',
     messageEditLimit: 2,
     profileAssetHistoryLimit: 3,
     maxRoomParticipants: 25,

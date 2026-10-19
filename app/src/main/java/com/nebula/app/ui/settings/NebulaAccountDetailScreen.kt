@@ -25,7 +25,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -93,6 +95,29 @@ fun NebulaAccountDetailScreen(
 ) {
     val theme = Theme.current
     val scope = rememberCoroutineScope()
+
+    // --- Active Sessions / Devices (Max 2 concurrent) ---
+    var activeSessions by remember { mutableStateOf<List<NebulaApiClient.ActiveDeviceSession>>(emptyList()) }
+    var isLoadingSessions by remember { mutableStateOf(true) }
+    var sessionsError by remember { mutableStateOf<String?>(null) }
+    var revokingSessionId by remember { mutableStateOf<String?>(null) }
+    var sessionToRevoke by remember { mutableStateOf<NebulaApiClient.ActiveDeviceSession?>(null) }
+    var reloadSessionsToken by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(reloadSessionsToken) {
+        isLoadingSessions = true
+        sessionsError = null
+        when (val response = NebulaApiClient.getActiveSessions()) {
+            is NebulaApiClient.ApiResponse.Success -> {
+                activeSessions = response.data
+                sessionsError = null
+            }
+            is NebulaApiClient.ApiResponse.Error -> {
+                sessionsError = response.message
+            }
+        }
+        isLoadingSessions = false
+    }
 
     // --- Account deletion (OTP-verified, 30-day grace period) ---
     var isLoadingDeletionStatus by remember { mutableStateOf(true) }
@@ -337,6 +362,126 @@ fun NebulaAccountDetailScreen(
                     AccountDetailRow("Banner", if (!userProfile.bannerUrl.isNullOrBlank()) "Custom Media" else "Palette ${userProfile.bannerIndex + 1}")
                     AccountDivider()
                     AccountDetailRow("Status", userProfile.status)
+                }
+            }
+
+            // Active Devices & Sessions (Max 2)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Active Devices & Sessions (${activeSessions.size}/2)",
+                        style = theme.typography.bodyMedium.copy(
+                            color = theme.colors.textSecondary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        ),
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                    ) {
+                        when {
+                            isLoadingSessions -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = theme.colors.primaryAccent,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Loading active devices…",
+                                        style = theme.typography.bodyMedium.copy(
+                                            color = theme.colors.textSecondary,
+                                            fontSize = 14.sp
+                                        )
+                                    )
+                                }
+                            }
+                            sessionsError != null -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = sessionsError.orEmpty(),
+                                        style = theme.typography.bodySmall.copy(
+                                            color = theme.colors.errorColor,
+                                            fontSize = 12.5.sp
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    TextButton(
+                                        onClick = { reloadSessionsToken++ },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(
+                                            text = "Retry",
+                                            style = theme.typography.button.copy(
+                                                color = theme.colors.primaryAccent
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            activeSessions.isEmpty() -> {
+                                Text(
+                                    text = "No active devices recorded.",
+                                    style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary),
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                            else -> {
+                                activeSessions.forEachIndexed { index, session ->
+                                    if (index > 0) {
+                                        AccountDivider()
+                                    }
+                                    ActiveSessionItemRow(
+                                        session = session,
+                                        isRevoking = revokingSessionId == session.id,
+                                        onRevoke = { sessionToRevoke = session }
+                                    )
+                                }
+                            }
+                        }
+
+                        AccountDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = theme.colors.primaryAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Strict Limit: Max 2 concurrent devices per account. Only 1 device may join voice/watch rooms at a time.",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary.copy(alpha = 0.85f),
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp
+                                )
+                            )
+                        }
+                    }
                 }
             }
 
@@ -761,6 +906,71 @@ fun NebulaAccountDetailScreen(
             }
         )
     }
+
+    if (sessionToRevoke != null) {
+        val target = sessionToRevoke!!
+        AlertDialog(
+            onDismissRequest = {
+                if (revokingSessionId == null) {
+                    sessionToRevoke = null
+                }
+            },
+            containerColor = theme.colors.surfaceElevated,
+            titleContentColor = theme.colors.textPrimary,
+            textContentColor = theme.colors.textSecondary,
+            title = {
+                Text(
+                    text = "Log out device?",
+                    style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to log out ${target.deviceInfo}? This device will be disconnected and will need to log in again.",
+                    style = theme.typography.bodyMedium.copy(
+                        color = theme.colors.textSecondary,
+                        lineHeight = 18.sp
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toRevoke = target
+                        sessionToRevoke = null
+                        revokingSessionId = toRevoke.id
+                        scope.launch {
+                            when (val res = NebulaApiClient.revokeSession(toRevoke.id)) {
+                                is NebulaApiClient.ApiResponse.Success -> {
+                                    reloadSessionsToken++
+                                }
+                                is NebulaApiClient.ApiResponse.Error -> {
+                                    sessionsError = res.message
+                                }
+                            }
+                            revokingSessionId = null
+                        }
+                    },
+                    enabled = revokingSessionId == null,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.colors.errorColor,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Log Out", style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { sessionToRevoke = null },
+                    enabled = revokingSessionId == null
+                ) {
+                    Text("Cancel", style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary))
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -918,4 +1128,130 @@ private fun AccountDivider() {
             .height(1.dp)
             .background(theme.colors.surfaceBorder)
     )
+}
+
+@Composable
+private fun ActiveSessionItemRow(
+    session: NebulaApiClient.ActiveDeviceSession,
+    isRevoking: Boolean,
+    onRevoke: () -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(theme.colors.surfaceElevated)
+                .border(1.dp, theme.colors.surfaceBorder, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PhoneAndroid,
+                contentDescription = null,
+                tint = if (session.isCurrent) theme.colors.primaryAccent else theme.colors.textSecondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = session.deviceInfo.ifBlank { "Android Device" },
+                    style = theme.typography.bodyMedium.copy(
+                        color = theme.colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                if (session.isCurrent) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "This device",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.primaryAccent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = "${session.ipAddress} • Last active: ${formatSessionTime(session.lastActiveAt)}",
+                style = theme.typography.caption.copy(
+                    color = theme.colors.textSecondary,
+                    fontSize = 11.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        if (!session.isCurrent) {
+            if (isRevoking) {
+                CircularProgressIndicator(
+                    color = theme.colors.errorColor,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                IconButton(
+                    onClick = onRevoke,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                        contentDescription = "Log out device",
+                        tint = theme.colors.errorColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatSessionTime(raw: String?): String {
+    if (raw.isNullOrBlank()) return "Recently"
+    val patterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ssXXX"
+    )
+    for (pattern in patterns) {
+        try {
+            val parser = SimpleDateFormat(pattern, Locale.US)
+            parser.timeZone = TimeZone.getTimeZone("UTC")
+            val date = parser.parse(raw) ?: continue
+            val now = System.currentTimeMillis()
+            val diff = now - date.time
+            return when {
+                diff < 60_000L -> "Just now"
+                diff < 3600_000L -> "${diff / 60_000L}m ago"
+                diff < 86400_000L -> "${diff / 3600_000L}h ago"
+                else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(date)
+            }
+        } catch (_: Exception) {}
+    }
+    return raw.take(10)
 }

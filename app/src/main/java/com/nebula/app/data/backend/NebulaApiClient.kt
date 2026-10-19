@@ -625,7 +625,49 @@ object NebulaApiClient {
 
 
     // ==========================================
-    // MEMBERSHIP & BILLING
+    // SESSIONS & DEVICES (MAX 2 DEVICES)
+    // ==========================================
+    data class ActiveDeviceSession(
+        val id: String,
+        val deviceId: String?,
+        val deviceInfo: String,
+        val ipAddress: String,
+        val lastActiveAt: String,
+        val createdAt: String,
+        val isCurrent: Boolean
+    )
+
+    suspend fun getActiveSessions(): ApiResponse<List<ActiveDeviceSession>> {
+        val res = request("/auth/sessions", "GET")
+        return when (res) {
+            is ApiResponse.Success -> {
+                val array = res.data.optJSONArray("data") ?: JSONArray()
+                val list = mutableListOf<ActiveDeviceSession>()
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    list.add(
+                        ActiveDeviceSession(
+                            id = obj.optString("id"),
+                            deviceId = obj.optString("deviceId").takeIf { it.isNotBlank() },
+                            deviceInfo = obj.optString("deviceInfo", "Android Device"),
+                            ipAddress = obj.optString("ipAddress", "unknown"),
+                            lastActiveAt = obj.optString("lastActiveAt"),
+                            createdAt = obj.optString("createdAt"),
+                            isCurrent = obj.optBoolean("isCurrent", false)
+                        )
+                    )
+                }
+                ApiResponse.Success(list)
+            }
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun revokeSession(sessionId: String): ApiResponse<JSONObject> =
+        request("/auth/sessions/$sessionId", "DELETE")
+
+    // ==========================================
+    // MEMBERSHIP & BILLING (RAZORPAY STRICT VALIDATION)
     // ==========================================
     suspend fun getMembershipPlans(): ApiResponse<JSONArray> {
         val res = request("/billing/plans", "GET")
@@ -634,6 +676,26 @@ object NebulaApiClient {
             is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
         }
     }
+
+    suspend fun createRazorpayOrder(tier: String): ApiResponse<JSONObject> =
+        request("/billing/razorpay/create-order", "POST", JSONObject().put("tier", tier))
+
+    suspend fun verifyRazorpayPayment(
+        orderId: String,
+        paymentId: String,
+        signature: String,
+        tier: String
+    ): ApiResponse<JSONObject> =
+        request(
+            "/billing/razorpay/verify",
+            "POST",
+            JSONObject().apply {
+                put("razorpay_order_id", orderId)
+                put("razorpay_payment_id", paymentId)
+                put("razorpay_signature", signature)
+                put("tier", tier)
+            }
+        )
 
     suspend fun verifyPurchase(purchaseToken: String, planTier: String): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
