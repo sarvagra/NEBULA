@@ -158,18 +158,18 @@ class MainActivity : ComponentActivity() {
                                 onExitApp = { finish() },
                                 modifier = Modifier.fillMaxSize()
                             )
-                        } else if (showWelcomeBack) {
-                            WelcomeBackScreen(
-                                displayName = uiState.userProfile.displayName,
-                                onContinue = { homeViewModel.dismissWelcomeBack() },
-                                modifier = Modifier.fillMaxSize()
-                            )
                         } else if (!uiState.userProfile.isOnboardingCompleted) {
                             com.nebula.app.ui.auth.NebulaOnboardingScreen(
                                 initialProfile = uiState.userProfile,
                                 onCompleteOnboarding = { displayName, username, dob, gender, avatarUri ->
                                     homeViewModel.onCompleteOnboarding(displayName, username, dob, gender, avatarUri)
                                 },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (showWelcomeBack) {
+                            WelcomeBackScreen(
+                                displayName = uiState.userProfile.displayName,
+                                onContinue = { homeViewModel.dismissWelcomeBack() },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {

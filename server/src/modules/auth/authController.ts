@@ -116,7 +116,7 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
         status: 'dynamic',
         presenceStatus: 'online',
         bio: '',
-        isOnboardingCompleted: isSpecialAdmin,
+        isOnboardingCompleted: false,
       });
     } else {
       if (!user.firebaseUid) {
@@ -240,13 +240,12 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
         status: 'dynamic',
         presenceStatus: 'online',
         bio: '',
-        isOnboardingCompleted: isSpecialAdmin,
+        isOnboardingCompleted: false,
       });
     } else {
       if (isSpecialAdmin) {
         user.role = 'admin';
         user.tier = 'premium_plus';
-        user.isOnboardingCompleted = true;
       }
       // Completion is explicit; a generated internal handle is not a chosen identity.
       if (user.isOnboardingCompleted) {
