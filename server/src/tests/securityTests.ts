@@ -1630,6 +1630,59 @@ async function runSecurityTests() {
     });
   });
 
+  // 18. EMERGENCY SECURITY LOCKDOWN & HONEYPOT TRIPWIRE TESTS
+  await assertTest('Accessing exposed honeypot (/.env) trips circuit breaker & returns 503', async () => {
+    const res = await makeRequest('/.env');
+    if (res.status !== 503) {
+      throw new Error(`Expected honeypot probe to return 503 lockdown, got ${res.status}`);
+    }
+    const json = (await res.json()) as any;
+    if (json.error !== 'CRITICAL_SECURITY_LOCKDOWN') {
+      throw new Error(`Expected error CRITICAL_SECURITY_LOCKDOWN, got ${json.error}`);
+    }
+  });
+
+  await assertTest('Subsequent legitimate API requests are rejected during lockdown with 503', async () => {
+    const res = await makeRequest('/api/v1/users/me', {
+      headers: { Authorization: `Bearer ${validToken}` },
+    });
+    if (res.status !== 503) {
+      throw new Error(`Expected ordinary API to be frozen during lockdown (503), got ${res.status}`);
+    }
+  });
+
+  await assertTest('Admin unlock restores backend operations after lockdown', async () => {
+    // 1. Invalid key rejected
+    const badUnlock = await makeRequest('/api/v1/security/admin-unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: 'wrong_secret' }),
+    });
+    if (badUnlock.status !== 403) {
+      throw new Error(`Expected wrong admin secret to be rejected with 403, got ${badUnlock.status}`);
+    }
+
+    // 2. Valid key successfully unlocks
+    const goodUnlock = await makeRequest('/api/v1/security/admin-unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: 'nebula_emergency_unlock_2026' }),
+    });
+    if (goodUnlock.status !== 200) {
+      throw new Error(`Expected admin unlock with valid key to return 200, got ${goodUnlock.status}`);
+    }
+
+    // 3. Normal API request now passes
+    const statusRes = await makeRequest('/api/v1/security/status');
+    if (statusRes.status !== 200) {
+      throw new Error(`Expected status endpoint to return 200 after unlock, got ${statusRes.status}`);
+    }
+    const statusJson = (await statusRes.json()) as any;
+    if (statusJson.lockedDown !== false) {
+      throw new Error(`Expected lockedDown to be false after unlock, got ${statusJson.lockedDown}`);
+    }
+  });
+
   // Teardown
   try {
     await UserModel.deleteMany({ username: { $in: ['test_alice', 'test_bob', 'test_rename', 'test_renamed', 'renamed_again'] } });

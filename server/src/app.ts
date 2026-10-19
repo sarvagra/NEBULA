@@ -17,6 +17,7 @@ import { billingRouter } from './modules/billing/billingRoutes';
 import { analyticsRouter } from './modules/analytics/analyticsRoutes';
 import { mediaRouter } from './modules/media/mediaRoutes';
 import { redirectToObject } from './modules/media/storageController';
+import { securityLockdownMiddleware } from './middlewares/securityLockdown';
 
 export function createApp(): express.Application {
   const app = express();
@@ -61,7 +62,7 @@ export function createApp(): express.Application {
         return callback(new Error('CORS request blocked: Origin not allowed by Nebula security policy'));
       },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Admin-Key'],
       credentials: true,
     })
   );
@@ -77,6 +78,9 @@ export function createApp(): express.Application {
     express.json({ limit: isMediaUpload ? '42mb' : '100kb' })(req, res, next);
   });
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+
+  // 4. Emergency Security Circuit Breaker & Honeypot Defenses
+  app.use(securityLockdownMiddleware);
 
   // Media uploads can be 30 MiB; allow time for mobile uplinks while retaining a bounded timeout for other APIs.
   app.use((req, res, next) => {

@@ -220,3 +220,100 @@ export async function sendAutomatedNotificationEmail(
   return { sent: false, reason: 'no_email_transporter' };
 }
 
+/**
+ * Dispatches an emergency security alert directly to the administrator.
+ * Bypasses user notification preferences because this is a mission-critical infrastructure alert.
+ */
+export async function sendEmergencySecurityAlert(
+  adminEmail: string,
+  incident: {
+    reason: string;
+    ip: string;
+    method: string;
+    path: string;
+    query: any;
+    bodySnippet: string;
+    userAgent: string;
+    timestamp: string;
+  }
+): Promise<SendOtpResult> {
+  const subject = `🚨 CRITICAL SECURITY ALERT: Nebula Backend Frozen / Lockdown Engaged (${incident.reason.slice(0, 40)})`;
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { margin: 0; padding: 0; background-color: #0b0c10; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f0f2fa; }
+        .container { max-width: 580px; margin: 30px auto; background: #181119; border: 2px solid #ef4444; border-radius: 16px; padding: 32px 28px; }
+        .badge { background: #ef4444; color: #ffffff; padding: 4px 10px; border-radius: 6px; font-weight: 800; font-size: 12px; letter-spacing: 1px; display: inline-block; margin-bottom: 12px; }
+        .title { font-size: 20px; font-weight: 800; color: #fca5a5; margin-bottom: 8px; }
+        .desc { font-size: 14px; color: #fecaca; line-height: 1.5; margin-bottom: 20px; }
+        .card { background: #0e070c; border: 1px solid #7f1d1d; border-radius: 10px; padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.6; color: #f87171; overflow-x: auto; }
+        .row { margin-bottom: 8px; }
+        .key { color: #fca5a5; font-weight: 700; }
+        .footer { margin-top: 24px; font-size: 12px; color: #991b1b; text-align: center; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="badge">EMERGENCY TRIPWIRE ACTIVATED</div>
+        <div class="title">Nebula Backend Circuit Breaker Engaged</div>
+        <p class="desc">
+          An illegal access or database tampering probe was detected. The backend has <strong>frozen all incoming traffic</strong> (0 requests accepted) to preserve system integrity.
+        </p>
+        <div class="card">
+          <div class="row"><span class="key">Incident Reason:</span> ${incident.reason}</div>
+          <div class="row"><span class="key">Attacker IP:</span> ${incident.ip}</div>
+          <div class="row"><span class="key">Request:</span> ${incident.method} ${incident.path}</div>
+          <div class="row"><span class="key">User-Agent:</span> ${incident.userAgent}</div>
+          <div class="row"><span class="key">Query:</span> ${JSON.stringify(incident.query)}</div>
+          <div class="row"><span class="key">Body Snippet:</span> ${incident.bodySnippet}</div>
+          <div class="row"><span class="key">Timestamp:</span> ${incident.timestamp}</div>
+        </div>
+        <p class="footer">
+          To safely restore services, trigger <code>POST /api/v1/security/admin-unlock</code> with your admin key.
+        </p>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const resend = getResendClient();
+  if (resend) {
+    try {
+      const fromAddress = config.email.fromEmail || 'Nebula Security <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
+        from: fromAddress,
+        to: [adminEmail],
+        subject,
+        html,
+      });
+
+      if (!error) {
+        console.log(`[SECURITY ALERT] Dispatched emergency incident alert to ${adminEmail} (ID: ${data?.id})`);
+        return { sent: true };
+      }
+    } catch (err: any) {
+      console.warn('[SECURITY ALERT] Resend alert dispatch failed:', err.message);
+    }
+  }
+
+  const mailer = getTransporter();
+  if (mailer) {
+    try {
+      await mailer.sendMail({
+        from: config.email.fromEmail || 'security@nebula.app',
+        to: adminEmail,
+        subject,
+        html,
+      });
+      return { sent: true };
+    } catch (err: any) {
+      return { sent: false, reason: err.message };
+    }
+  }
+
+  return { sent: false, reason: 'no_email_transporter' };
+}
+
