@@ -14,7 +14,7 @@ function getTransporter(): Transporter | null {
 
   const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass } = config.email;
 
-  if (!smtpUser && !smtpHost) {
+  if (!smtpUser || !smtpPass) {
     return null;
   }
 
@@ -24,12 +24,12 @@ function getTransporter(): Transporter | null {
         host: smtpHost,
         port: smtpPort,
         secure: smtpSecure || smtpPort === 465,
-        auth: smtpUser && smtpPass ? {
+        auth: {
           user: smtpUser,
           pass: smtpPass,
-        } : undefined,
+        },
       });
-    } else if (smtpUser && smtpPass) {
+    } else {
       // Standard Gmail service with App Password
       transporter = nodemailer.createTransport({
         service: 'gmail',
@@ -48,22 +48,19 @@ function getTransporter(): Transporter | null {
 }
 
 /**
- * Sends a 6-digit OTP verification email using Gmail / SMTP.
- * If credentials are not yet configured in the environment, it safely logs the code
- * to the server console and allows login to continue without 503 errors.
+ * Sends a 6-digit OTP verification email directly to the recipient inbox using Gmail SMTP.
  */
 export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
   const mailer = getTransporter();
 
   if (!mailer) {
-    console.log(`\n================================================================`);
-    console.log(`[NEBULA AUTH] 🔑 OTP FOR ${to}: [ ${code} ]`);
-    console.log(`  STATUS: Gmail SMTP credentials pending. Code logged above for immediate access.`);
-    console.log(`================================================================\n`);
+    if (process.env.NODE_ENV === 'test') {
+      return { sent: true, deliveredToInbox: false };
+    }
+    console.error(`[EMAIL SERVICE] No Gmail SMTP credentials configured (SMTP_USER/SMTP_PASS missing).`);
     return {
-      sent: true,
-      deliveredToInbox: false,
-      reason: 'Sandbox fallback: code logged to server console',
+      sent: false,
+      reason: 'SMTP credentials not configured on server',
     };
   }
 
@@ -117,10 +114,9 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendOtpRes
       deliveredToInbox: true,
     };
   } catch (err: any) {
-    console.warn(`[NEBULA AUTH] ⚠️ Failed to send OTP email via Gmail/SMTP to ${to}:`, err.message);
+    console.error(`[NEBULA AUTH] ⚠️ Failed to send OTP email via Gmail/SMTP to ${to}:`, err.message);
     return {
-      sent: true,
-      deliveredToInbox: false,
+      sent: false,
       reason: err.message,
     };
   }

@@ -68,7 +68,7 @@ import com.nebula.app.ui.components.NebulaLogo
 fun NebulaAuthScreen(
     onSignInWithGoogle: () -> Unit,
     onSignInWithEmail: (email: String, displayName: String) -> Unit = { _, _ -> },
-    onRequestOtp: (email: String, onResult: (Boolean, String?) -> Unit) -> Unit = { _, _ -> },
+    onRequestOtp: (email: String, onResult: (Boolean) -> Unit) -> Unit = { _, _ -> },
     onVerifyOtp: (email: String, otp: String) -> Unit = { _, _ -> },
     isAuthLoading: Boolean,
     errorMessage: String? = null,
@@ -82,7 +82,6 @@ fun NebulaAuthScreen(
     var emailInput by remember { mutableStateOf("") }
     var otpStep by remember { mutableIntStateOf(1) } // 1: Email input, 2: OTP input
     var otpInput by remember { mutableStateOf("") }
-    var fallbackDevCode by remember { mutableStateOf<String?>(null) }
     var isSendingOtp by remember { mutableStateOf(false) }
     val isGmailAddress = emailInput.trim().lowercase().endsWith("@gmail.com")
 
@@ -428,26 +427,6 @@ fun NebulaAuthScreen(
                             )
                         )
 
-                        if (!fallbackDevCode.isNullOrBlank()) {
-                            Surface(
-                                color = theme.colors.primaryAccent.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, theme.colors.primaryAccent.copy(alpha = 0.35f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = "⚡ Verification code received from server:",
-                                        style = theme.typography.caption.copy(fontWeight = FontWeight.Bold, color = theme.colors.primaryAccent, fontSize = 11.5.sp)
-                                    )
-                                    Text(
-                                        text = "Code: $fallbackDevCode (auto-filled below)",
-                                        style = theme.typography.caption.copy(color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                    )
-                                }
-                            }
-                        }
-
                         OutlinedTextField(
                             value = otpInput,
                             onValueChange = { otpInput = it.filter { ch -> ch.isDigit() }.take(6) },
@@ -468,7 +447,6 @@ fun NebulaAuthScreen(
                             onClick = { 
                                 otpStep = 1 
                                 otpInput = ""
-                                fallbackDevCode = null
                             },
                             contentPadding = PaddingValues(0.dp)
                         ) {
@@ -484,12 +462,10 @@ fun NebulaAuthScreen(
                         if (otpStep == 1) {
                             isSendingOtp = true
                             otpInput = ""
-                            fallbackDevCode = null
-                            onRequestOtp(cleanEmail) { sent, devCode ->
+                            onRequestOtp(cleanEmail) { sent ->
                                 isSendingOtp = false
                                 if (sent) {
-                                    fallbackDevCode = devCode
-                                    otpInput = devCode ?: ""
+                                    otpInput = ""
                                     otpStep = 2
                                 }
                             }

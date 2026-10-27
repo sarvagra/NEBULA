@@ -1477,13 +1477,13 @@ class HomeViewModel(
 
     private var otpRequestInFlight = false
 
-    fun requestOtp(target: String, onResult: (Boolean, String?) -> Unit) {
+    fun requestOtp(target: String, onResult: (Boolean) -> Unit) {
         if (otpRequestInFlight) return
         otpRequestInFlight = true
         val manager = authManager
         if (manager == null) {
             otpRequestInFlight = false
-            onResult(false, null)
+            onResult(false)
             return
         }
         viewModelScope.launch {
@@ -1492,17 +1492,12 @@ class HomeViewModel(
                 val res = manager.requestOtp(target)
                 _uiState.value = _uiState.value.copy(isAuthLoading = false)
                 if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
-                    val devCode = res.data.optJSONObject("data")?.optString("devCode")?.takeIf { it.isNotBlank() }
-                    val msg = if (!devCode.isNullOrBlank()) {
-                        "Verification code: $devCode"
-                    } else {
-                        res.data.optString("message", "Verification code dispatched")
-                    }
+                    val msg = res.data.optString("message", "Verification code sent to your email")
                     _uiState.value = _uiState.value.copy(quickToastMessage = msg)
-                    onResult(true, devCode)
+                    onResult(true)
                 } else if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error) {
                     _uiState.value = _uiState.value.copy(authErrorMessage = res.message, quickToastMessage = res.message)
-                    onResult(false, null)
+                    onResult(false)
                 }
             } finally {
                 otpRequestInFlight = false

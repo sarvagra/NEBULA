@@ -157,9 +157,9 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
 
 export async function requestOtp(req: Request, res: Response): Promise<void> {
   try {
-    const rawTarget = (req.body.email || '').trim().toLowerCase();
+    const rawTarget = (req.body.email || req.body.phone || '').trim().toLowerCase();
     if (!rawTarget) {
-      res.status(400).json({ success: false, error: 'A Gmail address is required' });
+      res.status(400).json({ success: false, error: 'A valid email address is required' });
       return;
     }
 
@@ -187,12 +187,8 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
 
     res.json({
       success: true,
-      message: emailResult.deliveredToInbox ? 'Verification code sent to your email' : 'Verification code dispatched',
+      message: 'Verification code sent to your email',
       isNewUser: !existingUser,
-      emailSent: emailResult.deliveredToInbox ?? true,
-      data: {
-        devCode: (process.env.NODE_ENV === 'development' || !emailResult.deliveredToInbox) ? code : undefined,
-      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to dispatch verification code' });
