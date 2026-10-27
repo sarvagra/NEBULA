@@ -8,10 +8,38 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 
 class NebulaApplication : Application(), ImageLoaderFactory {
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
+            val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (isDebuggable) {
+                appCheck.installAppCheckProviderFactory(
+                    com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory.getInstance()
+                )
+            } else {
+                appCheck.installAppCheckProviderFactory(
+                    com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory.getInstance()
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .components {
             if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory())
             else add(GifDecoder.Factory())
+        }
+        .memoryCache {
+            coil.memory.MemoryCache.Builder(this)
+                .maxSizePercent(0.25)
+                .build()
+        }
+        .diskCache {
+            coil.disk.DiskCache.Builder()
+                .directory(cacheDir.resolve("image_cache"))
+                .maxSizeBytes(250L * 1024 * 1024)
+                .build()
         }
         .crossfade(true)
         .build()

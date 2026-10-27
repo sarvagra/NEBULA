@@ -10,17 +10,42 @@ Nebula operates under a **Zero-Trust, Server-Authoritative** security architectu
 
 ---
 
-## 2. Authentication & Session Management
+## 2. Authentication & Multi-Device Session Management
 
 ### Access & Refresh Token Architecture
-* **Access Tokens**: Short-lived (7 days), signed with HMAC SHA-256 (`JWT_SECRET`). Payload includes user ID, handle, display name, tier, and role.
+* **Access Tokens**: Short-lived (7 days), signed with HMAC SHA-256 (`JWT_SECRET`). Payload includes user ID, handle, display name, tier, role, persistent `deviceId`, and database `sessionId`.
 * **Refresh Tokens**: Cryptographically generated 40-byte random tokens stored as SHA-256 hashes in MongoDB (`RefreshToken` collection).
-* **Revocability**: Refresh tokens can be individually revoked on logout or universally revoked during security resets (`AuthService.revokeAllUserSessions`).
+* **Strict 2-Device Concurrency Cap**: Accounts are strictly limited to at most 2 active devices. Attempting to log into a 3rd device without revoking an existing session returns `403 DEVICE_LIMIT_REACHED`.
+* **Stateful Real-Time Revocability**: When a session is logged out or remotely revoked from Settings > Account, `authMiddleware` validates `sessionId` against active records in `RefreshTokenModel`. Revoked sessions are rejected immediately with `401 SESSION_REVOKED`, ensuring instant termination across all devices.
+* **Current Device Tracking**: Every Android client maintains a persistent UUID (`deviceId`) and passes `X-Device-Id` and `X-Device-Info`, allowing accurate "This device" identification in session management.
 * **MongoDB TTL Index**: Expired refresh tokens are automatically purged by MongoDB background workers.
 
 ---
 
-## 3. Defense-in-Depth Mechanisms
+## 3. Server-Side Attestation & Network Security
+
+### Firebase App Check & Play Integrity Attestation
+* **Mobile Binary Verification**: The server verifies that incoming requests originate from legitimate, untampered Android binaries via Firebase App Check tokens (`X-Firebase-AppCheck`), backed by Google's Play Integrity API.
+* **App Check Middleware**: Evaluates incoming tokens cryptographically with Firebase Admin SDK (`verifyAppCheckToken`). Configurable enforcement (`APP_CHECK_ENFORCEMENT=enforce|warn|off`) rejects tampered, rooted, or uncertified devices with `401 APP_CHECK_MISSING` / `403 APP_CHECK_INVALID`.
+
+### Declarative Certificate Pinning
+* **MITM Proxy Prevention**: Android `network_security_config.xml` enforces SHA-256 SPKI certificate pinning for the production backend (`onrender.com`).
+* **Backup Pin Redundancy**: Configured with leaf pin, intermediate CA pin (`Google Trust Services WE1`), backup root pin (`GTS Root R4`), and fallback root pin (`ISRG Root X1`), preventing service outages during certificate renewal while blocking user-installed and corporate MITM certificates.
+
+---
+
+## 4. Backend & Data Least-Privilege Architecture
+
+### S3 Object Storage Hardening
+* **Short-Lived Presigned URLs**: Private object download and redirect URLs expire after **15 minutes (900 seconds)**, minimizing the window of exposure if a URL is captured.
+* **Scoped IAM Role**: S3 storage credentials operate under a dedicated least-privilege IAM policy granting only `s3:GetObject` and `s3:PutObject` restricted to the application bucket prefix (`arn:aws:s3:::nebula-app-storage/*`), with administrative and bucket-deletion capabilities completely omitted.
+
+### MongoDB Atlas Least Privilege
+* **Scoped Database User**: Backend MongoDB connection uses credentials with `readWrite` permissions strictly scoped to the `nebula` database (`readWrite@nebula`). Administrative roles (`atlasAdmin`, `readWriteAnyDatabase`, `dbAdminAnyDatabase`) are strictly disallowed.
+
+---
+
+## 5. Defense-in-Depth Mechanisms
 
 ### Input Sanitization & NoSQL Injection Protection
 * Global `noSqlSanitizer` recursively rejects any query, body, or param containing keys prefixed with `$` (e.g. `$gt`, `$ne`, `$where`, `$regex`) or object path separators (`.`), preventing NoSQL operator injection.

@@ -6,6 +6,7 @@ import { toPrivateUserDTO, toPublicUserDTO } from '../../utils/dto';
 import { RoomModel } from '../../models/Room';
 import { notifyRoomsParticipantProfileUpdated } from '../../realtime/socketServer';
 import { entitlementsForTier } from '../../utils/entitlements';
+import { uploadObject } from '../../services/objectStorage';
 
 function addCalendarMonths(date: Date, months: number): Date {
   const result = new Date(date);
@@ -176,13 +177,39 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     }
     if (bannerIndex !== undefined) updateFields.bannerIndex = bannerIndex;
     if (bannerUrl !== undefined) {
-      updateFields.bannerUrl = bannerUrl;
+      if (bannerUrl && bannerUrl.startsWith('data:')) {
+        try {
+          const match = bannerUrl.match(/^data:([^;,]+);base64,/);
+          const mime = match ? match[1] : 'image/jpeg';
+          const ext = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'mp4' : mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+          const key = `banners/${req.user.id}/${Date.now()}.${ext}`;
+          updateFields.bannerUrl = await uploadObject(bannerUrl, key, mime);
+        } catch {
+          updateFields.bannerUrl = bannerUrl;
+        }
+      } else {
+        updateFields.bannerUrl = bannerUrl;
+      }
     }
     if (interests) {
       // Tag allowance is server-authoritative per tier (Basic 5, Premium 8, Premium Plus 12).
       updateFields.interests = (Array.isArray(interests) ? interests : []).slice(0, entitlementsForTier(req.user.tier).maxProfileTags);
     }
-    if (avatarUrl !== undefined) updateFields.avatarUrl = avatarUrl;
+    if (avatarUrl !== undefined) {
+      if (avatarUrl && avatarUrl.startsWith('data:')) {
+        try {
+          const match = avatarUrl.match(/^data:([^;,]+);base64,/);
+          const mime = match ? match[1] : 'image/jpeg';
+          const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+          const key = `avatars/${req.user.id}/${Date.now()}.${ext}`;
+          updateFields.avatarUrl = await uploadObject(avatarUrl, key, mime);
+        } catch {
+          updateFields.avatarUrl = avatarUrl;
+        }
+      } else {
+        updateFields.avatarUrl = avatarUrl;
+      }
+    }
     if (isFriendCountPublic !== undefined) updateFields.isFriendCountPublic = isFriendCountPublic;
     if (isOnboardingCompleted !== undefined) {
       updateFields.isOnboardingCompleted = Boolean(isOnboardingCompleted);

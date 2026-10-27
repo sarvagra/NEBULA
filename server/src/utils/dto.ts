@@ -59,9 +59,11 @@ export interface PrivateUserDTO {
 
 export function toPublicUserDTO(user: IUser, relationship: string = 'none'): PublicUserDTO {
   const isActive = Boolean(
-    user.lastActiveAt &&
-    Date.now() - new Date(user.lastActiveAt).getTime() < 60_000 &&
-    user.presenceStatus !== 'offline'
+    user.presenceStatus !== 'offline' &&
+    user.status !== 'offline' &&
+    ((user.lastActiveAt && Date.now() - new Date(user.lastActiveAt).getTime() < 180_000) ||
+     user.presenceStatus === 'online' ||
+     user.presenceStatus === 'in_a_room')
   );
   return {
     id: user._id.toString(),
@@ -76,7 +78,7 @@ export function toPublicUserDTO(user: IUser, relationship: string = 'none'): Pub
       ? (user.customStatus || 'Custom')
       : user.status === 'offline' || user.presenceStatus === 'offline'
         ? 'Offline'
-        : isActive ? 'Active' : 'Offline',
+        : isActive ? (user.activeRoomId ? 'In a room' : 'Active') : 'Offline',
     profileStatus: ['dynamic', 'offline', 'custom'].includes(user.status) ? user.status : 'dynamic',
     presenceStatus: isActive && user.status !== 'offline' ? (user.activeRoomId ? 'in_a_room' : 'online') : 'offline',
     customStatus: user.customStatus,

@@ -129,6 +129,7 @@ class HomeViewModel(
                                 NebulaNotification(
                                     id = item.optString("id"),
                                     type = type,
+                                    actorId = actor?.optString("id")?.ifBlank { null },
                                     actorName = actor?.optString("displayName")?.ifBlank { null },
                                     actorAvatarUrl = actor?.optString("avatarUrl")?.ifBlank { null },
                                     actorAvatarLetter = actor?.optString("avatarLetter")?.ifBlank { "U" } ?: "U",
@@ -176,7 +177,9 @@ class HomeViewModel(
                                     customStatus = user.optString("customStatus", profile.customStatus),
                                     avatarUri = user.optString("avatarUrl").ifBlank { null },
                                     bannerUrl = user.optString("bannerUrl").ifBlank { null },
-                                    bannerIndex = user.optInt("bannerIndex", profile.bannerIndex),
+                                    bannerIndex = user.optInt("bannerIndex", profile.bannerIndex).let { serverIdx ->
+                                        if (profile.bannerIndex >= 5 && serverIdx in 0..4) profile.bannerIndex else serverIdx
+                                    },
                                     interests = user.optJSONArray("interests")?.let { values ->
                                         List(values.length()) { index -> values.optString(index) }
                                     } ?: profile.interests,
@@ -397,7 +400,10 @@ class HomeViewModel(
                                 bio = userObj.optString("bio", savedProfile.bio),
                                 status = userObj.optString("status", savedProfile.status).lowercase().let { if (it in setOf("dynamic", "offline", "custom")) it else "dynamic" },
                                 customStatus = userObj.optString("customStatus", savedProfile.customStatus),
-                                bannerIndex = userObj.optInt("bannerIndex", savedProfile.bannerIndex),
+                                bannerIndex = userObj.optInt("bannerIndex", savedProfile.bannerIndex).let { serverIdx ->
+                                    if (savedProfile.bannerIndex >= 5 && serverIdx in 0..4) savedProfile.bannerIndex else serverIdx
+                                },
+                                bannerUrl = userObj.optString("bannerUrl", savedProfile.bannerUrl ?: "").ifEmpty { savedProfile.bannerUrl },
                                 isFriendCountPublic = userObj.optBoolean("isFriendCountPublic", savedProfile.isFriendCountPublic),
                                 avatarUri = userObj.optString("avatarUrl", savedProfile.avatarUri ?: "").ifEmpty { savedProfile.avatarUri },
                                 subscriptionTier = backendTier,
@@ -650,13 +656,37 @@ class HomeViewModel(
     }
 
     // --- SOCIAL & CHATS ACTIONS ---
+    private var lastConversationClickTime = 0L
+
     fun onSelectSocialConversation(id: String) {
-        viewModelScope.launch {
-            socialRepository.selectConversation(id)
+        val now = System.currentTimeMillis()
+        if (now - lastConversationClickTime < 400L && _uiState.value.activeSocialConversation?.id == id) {
+            return
+        }
+        lastConversationClickTime = now
+
+        // STEP 1: Instant optimistic UI opening (0ms - zero delay before screen transition)
+        val instantTarget = socialRepository.conversations.value.firstOrNull { it.id == id }
+            ?: _uiState.value.socialConversations.firstOrNull { it.id == id }
+
+        if (instantTarget != null) {
             _uiState.value = _uiState.value.copy(
                 activeRoom = null,
-                activeSocialConversation = socialRepository.conversations.value.firstOrNull { it.id == id }
+                activeSocialConversation = instantTarget
             )
+        }
+
+        // STEP 2: Asynchronously select, sync read status, and start live polling
+        viewModelScope.launch {
+            socialRepository.selectConversation(id)
+            val updated = socialRepository.activeConversation.value
+                ?: socialRepository.conversations.value.firstOrNull { it.id == id }
+            if (updated != null && (_uiState.value.activeSocialConversation?.id == id || _uiState.value.activeSocialConversation == null)) {
+                _uiState.value = _uiState.value.copy(
+                    activeRoom = null,
+                    activeSocialConversation = updated
+                )
+            }
             startConversationSync()
         }
     }
@@ -684,6 +714,14 @@ class HomeViewModel(
     fun onOpenNotificationDestination(type: String, id: String) {
         when (type) {
             "dm" -> viewModelScope.launch {
+                val instant = socialRepository.conversations.value.firstOrNull { it.id == id }
+                if (instant != null) {
+                    _uiState.value = _uiState.value.copy(
+                        currentTab = NebulaTab.CHATS,
+                        activeRoom = null,
+                        activeSocialConversation = instant
+                    )
+                }
                 if (socialRepository.conversations.value.none { it.id == id }) socialRepository.refresh()
                 socialRepository.selectConversation(id)
                 val conversation = socialRepository.activeConversation.value
@@ -693,9 +731,10 @@ class HomeViewModel(
                         activeRoom = null,
                         activeSocialConversation = conversation
                     )
-                } else {
+                } else if (instant == null) {
                     showToast("That conversation is no longer available.")
                 }
+                startConversationSync()
             }
             "room_invite", "room_activity" -> onJoinRoom(id)
             "friend_request" -> onTabSelected(NebulaTab.FRIENDS)
@@ -703,24 +742,35 @@ class HomeViewModel(
     }
 
     fun onMessageFriend(user: NebulaUser) {
+        val now = System.currentTimeMillis()
+        if (now - lastConversationClickTime < 400L && _uiState.value.activeSocialConversation?.partnerUser?.id == user.id) {
+            return
+        }
+        lastConversationClickTime = now
+
         val conversation = _uiState.value.socialConversations.firstOrNull { it.partnerUser?.id == user.id }
+            ?: socialRepository.conversations.value.firstOrNull { it.partnerUser?.id == user.id }
             ?: NebulaConversation(
                 id = user.id,
                 title = user.displayName,
                 isGroup = false,
                 partnerUser = user,
-                participants = listOf(user),
+                participants = listOf(NebulaUser.CurrentUser, user),
                 lastMessageText = "",
                 lastMessageTime = ""
             )
+
+        // Instant 0ms transition:
+        _uiState.value = _uiState.value.copy(
+            activeRoom = null,
+            activeSocialConversation = conversation
+        )
+
         viewModelScope.launch {
             if (_uiState.value.socialConversations.any { it.id == conversation.id }) {
                 socialRepository.selectConversation(conversation.id)
             }
-            _uiState.value = _uiState.value.copy(
-                activeRoom = null,
-                activeSocialConversation = socialRepository.activeConversation.value ?: conversation
-            )
+            startConversationSync()
         }
     }
 
@@ -796,12 +846,29 @@ class HomeViewModel(
         )
     }
 
+    fun resolveUserRelationship(user: NebulaUser): NebulaUser {
+        val currentProfile = _uiState.value.userProfile
+        val isSelf = user.id == currentProfile.id || user.username.equals(currentProfile.username, ignoreCase = true)
+        if (isSelf) return user
+        val isFriend = _uiState.value.friends.any { it.id == user.id }
+        val incoming = _uiState.value.friendRequests.firstOrNull { it.sender.id == user.id }
+        val outgoing = _uiState.value.suggestedPeople.find { it.id == user.id }?.friendRequestPending == true || user.friendRequestPending
+        return user.copy(
+            isFriend = isFriend,
+            friendRequestReceived = !isFriend && incoming != null,
+            friendRequestId = incoming?.id ?: user.friendRequestId,
+            friendRequestPending = !isFriend && incoming == null && outgoing
+        )
+    }
+
     fun onOpenFriendProfile(user: NebulaUser) {
-        _uiState.value = _uiState.value.copy(activeFriendProfile = user)
-        navigateTo(FullScreenDestination.PublicProfile(user))
+        val resolved = resolveUserRelationship(user)
+        _uiState.value = _uiState.value.copy(activeFriendProfile = resolved)
+        navigateTo(FullScreenDestination.PublicProfile(resolved))
         if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
             socialRepository.loadPublicProfileById(user.id)?.let { loaded ->
-                _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
+                val resolvedLoaded = resolveUserRelationship(loaded)
+                _uiState.value = _uiState.value.copy(activeFriendProfile = resolvedLoaded, fullScreenDestination = FullScreenDestination.PublicProfile(resolvedLoaded))
             }
         }
     }
@@ -828,13 +895,31 @@ class HomeViewModel(
     }
 
     fun onOpenPublicProfile(user: NebulaUser) {
-        _uiState.value = _uiState.value.copy(activeFriendProfile = user)
-        navigateTo(FullScreenDestination.PublicProfile(user))
+        val resolved = resolveUserRelationship(user)
+        _uiState.value = _uiState.value.copy(activeFriendProfile = resolved)
+        navigateTo(FullScreenDestination.PublicProfile(resolved))
         if (user.id != _uiState.value.userProfile.id) viewModelScope.launch {
             socialRepository.loadPublicProfileById(user.id)?.let { loaded ->
-                _uiState.value = _uiState.value.copy(activeFriendProfile = loaded, fullScreenDestination = FullScreenDestination.PublicProfile(loaded))
+                val resolvedLoaded = resolveUserRelationship(loaded)
+                _uiState.value = _uiState.value.copy(activeFriendProfile = resolvedLoaded, fullScreenDestination = FullScreenDestination.PublicProfile(resolvedLoaded))
             }
         }
+    }
+
+    fun onOpenUserProfileById(userId: String, displayName: String? = null, avatarUrl: String? = null, avatarLetter: String? = null) {
+        val existing = _uiState.value.friends.firstOrNull { it.id == userId }
+            ?: _uiState.value.friendRequests.firstOrNull { it.sender.id == userId }?.sender
+            ?: _uiState.value.suggestedPeople.firstOrNull { it.id == userId }
+            ?: NebulaUser(
+                id = userId,
+                username = "@user",
+                displayName = displayName ?: "User",
+                avatarLetter = avatarLetter ?: "U",
+                avatarUrl = avatarUrl,
+                bio = "",
+                status = "Offline"
+            )
+        onOpenPublicProfile(existing)
     }
 
     fun onOpenEditProfile() {
@@ -878,6 +963,25 @@ class HomeViewModel(
         }
     }
 
+    fun updateOptimisticProfile(
+        bannerIndex: Int? = null,
+        bannerUrl: String? = null,
+        avatarUrl: String? = null
+    ) {
+        val current = _uiState.value.userProfile
+        val updated = current.copy(
+            bannerIndex = bannerIndex ?: current.bannerIndex,
+            bannerUrl = if (bannerIndex != null && bannerUrl == null) null else (bannerUrl ?: current.bannerUrl),
+            avatarUri = avatarUrl ?: current.avatarUri,
+            isCustomAvatar = if (avatarUrl != null) true else current.isCustomAvatar
+        )
+        sessionManager?.saveUserProfile(updated)
+        _uiState.value = _uiState.value.copy(userProfile = updated)
+        viewModelScope.launch {
+            profileRepository.setLoggedInUser(updated)
+        }
+    }
+
     fun onSaveProfile(
         displayName: String,
         username: String,
@@ -902,10 +1006,36 @@ class HomeViewModel(
                 return@launch
             }
 
+            val current = _uiState.value.userProfile
+            // ⚡ Immediate optimistic UI update - reflects instantly on Profile
+            val optimisticProfile = current.copy(
+                displayName = displayName,
+                username = "@$cleanUsername",
+                bio = bio,
+                status = status,
+                customStatus = customStatus,
+                bannerIndex = bannerIndex,
+                bannerUrl = bannerUrl,
+                interests = interests,
+                avatarUri = avatarUrl ?: current.avatarUri,
+                avatarFallbackLetter = displayName.firstOrNull()?.uppercase() ?: "N",
+                isCustomAvatar = !avatarUrl.isNullOrEmpty() || current.isCustomAvatar,
+                isFriendCountPublic = isFriendCountPublic,
+                isOnboardingCompleted = true
+            )
+            profileRepository.setLoggedInUser(optimisticProfile)
+            sessionManager?.saveUserProfile(optimisticProfile)
+
+            val prev = if (navBackStack.isNotEmpty()) navBackStack.pop() else null
+            _uiState.value = _uiState.value.copy(
+                userProfile = optimisticProfile,
+                isFriendCountPublic = isFriendCountPublic,
+                fullScreenDestination = prev
+            )
+
             // Only send the tier-gated presence fields when they actually changed.
             // Otherwise an untouched "offline" value blocks every other edit on a
             // Basic account, which is exactly what users were hitting.
-            val current = _uiState.value.userProfile
             val statusChanged = !status.equals(current.status, ignoreCase = true)
             val customStatusChanged = customStatus != current.customStatus
             val apiRes = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
@@ -924,37 +1054,19 @@ class HomeViewModel(
 
             when (apiRes) {
                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
-                    val updatedProfile = _uiState.value.userProfile.copy(
-                        displayName = displayName,
-                        username = "@$cleanUsername",
-                        bio = bio,
-                        status = status,
-                        customStatus = customStatus,
-                        bannerIndex = bannerIndex,
-                        bannerUrl = bannerUrl ?: _uiState.value.userProfile.bannerUrl,
-                        interests = interests,
-                        avatarUri = avatarUrl ?: _uiState.value.userProfile.avatarUri,
-                        avatarFallbackLetter = displayName.firstOrNull()?.uppercase() ?: "N",
-                        isCustomAvatar = !avatarUrl.isNullOrEmpty() || _uiState.value.userProfile.isCustomAvatar,
-                        isFriendCountPublic = isFriendCountPublic,
-                        isOnboardingCompleted = true
+                    val serverProfile = optimisticProfile.copy(
+                        bannerUrl = bannerUrl ?: current.bannerUrl,
+                        avatarUri = avatarUrl ?: current.avatarUri
                     )
-                    profileRepository.setLoggedInUser(updatedProfile)
-                    sessionManager?.saveUserProfile(updatedProfile)
-
-                    val prev = if (navBackStack.isNotEmpty()) navBackStack.pop() else null
-                    _uiState.value = _uiState.value.copy(
-                        userProfile = updatedProfile,
-                        isFriendCountPublic = isFriendCountPublic,
-                        fullScreenDestination = prev
-                    )
+                    profileRepository.setLoggedInUser(serverProfile)
+                    sessionManager?.saveUserProfile(serverProfile)
                     showToast("Profile saved successfully")
                 }
                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
                     if (apiRes.statusCode == 409) {
                         showToast("Error: Username @$cleanUsername is already taken")
                     } else {
-                        showToast("Error: ${apiRes.message}")
+                        showToast("Notice: Saved locally (${apiRes.message})")
                     }
                 }
             }
@@ -1264,6 +1376,21 @@ class HomeViewModel(
         }
     }
 
+    fun onClearAllNotifications() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(notifications = emptyList())
+            when (com.nebula.app.data.backend.NebulaApiClient.clearAllNotifications()) {
+                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                    showToast("Notifications cleared")
+                }
+                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
+                    refreshAll()
+                    showToast("Failed to clear notifications")
+                }
+            }
+        }
+    }
+
     fun onAcceptNotification(notif: com.nebula.app.domain.model.NebulaNotification) {
         when (notif.type) {
             com.nebula.app.domain.model.NotificationType.FRIEND_REQUEST -> {
@@ -1365,7 +1492,12 @@ class HomeViewModel(
                 val res = manager.requestOtp(target)
                 _uiState.value = _uiState.value.copy(isAuthLoading = false)
                 if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
-                    val msg = res.data.optString("message", "Verification code dispatched")
+                    val devCode = res.data.optJSONObject("data")?.optString("devCode")
+                    val msg = if (!devCode.isNullOrBlank()) {
+                        "Verification code: $devCode"
+                    } else {
+                        res.data.optString("message", "Verification code dispatched")
+                    }
                     _uiState.value = _uiState.value.copy(quickToastMessage = msg)
                     onResult(true)
                 } else if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error) {
@@ -1462,14 +1594,17 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(isAuthLoading = true)
             runCatching { roomRepository.leaveRoom() }
             (roomRepository as? RoomRepositoryImpl)?.disconnectRealtime()
+            runCatching { com.nebula.app.data.backend.NebulaApiClient.logout() }
             manager?.signOut()
             sessionManager?.clearSession()
             (socialRepository as? SocialRepositoryImpl)?.clearLocalState()
             chatRepository.clearAllLocalData()
-            profileRepository.setLoggedInUser(com.nebula.app.domain.model.UserProfile(isLoggedIn = false))
+            val loggedOutProfile = com.nebula.app.domain.model.UserProfile(isLoggedIn = false)
+            profileRepository.setLoggedInUser(loggedOutProfile)
             com.nebula.app.data.backend.NebulaApiClient.authToken = null
             _uiState.value = _uiState.value.copy(
                 isAuthLoading = false,
+                userProfile = loggedOutProfile,
                 activeModalSheet = null,
                 fullScreenDestination = null,
                 activeRoom = null,

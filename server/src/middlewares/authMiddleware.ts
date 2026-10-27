@@ -3,10 +3,13 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { config } from '../config/env';
 import { UserModel, SubscriptionTier } from '../models/User';
+import { RefreshTokenModel } from '../models/RefreshToken';
 import { FirebaseService } from '../services/firebaseService';
 
 export interface AuthenticatedUser {
   id: string;
+  sessionId?: string;
+  deviceId?: string;
   username: string;
   displayName: string;
   tier: SubscriptionTier;
@@ -36,12 +39,33 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
   try {
     let user: any = null;
+    let decodedSessionId: string | undefined;
+    let decodedDeviceId: string | undefined;
 
     // 1. Try verifying as a Nebula session JWT
     try {
-      const decoded = jwt.verify(token, config.auth.jwtSecret) as { id: string };
+      const decoded = jwt.verify(token, config.auth.jwtSecret) as { id: string; sessionId?: string; deviceId?: string };
       if (decoded && decoded.id) {
+        decodedSessionId = decoded.sessionId;
+        decodedDeviceId = decoded.deviceId;
+
         if (mongoose.connection.readyState === 1) {
+          // If the token is tied to a specific session, ensure it has not been revoked
+          if (decoded.sessionId) {
+            const activeSession = await RefreshTokenModel.findOne({
+              _id: decoded.sessionId,
+              revoked: false,
+              expiresAt: { $gt: new Date() },
+            });
+            if (!activeSession) {
+              res.status(401).json({
+                success: false,
+                error: 'Your session has been logged out or revoked.',
+                code: 'SESSION_REVOKED',
+              });
+              return;
+            }
+          }
           user = await UserModel.findById(decoded.id).select('_id username displayName tier role isBanned');
         }
       }
@@ -98,6 +122,8 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     // Attach server-authoritative identity (never trusted from client)
     req.user = {
       id: user._id.toString(),
+      sessionId: decodedSessionId,
+      deviceId: decodedDeviceId,
       username: user.username,
       displayName: user.displayName,
       tier: user.tier,

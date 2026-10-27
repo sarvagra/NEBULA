@@ -23,11 +23,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,13 +75,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-private val BANNER_PALETTES = listOf(
-    listOf(Color(0xFF1E1B4B), Color(0xFF312E81)),
-    listOf(Color(0xFF3B0764), Color(0xFF581C87)),
-    listOf(Color(0xFF042F2E), Color(0xFF115E59)),
-    listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)),
-    listOf(Color(0xFF090B10), Color(0xFF1E222D))
-)
+private val BANNER_PALETTES = com.nebula.app.ui.components.NebulaBannerThemes.ALL.map { it.colors }
 
 /**
  * NebulaAccountDetailScreen:
@@ -103,6 +99,8 @@ fun NebulaAccountDetailScreen(
     var revokingSessionId by remember { mutableStateOf<String?>(null) }
     var sessionToRevoke by remember { mutableStateOf<NebulaApiClient.ActiveDeviceSession?>(null) }
     var reloadSessionsToken by remember { mutableIntStateOf(0) }
+    var isRevokingAllOthers by remember { mutableStateOf(false) }
+    var showRevokeOthersConfirmDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadSessionsToken) {
         isLoadingSessions = true
@@ -216,58 +214,15 @@ fun NebulaAccountDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // Profile Banner Preview in Account
-                    val bannerColors = BANNER_PALETTES[userProfile.bannerIndex.coerceIn(0, BANNER_PALETTES.lastIndex)]
-                    Box(
+                    com.nebula.app.ui.components.NebulaBannerView(
+                        bannerUrl = userProfile.bannerUrl,
+                        bannerIndex = userProfile.bannerIndex,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(90.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .then(
-                                if (userProfile.bannerUrl.isNullOrBlank()) Modifier.background(Brush.horizontalGradient(bannerColors))
-                                else Modifier.background(Color.Black)
-                            )
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!userProfile.bannerUrl.isNullOrBlank()) {
-                            val bannerUri = userProfile.bannerUrl!!
-                            val base64Bitmap = remember(bannerUri) {
-                                if (bannerUri.startsWith("data:image")) {
-                                    try {
-                                        val data = bannerUri.substringAfter("base64,")
-                                        val decoded = Base64.decode(data, Base64.DEFAULT)
-                                        BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
-                                    } catch (e: Exception) {
-                                        null
-                                    }
-                                } else null
-                            }
-                            if (base64Bitmap != null) {
-                                Image(
-                                    bitmap = base64Bitmap.asImageBitmap(),
-                                    contentDescription = "Account Banner",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                AsyncImage(
-                                    model = bannerUri,
-                                    contentDescription = "Account Banner",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = "Profile Banner",
-                                style = theme.typography.caption.copy(
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp
-                                )
-                            )
-                        }
-                    }
+                            .height(90.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        borderColor = theme.colors.surfaceBorder
+                    )
 
                     Box(
                         modifier = Modifier
@@ -365,18 +320,36 @@ fun NebulaAccountDetailScreen(
                 }
             }
 
-            // Active Devices & Sessions (Max 2)
+            // Active Devices & Sessions (Max 2 concurrent)
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Active Devices & Sessions (${activeSessions.size}/2)",
-                        style = theme.typography.bodyMedium.copy(
-                            color = theme.colors.textSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        ),
-                        modifier = Modifier.padding(start = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Active Devices (${activeSessions.size}/2)",
+                            style = theme.typography.bodyMedium.copy(
+                                color = theme.colors.textSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        )
+                        IconButton(
+                            onClick = { reloadSessionsToken++ },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh devices",
+                                tint = theme.colors.textSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
 
                     Column(
                         modifier = Modifier
@@ -390,7 +363,7 @@ fun NebulaAccountDetailScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                        .padding(16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
@@ -400,7 +373,7 @@ fun NebulaAccountDetailScreen(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = "Loading active devices…",
+                                        text = "Checking active devices…",
                                         style = theme.typography.bodyMedium.copy(
                                             color = theme.colors.textSecondary,
                                             fontSize = 14.sp
@@ -437,23 +410,97 @@ fun NebulaAccountDetailScreen(
                                     }
                                 }
                             }
-                            activeSessions.isEmpty() -> {
-                                Text(
-                                    text = "No active devices recorded.",
-                                    style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary),
-                                    modifier = Modifier.padding(16.dp)
-                                )
-                            }
                             else -> {
-                                activeSessions.forEachIndexed { index, session ->
-                                    if (index > 0) {
-                                        AccountDivider()
+                                val current = activeSessions.firstOrNull { it.isCurrent }
+                                val others = activeSessions.filterNot { it.isCurrent }
+
+                                // 1. Primary "This Device" Card
+                                CurrentDeviceCard(
+                                    session = current,
+                                    userDeviceName = android.os.Build.MODEL
+                                )
+
+                                // 2. Other Signed-in Devices Section
+                                if (others.isNotEmpty()) {
+                                    AccountDivider()
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "OTHER SIGNED-IN DEVICES (${others.size})",
+                                            style = theme.typography.caption.copy(
+                                                color = theme.colors.textTertiary,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 0.8.sp,
+                                                fontSize = 10.5.sp
+                                            )
+                                        )
+
+                                        others.forEach { otherSession ->
+                                            OtherSessionRow(
+                                                session = otherSession,
+                                                isRevoking = revokingSessionId == otherSession.id,
+                                                onRevoke = { sessionToRevoke = otherSession }
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                        Button(
+                                            onClick = { showRevokeOthersConfirmDialog = true },
+                                            enabled = !isRevokingAllOthers,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(38.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = theme.colors.errorColor.copy(alpha = 0.12f),
+                                                contentColor = theme.colors.errorColor
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            if (isRevokingAllOthers) {
+                                                CircularProgressIndicator(
+                                                    color = theme.colors.errorColor,
+                                                    strokeWidth = 2.dp,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = "Log Out of All Other Devices",
+                                                    style = theme.typography.bodySmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 12.5.sp
+                                                    )
+                                                )
+                                            }
+                                        }
                                     }
-                                    ActiveSessionItemRow(
-                                        session = session,
-                                        isRevoking = revokingSessionId == session.id,
-                                        onRevoke = { sessionToRevoke = session }
-                                    )
+                                } else {
+                                    AccountDivider()
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00C853),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "No other devices. Your account is only signed in on this phone.",
+                                            style = theme.typography.caption.copy(
+                                                color = theme.colors.textSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -759,7 +806,13 @@ fun NebulaAccountDetailScreen(
                         scope.launch {
                             when (val response = NebulaApiClient.requestAccountDeletion()) {
                                 is NebulaApiClient.ApiResponse.Success -> {
-                                    otpInput = ""
+                                    val data = response.data.optJSONObject("data") ?: response.data
+                                    val devCode = data.optString("devCode").ifBlank { data.optString("code") }
+                                    if (devCode.isNotBlank()) {
+                                        otpInput = devCode
+                                    } else {
+                                        otpInput = ""
+                                    }
                                     deletionFlowStage = DeletionFlowStage.OTP
                                 }
                                 is NebulaApiClient.ApiResponse.Error -> {
@@ -920,13 +973,16 @@ fun NebulaAccountDetailScreen(
             textContentColor = theme.colors.textSecondary,
             title = {
                 Text(
-                    text = "Log out device?",
+                    text = if (target.isCurrent) "Log out of this device?" else "Log out device?",
                     style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
             text = {
                 Text(
-                    text = "Are you sure you want to log out ${target.deviceInfo}? This device will be disconnected and will need to log in again.",
+                    text = if (target.isCurrent)
+                        "Are you sure you want to log out of this device? You will be signed out immediately."
+                    else
+                        "Are you sure you want to log out ${target.deviceInfo}? This device will be disconnected and will need to log in again.",
                     style = theme.typography.bodyMedium.copy(
                         color = theme.colors.textSecondary,
                         lineHeight = 18.sp
@@ -938,17 +994,23 @@ fun NebulaAccountDetailScreen(
                     onClick = {
                         val toRevoke = target
                         sessionToRevoke = null
-                        revokingSessionId = toRevoke.id
-                        scope.launch {
-                            when (val res = NebulaApiClient.revokeSession(toRevoke.id)) {
-                                is NebulaApiClient.ApiResponse.Success -> {
-                                    reloadSessionsToken++
+                        if (toRevoke.isCurrent) {
+                            onSignOut()
+                        } else {
+                            revokingSessionId = toRevoke.id
+                            activeSessions = activeSessions.filterNot { it.id == toRevoke.id }
+                            scope.launch {
+                                when (val res = NebulaApiClient.revokeSession(toRevoke.id)) {
+                                    is NebulaApiClient.ApiResponse.Success -> {
+                                        reloadSessionsToken++
+                                    }
+                                    is NebulaApiClient.ApiResponse.Error -> {
+                                        sessionsError = res.message
+                                        reloadSessionsToken++
+                                    }
                                 }
-                                is NebulaApiClient.ApiResponse.Error -> {
-                                    sessionsError = res.message
-                                }
+                                revokingSessionId = null
                             }
-                            revokingSessionId = null
                         }
                     },
                     enabled = revokingSessionId == null,
@@ -965,6 +1027,65 @@ fun NebulaAccountDetailScreen(
                 TextButton(
                     onClick = { sessionToRevoke = null },
                     enabled = revokingSessionId == null
+                ) {
+                    Text("Cancel", style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary))
+                }
+            }
+        )
+    }
+
+    if (showRevokeOthersConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isRevokingAllOthers) showRevokeOthersConfirmDialog = false
+            },
+            containerColor = theme.colors.surfaceElevated,
+            titleContentColor = theme.colors.textPrimary,
+            textContentColor = theme.colors.textSecondary,
+            title = {
+                Text("Log out other devices?", style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to log out all other devices? Any other phones or browsers will be disconnected immediately.",
+                    style = theme.typography.bodyMedium.copy(
+                        color = theme.colors.textSecondary,
+                        lineHeight = 18.sp
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRevokeOthersConfirmDialog = false
+                        isRevokingAllOthers = true
+                        scope.launch {
+                            when (val res = NebulaApiClient.revokeOtherSessions()) {
+                                is NebulaApiClient.ApiResponse.Success -> {
+                                    reloadSessionsToken++
+                                }
+                                is NebulaApiClient.ApiResponse.Error -> {
+                                    sessionsError = res.message
+                                    reloadSessionsToken++
+                                }
+                            }
+                            isRevokingAllOthers = false
+                        }
+                    },
+                    enabled = !isRevokingAllOthers,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.colors.errorColor,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Log Out All Others", style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRevokeOthersConfirmDialog = false },
+                    enabled = !isRevokingAllOthers
                 ) {
                     Text("Cancel", style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary))
                 }
@@ -1131,101 +1252,157 @@ private fun AccountDivider() {
 }
 
 @Composable
-private fun ActiveSessionItemRow(
-    session: NebulaApiClient.ActiveDeviceSession,
-    isRevoking: Boolean,
-    onRevoke: () -> Unit
+private fun CurrentDeviceCard(
+    session: NebulaApiClient.ActiveDeviceSession?,
+    userDeviceName: String
 ) {
     val theme = Theme.current
+    val deviceModel = session?.deviceInfo?.takeIf { it.isNotBlank() } ?: userDeviceName.ifBlank { "Android Device" }
+    val ip = session?.ipAddress?.takeIf { it.isNotBlank() } ?: "Local"
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(42.dp)
                 .clip(CircleShape)
-                .background(theme.colors.surfaceElevated)
+                .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
+                .border(1.5.dp, theme.colors.primaryAccent, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PhoneAndroid,
+                contentDescription = null,
+                tint = theme.colors.primaryAccent,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = deviceModel,
+                    style = theme.typography.bodyMedium.copy(
+                        color = theme.colors.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF00C853).copy(alpha = 0.15f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "This Device",
+                        style = theme.typography.caption.copy(
+                            color = Color(0xFF00C853),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.5.sp
+                        )
+                    )
+                }
+            }
+
+            Text(
+                text = "$ip • Active now",
+                style = theme.typography.caption.copy(
+                    color = theme.colors.textSecondary,
+                    fontSize = 12.sp
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun OtherSessionRow(
+    session: NebulaApiClient.ActiveDeviceSession,
+    isRevoking: Boolean,
+    onRevoke: () -> Unit
+) {
+    val theme = Theme.current
+    val deviceModel = session.deviceInfo.ifBlank { "Other Device" }
+    val ip = session.ipAddress.ifBlank { "Unknown IP" }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(theme.colors.surfaceElevated)
+            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(theme.colors.surface)
                 .border(1.dp, theme.colors.surfaceBorder, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.PhoneAndroid,
                 contentDescription = null,
-                tint = if (session.isCurrent) theme.colors.primaryAccent else theme.colors.textSecondary,
-                modifier = Modifier.size(20.dp)
+                tint = theme.colors.textSecondary,
+                modifier = Modifier.size(18.dp)
             )
         }
 
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = session.deviceInfo.ifBlank { "Android Device" },
-                    style = theme.typography.bodyMedium.copy(
-                        color = theme.colors.textPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-
-                if (session.isCurrent) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "This device",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
-                        )
-                    }
-                }
-            }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = deviceModel,
+                style = theme.typography.bodySmall.copy(
+                    color = theme.colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
             Text(
-                text = "${session.ipAddress} • Last active: ${formatSessionTime(session.lastActiveAt)}",
+                text = "$ip • ${formatSessionTime(session.lastActiveAt)}",
                 style = theme.typography.caption.copy(
-                    color = theme.colors.textSecondary,
-                    fontSize = 11.5.sp
+                    color = theme.colors.textTertiary,
+                    fontSize = 11.sp
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        if (!session.isCurrent) {
-            if (isRevoking) {
-                CircularProgressIndicator(
-                    color = theme.colors.errorColor,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(20.dp)
+        if (isRevoking) {
+            CircularProgressIndicator(
+                color = theme.colors.errorColor,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(18.dp)
+            )
+        } else {
+            IconButton(
+                onClick = onRevoke,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                    contentDescription = "Revoke session",
+                    tint = theme.colors.errorColor,
+                    modifier = Modifier.size(18.dp)
                 )
-            } else {
-                IconButton(
-                    onClick = onRevoke,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                        contentDescription = "Log out device",
-                        tint = theme.colors.errorColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
             }
         }
     }

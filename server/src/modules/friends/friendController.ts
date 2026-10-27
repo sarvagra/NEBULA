@@ -396,9 +396,21 @@ export async function listSuggestedPeople(req: Request, res: Response): Promise<
     }
     const me = await UserModel.findById(currentUserId).select('tier');
     const limit = me?.tier === 'premium_plus' ? 12 : me?.tier === 'premium' ? 10 : 5;
-    const excluded = await FriendshipModel.find({ $or: [{ requesterId: currentUserId }, { recipientId: currentUserId }] }).select('requesterId recipientId');
-    const excludedIds = new Set<string>([currentUserId]);
-    excluded.forEach((item) => excludedIds.add(item.requesterId === currentUserId ? item.recipientId : item.requesterId));
+    const queryConditions: any[] = [{ requesterId: currentUserId }, { recipientId: currentUserId }];
+    if (mongoose.Types.ObjectId.isValid(currentUserId)) {
+      queryConditions.push(
+        { requesterId: new mongoose.Types.ObjectId(currentUserId) as any },
+        { recipientId: new mongoose.Types.ObjectId(currentUserId) as any }
+      );
+    }
+    const excluded = await FriendshipModel.find({ $or: queryConditions }).select('requesterId recipientId');
+    const excludedIds = new Set<string>([currentUserId.toString()]);
+    excluded.forEach((item: any) => {
+      const r1 = item.requesterId?.toString();
+      const r2 = item.recipientId?.toString();
+      if (r1) excludedIds.add(r1);
+      if (r2) excludedIds.add(r2);
+    });
     const omittedIds = Array.isArray(req.body?.excludeIds) ? req.body.excludeIds.filter((id: unknown) => typeof id === 'string') : [];
     omittedIds.forEach((id: string) => excludedIds.add(id));
     const firstDegree = [...excludedIds].filter((id) => id !== currentUserId);
@@ -426,11 +438,22 @@ export async function listSuggestedPeople(req: Request, res: Response): Promise<
     ].filter((u, index, arr) => arr.findIndex((other) => other?._id.toString() === u?._id.toString()) === index) as any[];
     const network = ordered.slice(0, Math.max(0, limit - 1));
     const remaining = limit - network.length;
+
+    // Convert all excluded IDs (self, friends, room mates, excludes) to ObjectIds for raw aggregation $nin
+    const allExcludedStringIds = new Set<string>([...excludedIds, ...network.map((u) => u._id.toString())]);
+    const excludedObjectIds = [...allExcludedStringIds]
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
     const random = remaining > 0 ? await UserModel.aggregate([
-      { $match: { _id: { $nin: [...excludedIds, ...ordered.map((u) => u._id)] }, isBanned: false, isOnboardingCompleted: true } },
+      { $match: { _id: { $nin: excludedObjectIds }, isBanned: false, isOnboardingCompleted: true } },
       { $sample: { size: remaining } },
     ]) : [];
-    const suggested = [...network, ...random];
+
+    // Authoritative safety guarantee: current user can NEVER appear in recommendations
+    const suggested = [...network, ...random].filter(
+      (u) => u && u._id.toString() !== currentUserId && !excludedIds.has(u._id.toString())
+    );
 
     res.json({
       success: true,

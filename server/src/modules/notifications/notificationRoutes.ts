@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listNotifications, markAsRead, deleteNotification, registerDeviceToken } from './notificationController';
+import { listNotifications, markAsRead, deleteNotification, registerDeviceToken, clearAllNotifications } from './notificationController';
 import {
   getReengagementPreferences,
   updateReengagementPreferences,
@@ -12,6 +12,7 @@ import { validateObjectIdParam } from '../../middlewares/validation';
 export const notificationRouter = Router();
 
 notificationRouter.get('/', authMiddleware, listNotifications);
+notificationRouter.delete('/', authMiddleware, clearAllNotifications);
 notificationRouter.post('/device-token', authMiddleware, registerDeviceToken);
 notificationRouter.put('/:id/read', validateObjectIdParam('id'), authMiddleware, markAsRead);
 notificationRouter.delete('/:id', validateObjectIdParam('id'), authMiddleware, deleteNotification);

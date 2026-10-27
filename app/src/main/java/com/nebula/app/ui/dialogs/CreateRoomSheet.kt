@@ -175,15 +175,7 @@ fun isSupportedDirectStream(url: String): Boolean {
     return clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".m3u8") || clean.contains(".mp4?")
 }
 
-/** Ordered create-room wizard steps (N-046). Back always moves one step back. */
-private val CREATE_ROOM_STEP_TITLES = listOf(
-    "Privacy",
-    "Source",
-    "Source selection",
-    "Participant limit",
-    "Tags",
-    "Create"
-)
+
 
 /**
  * CreateRoomSheet — six-step room creation wizard, in this exact order:
@@ -217,9 +209,6 @@ fun CreateRoomSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Wizard position: 0 privacy, 1 source, 2 source selection, 3 limit, 4 tags, 5 create.
-    var step by remember { mutableIntStateOf(0) }
-
     var roomName by remember { mutableStateOf("") }
     var nameError by remember { mutableStateOf<String?>(null) }
     var selectedPrivacy by remember { mutableStateOf(RoomPrivacy.FRIENDS) }
@@ -247,10 +236,10 @@ fun CreateRoomSheet(
         if (selectedMaxParticipants > participantCap) selectedMaxParticipants = participantCap
     }
 
-    val stepLabelStyle = theme.typography.caption.copy(
+    val sectionHeaderStyle = theme.typography.caption.copy(
         color = theme.colors.textSecondary,
         fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
+        letterSpacing = 0.8.sp,
         fontSize = 11.5.sp
     )
     val hintStyle = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 11.sp)
@@ -290,7 +279,6 @@ fun CreateRoomSheet(
 
         val verifier = verifySourceLink
         if (verifier == null) {
-            // No server preflight wired: accept locally, the final create call stays authoritative.
             acceptSourceVideo(url)
             return
         }
@@ -301,10 +289,8 @@ fun CreateRoomSheet(
             when (response) {
                 is NebulaApiClient.ApiResponse.Error ->
                     if (response.statusCode == 422) {
-                        // Server rejected the link: one inline line, no dialog, no toast dump.
                         sourceError = singleLineLinkError(response.message)
                     } else {
-                        // Auth/network hiccups are not link rejections; the create call reports them.
                         acceptSourceVideo(url)
                     }
                 else -> acceptSourceVideo(url)
@@ -312,13 +298,14 @@ fun CreateRoomSheet(
         }
     }
 
+    val nameSuggestions = listOf("Cinema Night", "Study Chill", "Watch Party", "Gaming Hub")
+
     PABottomSheet(
         isVisible = isVisible,
         onDismissRequest = onDismiss,
         title = "Create Room"
     ) {
-        // System back walks one step backwards before it can dismiss the sheet.
-        BackHandler(enabled = step > 0) { step -= 1 }
+        BackHandler { onDismiss() }
 
         Column(
             modifier = Modifier
@@ -327,241 +314,197 @@ fun CreateRoomSheet(
                 .padding(horizontal = 18.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            CreateRoomStepHeader(
-                stepIndex = step,
-                title = CREATE_ROOM_STEP_TITLES[step],
-                canGoBack = step > 0,
-                onBack = { step -= 1 }
-            )
-
-            when (step) {
-                // ---------------------------------------------------------------
-                // 1. PRIVACY
-                // ---------------------------------------------------------------
-                0 -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(text = "PRIVACY", style = stepLabelStyle)
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PrivacyOption(
-                                label = "Friends",
-                                icon = Icons.Default.People,
-                                isSelected = selectedPrivacy == RoomPrivacy.FRIENDS,
-                                onClick = { selectedPrivacy = RoomPrivacy.FRIENDS },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PrivacyOption(
-                                label = "Invite Only",
-                                icon = Icons.Default.Lock,
-                                isSelected = selectedPrivacy == RoomPrivacy.INVITE_ONLY,
-                                onClick = { selectedPrivacy = RoomPrivacy.INVITE_ONLY },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PrivacyOption(
-                                label = "Public",
-                                icon = Icons.Default.Public,
-                                isSelected = selectedPrivacy == RoomPrivacy.PUBLIC,
-                                onClick = { selectedPrivacy = RoomPrivacy.PUBLIC },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        Text(
-                            text = when (selectedPrivacy) {
-                                RoomPrivacy.FRIENDS -> "Only your friends can join."
-                                RoomPrivacy.INVITE_ONLY -> "Only people you invite can join."
-                                RoomPrivacy.PUBLIC -> "Anyone can find and join this room."
-                            },
-                            style = hintStyle
-                        )
-                    }
-
-                    Button(
-                        onClick = { step = 1 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("Continue to source", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
+            // 1. ROOM NAME
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "ROOM NAME", style = sectionHeaderStyle)
+                    Text(
+                        text = "${roomName.length}/16",
+                        style = hintStyle
+                    )
                 }
 
-                // ---------------------------------------------------------------
-                // 2. SOURCE (media source kind)
-                // ---------------------------------------------------------------
-                1 -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(text = "SELECT SOURCE", style = stepLabelStyle)
-                        Text(text = "What should this room play?", style = hintStyle)
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = {
+                        roomName = it.take(16)
+                        nameError = null
+                    },
+                    placeholder = {
+                        Text(
+                            text = "e.g. Cinema Night, Lo-Fi Chill",
+                            style = theme.typography.bodyMedium.copy(color = theme.colors.textTertiary)
+                        )
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = theme.colors.surface,
+                        unfocusedContainerColor = theme.colors.surface,
+                        focusedBorderColor = if (nameError != null) theme.colors.errorColor else theme.colors.primaryAccent,
+                        unfocusedBorderColor = if (nameError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
+                        focusedTextColor = theme.colors.textPrimary,
+                        unfocusedTextColor = theme.colors.textPrimary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                if (nameError != null) {
+                    Text(
+                        text = nameError.orEmpty(),
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.errorColor,
+                            fontSize = 11.5.sp
+                        )
+                    )
+                }
+
+                // Quick suggestions row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    nameSuggestions.forEach { suggestion ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(theme.colors.surface)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
+                                .clickable {
+                                    roomName = suggestion
+                                    nameError = null
+                                }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
                         ) {
-                            listOf(
-                                Triple("YouTube", Icons.Default.Tv, "Search videos"),
-                                Triple("Vimeo", Icons.Default.PlayArrow, "vimeo.com link"),
-                                Triple("URL", Icons.Default.Link, "Direct video file"),
-                                Triple("None", Icons.Default.Mic, "Ambient · no video")
-                            ).forEach { (label, icon, subtitle) ->
-                                ActivityOption(
-                                    label = label,
-                                    subtitle = subtitle,
-                                    icon = icon,
-                                    isSelected = selectedSource == label,
-                                    onClick = {
-                                        if (selectedSource != label) {
-                                            selectedSource = label
-                                            sourceUrl = ""
-                                            sourceError = null
-                                            // The chosen concrete video belongs to the previous kind.
-                                            selectedMedia = null
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f)
+                            Text(
+                                text = suggestion,
+                                style = theme.typography.caption.copy(
+                                    color = if (roomName == suggestion) theme.colors.primaryAccent else theme.colors.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (roomName == suggestion) FontWeight.Bold else FontWeight.Normal
                                 )
-                            }
+                            )
                         }
-
-                        Text(
-                            text = when (selectedSource) {
-                                "YouTube" -> "Search YouTube in-app, or paste a YouTube video link."
-                                "Vimeo" -> "Paste a public Vimeo link such as vimeo.com/123456789."
-                                "URL" -> "Paste a direct video file link (MP4, WebM, M3U8)."
-                                else -> "No video: the room opens in idle position and can be switched later."
-                            },
-                            style = hintStyle
-                        )
                     }
+                }
+            }
 
-                    Button(
-                        onClick = { step = 2 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("Continue to source selection", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            // 2. PRIVACY
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "PRIVACY", style = sectionHeaderStyle)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PrivacyOption(
+                        label = "Friends",
+                        icon = Icons.Default.People,
+                        isSelected = selectedPrivacy == RoomPrivacy.FRIENDS,
+                        onClick = { selectedPrivacy = RoomPrivacy.FRIENDS },
+                        modifier = Modifier.weight(1f)
+                    )
+                    PrivacyOption(
+                        label = "Invite Only",
+                        icon = Icons.Default.Lock,
+                        isSelected = selectedPrivacy == RoomPrivacy.INVITE_ONLY,
+                        onClick = { selectedPrivacy = RoomPrivacy.INVITE_ONLY },
+                        modifier = Modifier.weight(1f)
+                    )
+                    PrivacyOption(
+                        label = "Public",
+                        icon = Icons.Default.Public,
+                        isSelected = selectedPrivacy == RoomPrivacy.PUBLIC,
+                        onClick = { selectedPrivacy = RoomPrivacy.PUBLIC },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // 3. MEDIA & ACTIVITY
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "MEDIA / ACTIVITY", style = sectionHeaderStyle)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        Triple("YouTube", Icons.Default.Tv, "Search / URL"),
+                        Triple("URL", Icons.Default.Link, "Direct Stream"),
+                        Triple("None", Icons.Default.Mic, "Ambient Voice")
+                    ).forEach { (label, icon, subtitle) ->
+                        ActivityOption(
+                            label = label,
+                            subtitle = subtitle,
+                            icon = icon,
+                            isSelected = selectedSource == label,
+                            onClick = {
+                                if (selectedSource != label) {
+                                    selectedSource = label
+                                    sourceUrl = ""
+                                    sourceError = null
+                                    selectedMedia = null
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
-                // ---------------------------------------------------------------
-                // 3. SOURCE SELECTION (concrete video: search result or entered link)
-                // ---------------------------------------------------------------
-                2 -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(text = "SOURCE SELECTION", style = stepLabelStyle)
-                        Text(
-                            text = when (selectedSource) {
-                                "YouTube" -> "Search YouTube or paste a YouTube link."
-                                "Vimeo" -> "Paste the public Vimeo video link."
-                                "URL" -> "Paste the direct video file link."
-                                else -> "Idle room — no video will be allotted."
-                            },
-                            style = hintStyle
-                        )
-
-                        if (selectedSource == "None") {
-                            // Idle Room State card (no video allotted)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(theme.colors.surface)
-                                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Media details/inputs based on selected source
+                when (selectedSource) {
+                    "YouTube" -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(
+                                onClick = { isYouTubeBrowserOpen = true },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFCC0000),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(theme.colors.surfaceElevated),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Tv,
+                                        imageVector = Icons.Default.Search,
                                         contentDescription = null,
-                                        tint = theme.colors.textSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "Idle Room Position (No Video)",
-                                        style = theme.typography.bodySmall.copy(
-                                            color = theme.colors.textPrimary,
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 13.sp
-                                        )
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = "An ambient room with chat only.",
-                                        style = theme.typography.caption.copy(
-                                            color = theme.colors.textSecondary,
-                                            fontSize = 11.sp
-                                        )
+                                        text = "Search YouTube",
+                                        style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }
                             }
-                        } else {
-                            if (selectedSource == "YouTube") {
-                                Button(
-                                    onClick = { isYouTubeBrowserOpen = true },
-                                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFCC0000),
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Search,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Text(
-                                            text = "Search YouTube in-app",
-                                            style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = "or paste a link below",
-                                    style = hintStyle,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                        }
 
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             OutlinedTextField(
                                 value = sourceUrl,
                                 onValueChange = {
                                     sourceUrl = it
-                                    // Any change clears the previous rejection immediately.
                                     sourceError = null
                                 },
                                 placeholder = {
                                     Text(
-                                        text = when (selectedSource) {
-                                            "YouTube" -> "https://www.youtube.com/watch?v=..."
-                                            "Vimeo" -> "https://vimeo.com/123456789"
-                                            else -> "https://example.com/video.mp4"
-                                        },
-                                        style = theme.typography.bodyMedium.copy(color = theme.colors.textTertiary)
+                                        text = "Or paste YouTube link…",
+                                        style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary)
                                     )
                                 },
                                 singleLine = true,
@@ -573,433 +516,373 @@ fun CreateRoomSheet(
                                     focusedTextColor = theme.colors.textPrimary,
                                     unfocusedTextColor = theme.colors.textPrimary
                                 ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
                             )
-
-                            // Exactly one inline line under the link field — never a dialog or a toast.
-                            sourceError?.let { err ->
-                                Text(
-                                    text = singleLineLinkError(err),
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.errorColor,
-                                        fontSize = 11.5.sp
-                                    ),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
 
                             Button(
                                 onClick = { submitSourceLink() },
-                                enabled = !isVerifyingLink,
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
+                                enabled = !isVerifyingLink && sourceUrl.isNotBlank(),
+                                modifier = Modifier.height(44.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = theme.colors.primaryAccent,
                                     contentColor = Color.White
                                 ),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = if (isVerifyingLink) "Checking link…" else "Add this video",
-                                        style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Allotted video card with remove (X) button
-                        selectedMedia?.let { media ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(theme.colors.surfaceElevated)
-                                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(width = 72.dp, height = 42.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFFCC0000)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        val videoId = media.youtubeVideoId
-                                        if (!videoId.isNullOrBlank()) {
-                                            AsyncImage(
-                                                model = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
-                                                contentDescription = media.title,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                            )
-                                        } else {
-                                            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                                        }
-                                    }
-                                    Column {
-                                        Text(
-                                            text = media.title,
-                                            style = theme.typography.bodySmall.copy(
-                                                color = theme.colors.textPrimary,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.5.sp
-                                            ),
-                                            maxLines = 1
-                                        )
-                                        Text(
-                                            text = "${media.source} • Ready to play",
-                                            style = theme.typography.caption.copy(
-                                                color = theme.colors.primaryAccent,
-                                                fontSize = 11.sp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    onClick = { selectedMedia = null },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove video",
-                                        tint = theme.colors.textSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = { step = 3 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("Continue to participant limit", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-                }
-
-                // ---------------------------------------------------------------
-                // 4. STRICT PARTICIPANT LIMIT
-                // ---------------------------------------------------------------
-                3 -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "PARTICIPANT LIMIT", style = stepLabelStyle)
-                            Text(
-                                text = "$selectedMaxParticipants members",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.primaryAccent,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp
+                                Text(
+                                    text = if (isVerifyingLink) "…" else "Add",
+                                    style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                                 )
-                            )
-                        }
-
-                        Text(
-                            text = "Your ${tierCapLabel(participantCap)} plan allows up to " +
-                                "$participantCap participants. Values above the cap are disabled.",
-                            style = hintStyle
-                        )
-
-                        val participantLimits = listOf(5, 10, 20, 25, 50)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            participantLimits.forEach { limit ->
-                                val isAllowed = limit <= participantCap
-                                val isSelected = selectedMaxParticipants == limit
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .alpha(if (isAllowed) 1f else 0.4f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable(enabled = isAllowed) {
-                                            // Hard clamp: nothing above the cap can ever be selected.
-                                            selectedMaxParticipants = limit.coerceAtMost(participantCap)
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "$limit",
-                                        style = theme.typography.bodySmall.copy(
-                                            color = when {
-                                                isSelected -> theme.colors.primaryAccent
-                                                isAllowed -> theme.colors.textPrimary
-                                                else -> theme.colors.textTertiary
-                                            },
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    )
-                                }
                             }
                         }
-
-                        Text(
-                            text = "Strict plan cap: $participantCap participants.",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.sp
-                            )
-                        )
                     }
 
-                    Button(
-                        onClick = { step = 4 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("Continue to tags", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-                }
-
-                // ---------------------------------------------------------------
-                // 5. TAGS (max 3, each 30 chars or fewer)
-                // ---------------------------------------------------------------
-                4 -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    "URL" -> {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "ROOM TAGS (${selectedTags.size}/$MAX_ROOM_TAGS)",
-                                style = stepLabelStyle
-                            )
-                            Text(
-                                text = "Up to $MAX_ROOM_TAGS tags · $MAX_ROOM_TAG_LENGTH characters each",
-                                style = hintStyle
-                            )
-                        }
-
-                        androidx.compose.foundation.layout.FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            com.nebula.app.ui.home.ALL_ROOM_TAGS.forEach { tag ->
-                                val isSelected = selectedTags.contains(tag)
-                                val isTooLong = tag.length > MAX_ROOM_TAG_LENGTH
-                                val canSelect = isSelected || (selectedTags.size < MAX_ROOM_TAGS && !isTooLong)
-                                Box(
-                                    modifier = Modifier
-                                        .alpha(if (isTooLong) 0.4f else 1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable(enabled = canSelect) {
-                                            selectedTags = if (isSelected) {
-                                                selectedTags - tag
-                                            } else {
-                                                if (selectedTags.size < MAX_ROOM_TAGS && tag.length <= MAX_ROOM_TAG_LENGTH) {
-                                                    selectedTags + tag
-                                                } else {
-                                                    selectedTags
-                                                }
-                                            }
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    Text(
-                                        text = "#$tag",
-                                        style = theme.typography.caption.copy(
-                                            color = if (isSelected) theme.colors.primaryAccent else theme.colors.textSecondary,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = { step = 5 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("Continue to review", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-                }
-
-                // ---------------------------------------------------------------
-                // 6. CREATE (name + final review + create button)
-                // ---------------------------------------------------------------
-                else -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(text = "FINAL REVIEW", style = stepLabelStyle)
-
-                        // ROOM NAME INPUT
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = "ROOM NAME", style = stepLabelStyle)
-
                             OutlinedTextField(
-                                value = roomName,
+                                value = sourceUrl,
                                 onValueChange = {
-                                    roomName = it.take(16)
-                                    nameError = null
+                                    sourceUrl = it
+                                    sourceError = null
                                 },
                                 placeholder = {
                                     Text(
-                                        text = "e.g. Cinema Night, Lo-Fi Study Lounge",
-                                        style = theme.typography.bodyMedium.copy(color = theme.colors.textTertiary)
+                                        text = "https://example.com/video.mp4",
+                                        style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary)
                                     )
                                 },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedContainerColor = theme.colors.surface,
                                     unfocusedContainerColor = theme.colors.surface,
-                                    focusedBorderColor = if (nameError != null) theme.colors.errorColor else theme.colors.primaryAccent,
-                                    unfocusedBorderColor = if (nameError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
+                                    focusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.primaryAccent,
+                                    unfocusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
                                     focusedTextColor = theme.colors.textPrimary,
                                     unfocusedTextColor = theme.colors.textPrimary
                                 ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
                             )
 
-                            nameError?.let { err ->
+                            Button(
+                                onClick = { submitSourceLink() },
+                                enabled = !isVerifyingLink && sourceUrl.isNotBlank(),
+                                modifier = Modifier.height(44.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = theme.colors.primaryAccent,
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
                                 Text(
-                                    text = err,
+                                    text = if (isVerifyingLink) "…" else "Add",
+                                    style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(theme.colors.surface)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = null,
+                                tint = theme.colors.primaryAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Ambient Lounge (No Video)",
+                                    style = theme.typography.bodySmall.copy(
+                                        color = theme.colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Audio & text chat only. You can stream media later.",
+                                    style = hintStyle
+                                )
+                            }
+                        }
+                    }
+                }
+
+                sourceError?.let { err ->
+                    Text(
+                        text = singleLineLinkError(err),
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.errorColor,
+                            fontSize = 11.5.sp
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Chosen video preview card
+                selectedMedia?.let { media ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.surfaceElevated)
+                            .border(1.dp, theme.colors.primaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 64.dp, height = 38.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFCC0000)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val videoId = media.youtubeVideoId
+                                if (!videoId.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                                        contentDescription = media.title,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = media.title,
+                                    style = theme.typography.bodySmall.copy(
+                                        color = theme.colors.textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${media.source} • Ready",
                                     style = theme.typography.caption.copy(
-                                        color = theme.colors.errorColor,
-                                        fontSize = 11.5.sp
+                                        color = theme.colors.primaryAccent,
+                                        fontSize = 10.5.sp
                                     )
                                 )
                             }
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(theme.colors.surface)
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        IconButton(
+                            onClick = { selectedMedia = null },
+                            modifier = Modifier.size(28.dp)
                         ) {
-                            CreateRoomReviewRow(
-                                label = "Privacy",
-                                value = when (selectedPrivacy) {
-                                    RoomPrivacy.FRIENDS -> "Friends"
-                                    RoomPrivacy.INVITE_ONLY -> "Invite Only"
-                                    RoomPrivacy.PUBLIC -> "Public"
-                                }
-                            )
-                            CreateRoomReviewRow(label = "Source", value = if (selectedSource == "None") "Ambient (no video)" else selectedSource)
-                            CreateRoomReviewRow(label = "Video", value = selectedMedia?.title ?: "Idle — no video")
-                            CreateRoomReviewRow(
-                                label = "Participants",
-                                value = "$selectedMaxParticipants of $participantCap max"
-                            )
-                            CreateRoomReviewRow(
-                                label = "Tags",
-                                value = if (selectedTags.isEmpty()) "None" else selectedTags.joinToString(" ") { "#$it" }
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = theme.colors.textSecondary,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Button(
-                        onClick = {
-                            val trimmed = roomName.trim()
-                            if (trimmed.isEmpty()) {
-                                nameError = "Room name cannot be empty"
-                                return@Button
-                            }
-                            if (trimmed.length < 3) {
-                                nameError = "Room name must be at least 3 characters"
-                                return@Button
-                            }
-                            if (trimmed.length > 16) {
-                                nameError = "Room name must be 16 characters or fewer"
-                                return@Button
-                            }
-                            if (!trimmed.matches("^[a-zA-Z0-9 ]+$".toRegex())) {
-                                nameError = "Use English letters, numbers, and spaces only"
-                                return@Button
-                            }
-                            nameError = null
-                            // Server accepts at most 3 tags, each 30 chars or fewer.
-                            val safeTags = selectedTags
-                                .filter { it.isNotBlank() && it.length <= MAX_ROOM_TAG_LENGTH }
-                                .distinct()
-                                .take(MAX_ROOM_TAGS)
-                            // Never send a value above the strict plan cap.
-                            val safeMaxParticipants = selectedMaxParticipants.coerceIn(2, participantCap)
-                            onCreateRoom(trimmed, selectedPrivacy, safeTags, safeMaxParticipants, selectedMedia)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Text(
-                            text = "Create Room",
-                            style = theme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
-                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            // 4. PARTICIPANT LIMIT
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "PARTICIPANT LIMIT", style = sectionHeaderStyle)
+                    Text(
+                        text = "$selectedMaxParticipants / $participantCap max",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.primaryAccent,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                val participantLimits = listOf(5, 10, 20, 25, 50)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    participantLimits.forEach { limit ->
+                        val isAllowed = limit <= participantCap
+                        val isSelected = selectedMaxParticipants == limit
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .alpha(if (isAllowed) 1f else 0.4f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable(enabled = isAllowed) {
+                                    selectedMaxParticipants = limit.coerceAtMost(participantCap)
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "$limit",
+                                style = theme.typography.bodySmall.copy(
+                                    color = when {
+                                        isSelected -> theme.colors.primaryAccent
+                                        isAllowed -> theme.colors.textPrimary
+                                        else -> theme.colors.textTertiary
+                                    },
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 5. TAGS (Optional)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ROOM TAGS (${selectedTags.size}/$MAX_ROOM_TAGS)",
+                        style = sectionHeaderStyle
+                    )
+                    Text(
+                        text = "Optional",
+                        style = hintStyle
+                    )
+                }
+
+                androidx.compose.foundation.layout.FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    com.nebula.app.ui.home.ALL_ROOM_TAGS.forEach { tag ->
+                        val isSelected = selectedTags.contains(tag)
+                        val isTooLong = tag.length > MAX_ROOM_TAG_LENGTH
+                        val canSelect = isSelected || (selectedTags.size < MAX_ROOM_TAGS && !isTooLong)
+                        Box(
+                            modifier = Modifier
+                                .alpha(if (isTooLong) 0.4f else 1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable(enabled = canSelect) {
+                                    selectedTags = if (isSelected) {
+                                        selectedTags - tag
+                                    } else {
+                                        if (selectedTags.size < MAX_ROOM_TAGS && tag.length <= MAX_ROOM_TAG_LENGTH) {
+                                            selectedTags + tag
+                                        } else {
+                                            selectedTags
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "#$tag",
+                                style = theme.typography.caption.copy(
+                                    color = if (isSelected) theme.colors.primaryAccent else theme.colors.textSecondary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 11.5.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // 6. CREATE ROOM CTA BUTTON
+            Button(
+                onClick = {
+                    val finalName = if (roomName.isBlank()) "Nebula Lounge" else roomName.trim()
+                    if (finalName.length < 3) {
+                        nameError = "Room name must be at least 3 characters"
+                        return@Button
+                    }
+                    if (finalName.length > 16) {
+                        nameError = "Room name must be 16 characters or fewer"
+                        return@Button
+                    }
+                    if (!finalName.matches("^[a-zA-Z0-9 ]+$".toRegex())) {
+                        nameError = "Use English letters, numbers, and spaces only"
+                        return@Button
+                    }
+                    nameError = null
+                    val safeTags = selectedTags
+                        .filter { it.isNotBlank() && it.length <= MAX_ROOM_TAG_LENGTH }
+                        .distinct()
+                        .take(MAX_ROOM_TAGS)
+                    val safeMaxParticipants = selectedMaxParticipants.coerceIn(2, participantCap)
+                    onCreateRoom(finalName, selectedPrivacy, safeTags, safeMaxParticipants, selectedMedia)
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = theme.colors.primaryAccent,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Create & Enter Room",
+                        style = theme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 
@@ -1022,89 +905,7 @@ fun CreateRoomSheet(
     )
 }
 
-@Composable
-private fun CreateRoomStepHeader(
-    stepIndex: Int,
-    title: String,
-    canGoBack: Boolean,
-    onBack: () -> Unit
-) {
-    val theme = Theme.current
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (canGoBack) {
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back one step",
-                    tint = theme.colors.textPrimary,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
-        }
-
-        Column {
-            Text(
-                text = "STEP ${stepIndex + 1} OF ${CREATE_ROOM_STEP_TITLES.size}",
-                style = theme.typography.caption.copy(
-                    color = theme.colors.textTertiary,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    fontSize = 10.sp
-                )
-            )
-            Text(
-                text = title,
-                style = theme.typography.bodyLarge.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun CreateRoomReviewRow(label: String, value: String) {
-    val theme = Theme.current
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 11.5.sp)
-        )
-        Text(
-            text = value,
-            modifier = Modifier.weight(1.4f),
-            style = theme.typography.bodySmall.copy(
-                color = theme.colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 12.5.sp
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End
-        )
-    }
-}
 
 @Composable
 private fun PrivacyOption(

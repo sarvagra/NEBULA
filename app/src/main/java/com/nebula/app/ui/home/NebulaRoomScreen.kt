@@ -131,6 +131,31 @@ import java.util.concurrent.atomic.AtomicReference
  * - Room Members Sheet with 3-dots admin mute/unmute and member public profile click
  * - Room Settings Sheet with name, max members, mic/video toggles, and tags
  */
+data class NebulaRoomActions(
+    val onAcceptFriendRequest: (String) -> Unit = {},
+    val onDeclineFriendRequest: (String) -> Unit = {},
+    val onCancelFriendRequest: (NebulaUser) -> Unit = {},
+    val onModerateParticipant: (String, Boolean?, Boolean?) -> Unit = { _, _, _ -> },
+    val onKickParticipant: (String) -> Unit = {},
+    val onAddFriend: (NebulaUser) -> Unit = {},
+    val onMessageFriend: (NebulaUser) -> Unit = {},
+    val onLeaveRoom: (newHostId: String?) -> Unit = {},
+    val onRefreshRoom: () -> Unit = {},
+    val onHostPlaybackSample: (Long, Boolean) -> Unit = { _, _ -> },
+    val onHostVideoEnded: (Long) -> Unit = {},
+    val onRestartVideo: () -> Unit = {},
+    val onViewParticipantProfile: (NebulaUser) -> Unit = {},
+    val onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
+    val onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
+    val onTogglePlayPause: () -> Unit = {},
+    val onSendRoomMessage: (String) -> Unit = {},
+    val onSendReaction: (String) -> Unit = {},
+    val onInviteFriend: (NebulaUser) -> Unit = {},
+    val onVotePoll: (String) -> Unit = {},
+    val onSeekTo: (Long) -> Unit = {},
+    val onUpdateMedia: (String, String) -> Unit = { _, _ -> }
+)
+
 @Composable
 fun NebulaRoomScreen(
     room: NebulaRoom,
@@ -138,30 +163,31 @@ fun NebulaRoomScreen(
     friends: List<NebulaUser> = emptyList(),
     friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest> = emptyList(),
     suggestedPeople: List<NebulaUser> = emptyList(),
-    onAcceptFriendRequest: (String) -> Unit = {},
-    onDeclineFriendRequest: (String) -> Unit = {},
-    onCancelFriendRequest: (NebulaUser) -> Unit = {},
-    onModerateParticipant: (String, Boolean?, Boolean?) -> Unit = { _, _, _ -> },
-    onKickParticipant: (String) -> Unit = {},
-    onAddFriend: (NebulaUser) -> Unit = {},
-    onMessageFriend: (NebulaUser) -> Unit = {},
-    onLeaveRoom: (newHostId: String?) -> Unit,
-    onRefreshRoom: () -> Unit = {},
-    onHostPlaybackSample: (Long, Boolean) -> Unit = { _, _ -> },
-    onHostVideoEnded: (Long) -> Unit = {},
-    onRestartVideo: () -> Unit = {},
-    onViewParticipantProfile: (NebulaUser) -> Unit = {},
-    onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
-    onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
-    onTogglePlayPause: () -> Unit,
-    onSendRoomMessage: (String) -> Unit,
-    onSendReaction: (String) -> Unit,
-    onInviteFriend: (NebulaUser) -> Unit = {},
-    onVotePoll: (String) -> Unit = {},
-    onSeekTo: (Long) -> Unit = {},
-    onUpdateMedia: (String, String) -> Unit = { _, _ -> },
+    actions: NebulaRoomActions = NebulaRoomActions(),
     modifier: Modifier = Modifier
 ) {
+    val onAcceptFriendRequest = actions.onAcceptFriendRequest
+    val onDeclineFriendRequest = actions.onDeclineFriendRequest
+    val onCancelFriendRequest = actions.onCancelFriendRequest
+    val onModerateParticipant = actions.onModerateParticipant
+    val onKickParticipant = actions.onKickParticipant
+    val onAddFriend = actions.onAddFriend
+    val onMessageFriend = actions.onMessageFriend
+    val onLeaveRoom = actions.onLeaveRoom
+    val onRefreshRoom = actions.onRefreshRoom
+    val onHostPlaybackSample = actions.onHostPlaybackSample
+    val onHostVideoEnded = actions.onHostVideoEnded
+    val onRestartVideo = actions.onRestartVideo
+    val onViewParticipantProfile = actions.onViewParticipantProfile
+    val onUpdateRoomSettings = actions.onUpdateRoomSettings
+    val onTransferHost = actions.onTransferHost
+    val onTogglePlayPause = actions.onTogglePlayPause
+    val onSendRoomMessage = actions.onSendRoomMessage
+    val onSendReaction = actions.onSendReaction
+    val onInviteFriend = actions.onInviteFriend
+    val onVotePoll = actions.onVotePoll
+    val onSeekTo = actions.onSeekTo
+    val onUpdateMedia = actions.onUpdateMedia
     val theme = Theme.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -205,10 +231,9 @@ fun NebulaRoomScreen(
     var showLeaveConfirmation by remember { mutableStateOf(false) }
     var showInviteFriends by remember { mutableStateOf(false) }
 
-    // Image/GIF Sharing Anti-Spam & Cooldown State
+    // Image/GIF Sharing Cooldown State
     var mediaSendTimestamps by remember { mutableStateOf(listOf<Long>()) }
     var cooldownSecondsRemaining by remember { mutableIntStateOf(0) }
-    var isMediaBanned by remember { mutableStateOf(false) }
     var pendingImageData by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(cooldownSecondsRemaining) {
@@ -218,7 +243,7 @@ fun NebulaRoomScreen(
         }
     }
 
-    // Photo/GIF Picker Launcher with strict format check & spam detection
+    // Photo/GIF Picker Launcher with strict format check
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -242,12 +267,12 @@ fun NebulaRoomScreen(
                 return@rememberLauncherForActivityResult
             }
 
-            // Rate-limiting check: max 2 media in 10 seconds
+            // Gentle rate-limiting check: max 2 media in 8 seconds
             val now = System.currentTimeMillis()
-            val recent = mediaSendTimestamps.filter { now - it < 10000L }
+            val recent = mediaSendTimestamps.filter { now - it < 8000L }
             if (recent.size >= 2) {
-                cooldownSecondsRemaining = 15
-                Toast.makeText(context, "Slow down! Image sharing is on cooldown for 15s to prevent spam.", Toast.LENGTH_LONG).show()
+                cooldownSecondsRemaining = 6
+                Toast.makeText(context, "Please wait a moment before sending another image", Toast.LENGTH_SHORT).show()
                 return@rememberLauncherForActivityResult
             }
 
@@ -657,65 +682,43 @@ fun NebulaRoomScreen(
             if (isCurrentUserAdmin) {
                 if (hasVideo) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(theme.colors.surface.copy(alpha = 0.5f))
+                            .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Rewind 10s
-                        IconButton(
-                            onClick = { seekTo(maxOf(0L, room.playbackPositionMs - 10000L)) },
-                            modifier = Modifier.size(32.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.FastRewind,
-                                contentDescription = "Rewind 10s",
-                                tint = theme.colors.textPrimary,
-                                modifier = Modifier.size(18.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.colors.successColor)
+                            )
+                            Text(
+                                text = "YouTube Controls Active • In Sync",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
                             )
                         }
-
-                        // Play / Pause
-                        IconButton(
-                            onClick = onTogglePlayPause,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (room.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (room.isPlaying) "Pause" else "Play",
-                                tint = theme.colors.primaryAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // Forward 10s
-                        IconButton(
-                            onClick = { seekTo(room.playbackPositionMs + 10000L) },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FastForward,
-                                contentDescription = "Forward 10s",
-                                tint = theme.colors.textPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Stop / Reset Video
-                        IconButton(
-                            onClick = {
-                                if (room.isPlaying) onTogglePlayPause()
-                                seekTo(0L)
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Stop,
-                                contentDescription = "Stop Video",
-                                tint = Color(0xFFEF4444),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Text(
+                            text = "Change Video",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.primaryAccent,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.5.sp
+                            ),
+                            modifier = Modifier.clickable { showMediaSearchSheet = true }
+                        )
                     }
-
                 } else {
                     Row(
                         modifier = Modifier
@@ -928,13 +931,8 @@ fun NebulaRoomScreen(
                 // Image / GIF upload button (WhatsApp-style direct gallery picker)
                 IconButton(
                     onClick = {
-                        if (isMediaBanned) {
-                            Toast.makeText(context, "You are banned from sending files in this room due to repeated spam", Toast.LENGTH_LONG).show()
-                            return@IconButton
-                        }
                         if (cooldownSecondsRemaining > 0) {
-                            isMediaBanned = true
-                            Toast.makeText(context, "Attempted upload during cooldown! You are now banned from sending files in this room.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Please wait ${cooldownSecondsRemaining}s before sharing another image", Toast.LENGTH_SHORT).show()
                             return@IconButton
                         }
                         photoPickerLauncher.launch(
@@ -956,7 +954,7 @@ fun NebulaRoomScreen(
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = "Share Image or GIF",
-                            tint = if (isMediaBanned) Color(0xFFEF4444) else theme.colors.textSecondary,
+                            tint = theme.colors.textSecondary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1337,7 +1335,7 @@ private fun NebulaYoutubePlayer(
                     <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}body{position:fixed;inset:0}#p{position:absolute;top:0;left:0}</style></head>
                     <body><div id="p"></div><script>
                     let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false, ended=$mediaEnded, muteAudioForProfile=$muteAudioForAndroidProfile;
-                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:0,disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(e.data===0){ended=true;if(window.Nebula){try{Nebula.ended(player.getCurrentTime()||0)}catch(_){}}return;}if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
+                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:${if (isHost) 1 else 0},disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(e.data===0){ended=true;if(window.Nebula){try{Nebula.ended(player.getCurrentTime()||0)}catch(_){}}return;}if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
                     function applyPending(){if(!ready||!pending)return;let s=pending; if(muteAudioForProfile)player.mute(); if(localPause){player.pauseVideo();return;}if(ended&&!s.playing){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(ended&&target>1){player.pauseVideo();return;}ended=false;if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
                     function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;if(position<1000&&playing)ended=false;applyPending();}
                     setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
@@ -1361,14 +1359,54 @@ private fun NebulaYoutubePlayer(
         player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player&&typeof player.seekTo==='function'){player.seekTo(${positionMs.coerceAtLeast(0L) / 1000.0},true);}", null)
     }
     LaunchedEffect(player.value, mediaEnded) {
-        player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player){ended=$mediaEnded;if(ended)player.pauseVideo();}", null)
+        player.value?.evaluateJavascript(
+            "if(typeof player!=='undefined'&&player){ended=$mediaEnded;if(ended)player.pauseVideo();else{player.seekTo(0,true);player.playVideo();}}",
+            null
+        )
     }
     if (mediaEnded) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.8f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Video ended", color = Color.White, fontWeight = FontWeight.Bold)
-                if (isHost) Button(onClick = onRestartVideo) { Text("Restart for everyone") }
-                else Text("Waiting for host to restart", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+        val theme = Theme.current
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.95f))
+                .clickable(enabled = true, onClick = {}),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(theme.colors.surface)
+                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Video ended",
+                    style = theme.typography.titleMedium.copy(
+                        color = theme.colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                if (isHost) {
+                    Button(
+                        onClick = onRestartVideo,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = theme.colors.primaryAccent,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Restart for everyone", fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Text(
+                        text = "Waiting for host to restart",
+                        style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary),
+                        fontSize = 12.sp
+                    )
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.nebula.app.data.backend
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -59,7 +60,17 @@ object NebulaApiClient {
                 readTimeout = 60000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
+                sessionManager?.getDeviceId()?.takeIf { it.isNotBlank() }?.let { setRequestProperty("X-Device-Id", it) }
+                sessionManager?.getDeviceInfo()?.takeIf { it.isNotBlank() }?.let { setRequestProperty("X-Device-Info", it) }
                 authToken?.takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
+
+                try {
+                    val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
+                    val tokenResult = appCheck.getAppCheckToken(false).await()
+                    tokenResult?.token?.takeIf { it.isNotBlank() }?.let {
+                        setRequestProperty("X-Firebase-AppCheck", it)
+                    }
+                } catch (_: Exception) {}
 
                 if (jsonBody != null && (method == "POST" || method == "PUT" || method == "PATCH")) {
                     doOutput = true
@@ -93,10 +104,18 @@ object NebulaApiClient {
             val responseText = BufferedReader(InputStreamReader(inputStream)).use { it.readText() }
             val json = JSONObject(responseText)
 
-            if (statusCode == 401 && allowRefresh && endpoint != "/auth/refresh" && refreshAccessToken()) {
-                connection.disconnect()
-                connection = null
-                return@withContext request(endpoint, method, jsonBody, allowRefresh = false)
+            if (statusCode == 401) {
+                val errorCode = json.optString("code")
+                if (errorCode == "SESSION_REVOKED") {
+                    authToken = null
+                    sessionManager?.clearSession()
+                    return@withContext ApiResponse.Error("Your session has been logged out or revoked", 401)
+                }
+                if (allowRefresh && endpoint != "/auth/refresh" && refreshAccessToken()) {
+                    connection.disconnect()
+                    connection = null
+                    return@withContext request(endpoint, method, jsonBody, allowRefresh = false)
+                }
             }
 
             if (isSuccess && json.optBoolean("success", true)) {
@@ -130,7 +149,11 @@ object NebulaApiClient {
     // AUTHENTICATION
     // ==========================================
     suspend fun googleSignIn(idToken: String): ApiResponse<JSONObject> {
-        val body = JSONObject().apply { put("idToken", idToken) }
+        val body = JSONObject().apply {
+            put("idToken", idToken)
+            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
+            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
+        }
         val res = request("/auth/google", "POST", body)
         if (res is ApiResponse.Success) {
             val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
@@ -155,6 +178,8 @@ object NebulaApiClient {
             if (isEmail) put("email", target.trim().lowercase())
             else put("phone", target.trim())
             put("otp", otp.trim())
+            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
+            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
         }
         val res = request("/auth/otp/verify", "POST", body)
         if (res is ApiResponse.Success) {
@@ -168,6 +193,8 @@ object NebulaApiClient {
     suspend fun developerSignIn(username: String = "nebula_explorer"): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("username", username.trim().replace("^@".toRegex(), ""))
+            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
+            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
         }
         val res = request("/auth/dev-login", "POST", body)
         if (res is ApiResponse.Success) {
@@ -188,6 +215,8 @@ object NebulaApiClient {
             put("email", cleanEmail)
             put("displayName", displayName.trim().ifEmpty { cleanEmail.substringBefore("@") })
             put("username", baseHandle)
+            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
+            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
         }
         val res = request("/auth/dev-login", "POST", body)
         if (res is ApiResponse.Success) {
@@ -235,6 +264,7 @@ object NebulaApiClient {
     suspend fun logout(): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             sessionManager?.getRefreshToken()?.takeIf { it.isNotBlank() }?.let { put("refreshToken", it) }
+            sessionManager?.getDeviceId()?.takeIf { it.isNotBlank() }?.let { put("deviceId", it) }
         }
         return request("/auth/logout", "POST", body)
     }
@@ -255,6 +285,9 @@ object NebulaApiClient {
 
     suspend fun deleteNotification(id: String): ApiResponse<JSONObject> =
         request("/notifications/$id", "DELETE")
+
+    suspend fun clearAllNotifications(): ApiResponse<JSONObject> =
+        request("/notifications", "DELETE")
 
     // ==========================================
     // ROOMS
@@ -428,7 +461,8 @@ object NebulaApiClient {
                 })
             }
             customStatus?.let { put("customStatus", it) }
-            put("bannerIndex", bannerIndex)
+            // Coerce bannerIndex to 0..4 for compatibility with live backend Zod schema
+            put("bannerIndex", bannerIndex.coerceIn(0, 4))
             put("interests", JSONArray(interests))
             if (avatarUrl != null) {
                 put("avatarUrl", avatarUrl)
@@ -473,11 +507,14 @@ object NebulaApiClient {
         }
     }
 
-    suspend fun uploadProfileAsset(assetType: String, url: String, name: String): ApiResponse<JSONObject> {
+    suspend fun uploadProfileAsset(assetType: String, url: String, name: String, mimeType: String? = null): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("assetType", assetType)
             put("url", url)
             put("name", name)
+            if (!mimeType.isNullOrBlank()) {
+                put("mimeType", mimeType)
+            }
         }
         return request("/users/me/assets", "POST", body)
     }
@@ -665,6 +702,9 @@ object NebulaApiClient {
 
     suspend fun revokeSession(sessionId: String): ApiResponse<JSONObject> =
         request("/auth/sessions/$sessionId", "DELETE")
+
+    suspend fun revokeOtherSessions(): ApiResponse<JSONObject> =
+        request("/auth/sessions/revoke-others", "POST")
 
     // ==========================================
     // MEMBERSHIP & BILLING (RAZORPAY STRICT VALIDATION)

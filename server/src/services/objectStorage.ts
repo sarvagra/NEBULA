@@ -62,9 +62,10 @@ export function resolveStoredObjectUrl(value?: string): string | undefined {
 }
 
 export async function getPrivateObjectRedirect(key: string): Promise<string> {
+  // Least-privilege short duration window: 15 minutes (900 seconds)
   return getSignedUrl(
     client,
     new GetObjectCommand({ Bucket: config.storage.bucket, Key: key }),
-    { expiresIn: 3600 }
+    { expiresIn: 900 }
   );
 }

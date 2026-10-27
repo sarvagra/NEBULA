@@ -592,7 +592,8 @@ data class NebulaNotification(
     val actionLabel: String? = null,
     val relatedId: String? = null,
     val isRead: Boolean = false,
-    /** Who caused this notification, so the row can show their avatar. */
+    /** Who caused this notification, so the row can show their avatar and link to profile. */
+    val actorId: String? = null,
     val actorName: String? = null,
     val actorAvatarUrl: String? = null,
     val actorAvatarLetter: String = "U",

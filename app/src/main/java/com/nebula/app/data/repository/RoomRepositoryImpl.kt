@@ -22,10 +22,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import com.nebula.app.data.local.SessionManager
 import java.util.UUID
 
 class RoomRepositoryImpl(
-    private val apiClient: NebulaApiClient = NebulaApiClient
+    private val apiClient: NebulaApiClient = NebulaApiClient,
+    private val sessionManager: SessionManager? = null
 ) : IRoomRepository {
 
     var onSocialChanged: (() -> Unit)? = null
@@ -35,8 +37,8 @@ class RoomRepositoryImpl(
         _activeRoom.value = null
     }
 
-    // Clean initial state: no hardcoded fake rooms
-    private val _rooms = MutableStateFlow<List<NebulaRoom>>(emptyList())
+    // Instant local-first initial state from cache
+    private val _rooms = MutableStateFlow<List<NebulaRoom>>(sessionManager?.getCachedRooms() ?: emptyList())
     override val rooms: StateFlow<List<NebulaRoom>> = _rooms.asStateFlow()
 
     private val _activeRoom = MutableStateFlow<NebulaRoom?>(null)
@@ -87,6 +89,7 @@ class RoomRepositoryImpl(
 
             }
             _rooms.value = list
+            sessionManager?.saveCachedRooms(list)
             return list
         }
         return _rooms.value
@@ -108,6 +111,7 @@ class RoomRepositoryImpl(
             val json = response.data.optJSONObject(i) ?: continue
             val id = json.optString("id").ifBlank { json.optString("_id") }
             if (id.isBlank()) continue
+            val createdAt = json.optString("createdAt")
             messages += RoomChatMessage(
                 id = id,
                 roomId = json.optString("roomId", roomId),
@@ -116,7 +120,7 @@ class RoomRepositoryImpl(
                 senderAvatar = json.optString("senderAvatarLetter", "U"),
                 senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
                 content = json.optString("text", ""),
-                timeLabel = "Earlier",
+                timeLabel = formatRoomMessageTime(createdAt),
                 isSystemMessage = json.optString("messageType") == "system"
             )
         }
@@ -387,7 +391,7 @@ class RoomRepositoryImpl(
             senderAvatar = json.optString("senderAvatarLetter", "U"),
             senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
             content = json.optString("text", ""),
-            timeLabel = createdAt.takeIf { it.isNotBlank() }?.let { "Just now" } ?: "Just now",
+            timeLabel = formatRoomMessageTime(createdAt),
             isSystemMessage = json.optString("messageType") == "system"
         )
         val updated = current.copy(recentMessages = current.recentMessages + message)
@@ -561,5 +565,27 @@ class RoomRepositoryImpl(
             userVotedOptionId = json.optString("userVotedOptionId").ifBlank { null },
             isClosed = !json.optBoolean("isActive", true)
         )
+    }
+}
+
+private fun formatRoomMessageTime(isoString: String?): String {
+    if (isoString.isNullOrBlank()) {
+        return java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+    }
+    return try {
+        val instant = java.time.Instant.parse(isoString)
+        val zone = java.time.ZoneId.systemDefault()
+        val localTime = instant.atZone(zone)
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.getDefault())
+        localTime.format(formatter)
+    } catch (_: Exception) {
+        try {
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse(isoString)
+            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(date ?: java.util.Date())
+        } catch (_: Exception) {
+            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+        }
     }
 }

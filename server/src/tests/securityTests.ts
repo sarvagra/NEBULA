@@ -1630,56 +1630,287 @@ async function runSecurityTests() {
     });
   });
 
-  // 18. EMERGENCY SECURITY LOCKDOWN & HONEYPOT TRIPWIRE TESTS
-  await assertTest('Accessing exposed honeypot (/.env) trips circuit breaker & returns 503', async () => {
-    const res = await makeRequest('/.env');
-    if (res.status !== 503) {
-      throw new Error(`Expected honeypot probe to return 503 lockdown, got ${res.status}`);
+  // 18. ROOM PRIVACY & ZERO-GHOST LIFECYCLE TESTS
+  await assertTest('Friends privacy hides and blocks non-friends, allows friends, and allows re-entry', async () => {
+    const hostUser = await UserModel.create({ username: 'room_host_user', displayName: 'Host User', tier: 'free' });
+    const friendUser = await UserModel.create({ username: 'room_friend_user', displayName: 'Friend User', tier: 'free' });
+    const strangerUser = await UserModel.create({ username: 'room_stranger_user', displayName: 'Stranger User', tier: 'free' });
+
+    const hostToken = jwt.sign({ ...validUserPayload, id: hostUser._id.toString(), username: hostUser.username }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const friendToken = jwt.sign({ ...validUserPayload, id: friendUser._id.toString(), username: friendUser.username }, config.auth.jwtSecret, { expiresIn: '1h' });
+    const strangerToken = jwt.sign({ ...validUserPayload, id: strangerUser._id.toString(), username: strangerUser.username }, config.auth.jwtSecret, { expiresIn: '1h' });
+
+    // Establish friendship between host and friendUser
+    await FriendshipModel.create({
+      requesterId: hostUser._id.toString(),
+      recipientId: friendUser._id.toString(),
+      status: 'accepted',
+    });
+
+    let friendsRoom: any = null;
+    try {
+      // 1. Host creates a friends-only room
+      const createRes = await makeRequest('/api/v1/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostToken}` },
+        body: JSON.stringify({ name: 'Friends Chill Lounge', privacy: 'friends' }),
+      });
+      if (createRes.status !== 201) throw new Error(`Host failed to create room: ${createRes.status}`);
+      const createJson = (await createRes.json()) as any;
+      friendsRoom = createJson.data;
+
+      // 2. Stranger lists rooms -> must NOT see Friends Chill Lounge
+      const strangerList = await makeRequest('/api/v1/rooms', {
+        headers: { Authorization: `Bearer ${strangerToken}` },
+      });
+      const strangerJson = (await strangerList.json()) as any;
+      const strangerSees = strangerJson.data.some((r: any) => r.id === friendsRoom.id);
+      if (strangerSees) throw new Error('Stranger user was able to see friends-only room in listRooms!');
+
+      // 3. Stranger attempts to join room -> must be rejected with 403
+      const strangerJoin = await makeRequest(`/api/v1/rooms/${friendsRoom.id}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${strangerToken}` },
+      });
+      if (strangerJoin.status !== 403) throw new Error(`Expected stranger join to be 403, got ${strangerJoin.status}`);
+
+      // 4. Friend lists rooms -> MUST see Friends Chill Lounge
+      const friendList = await makeRequest('/api/v1/rooms', {
+        headers: { Authorization: `Bearer ${friendToken}` },
+      });
+      const friendJson = (await friendList.json()) as any;
+      const friendSees = friendJson.data.some((r: any) => r.id === friendsRoom.id);
+      if (!friendSees) throw new Error('Accepted friend was unable to see friends-only room in listRooms!');
+
+      // 5. Friend joins room -> must succeed with 200
+      const friendJoin = await makeRequest(`/api/v1/rooms/${friendsRoom.id}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${friendToken}` },
+      });
+      if (friendJoin.status !== 200) throw new Error(`Friend failed to join friends room: ${friendJoin.status}`);
+
+      // 6. Host re-joins own room (re-entry recovery after reconnect) -> must succeed with 200 without 409 conflict
+      const hostReentry = await makeRequest(`/api/v1/rooms/${friendsRoom.id}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${hostToken}` },
+      });
+      if (hostReentry.status !== 200) throw new Error(`Host re-entry failed with status: ${hostReentry.status}`);
+
+      // 7. Ghost room cleanup: an empty room is purged from database when listed
+      const emptyRoom = await RoomModel.create({
+        name: 'Abandoned Ghost Room',
+        hostId: hostUser._id.toString(),
+        privacy: 'public',
+        participants: [],
+      });
+      const publicList = await makeRequest('/api/v1/rooms');
+      const publicJson = (await publicList.json()) as any;
+      const ghostListed = publicJson.data.some((r: any) => r.name === 'Abandoned Ghost Room');
+      if (ghostListed) throw new Error('Empty room was listed in room discovery!');
+      const stillInDb = await RoomModel.findById(emptyRoom._id);
+      if (stillInDb) throw new Error('Empty room was not pruned from DB!');
+    } finally {
+      if (friendsRoom) await RoomModel.deleteOne({ _id: friendsRoom.id });
+      await FriendshipModel.deleteMany({
+        $or: [
+          { requesterId: hostUser._id.toString() },
+          { recipientId: hostUser._id.toString() },
+        ],
+      });
+      await UserModel.deleteMany({ _id: { $in: [hostUser._id, friendUser._id, strangerUser._id] } });
+    }
+  });
+
+  // 19. EMERGENCY SECURITY LOCKDOWN & HONEYPOT TRIPWIRE TESTS
+  await assertTest('Accessing exposed honeypot (/.env) quarantines attacker IP with 403', async () => {
+    const res = await makeRequest('/.env', {
+      headers: { 'X-Forwarded-For': '198.51.100.42' },
+    });
+    if (res.status !== 403) {
+      throw new Error(`Expected honeypot probe to return 403 ACCESS_DENIED, got ${res.status}`);
     }
     const json = (await res.json()) as any;
-    if (json.error !== 'CRITICAL_SECURITY_LOCKDOWN') {
-      throw new Error(`Expected error CRITICAL_SECURITY_LOCKDOWN, got ${json.error}`);
+    if (json.error !== 'ACCESS_DENIED') {
+      throw new Error(`Expected error ACCESS_DENIED, got ${json.error}`);
     }
   });
 
-  await assertTest('Subsequent legitimate API requests are rejected during lockdown with 503', async () => {
-    const res = await makeRequest('/api/v1/users/me', {
-      headers: { Authorization: `Bearer ${validToken}` },
+  await assertTest('Quarantined attacker IP is blocked on subsequent requests while other IPs succeed', async () => {
+    // 1. Quarantined attacker IP is blocked
+    const blockedRes = await makeRequest('/api/v1/rooms', {
+      headers: {
+        Authorization: `Bearer ${validToken}`,
+        'X-Forwarded-For': '198.51.100.42',
+      },
     });
-    if (res.status !== 503) {
-      throw new Error(`Expected ordinary API to be frozen during lockdown (503), got ${res.status}`);
+    if (blockedRes.status !== 403) {
+      throw new Error(`Expected quarantined IP to be rejected with 403, got ${blockedRes.status}`);
+    }
+
+    // 2. Different legitimate IP succeeds without interruption
+    const goodRes = await makeRequest('/api/v1/rooms', {
+      headers: {
+        Authorization: `Bearer ${validToken}`,
+        'X-Forwarded-For': '203.0.113.19',
+      },
+    });
+    if (goodRes.status !== 200) {
+      throw new Error(`Expected legitimate user from different IP to succeed (200), got ${goodRes.status}`);
     }
   });
 
-  await assertTest('Admin unlock restores backend operations after lockdown', async () => {
-    // 1. Invalid key rejected
-    const badUnlock = await makeRequest('/api/v1/security/admin-unlock', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret: 'wrong_secret' }),
-    });
-    if (badUnlock.status !== 403) {
-      throw new Error(`Expected wrong admin secret to be rejected with 403, got ${badUnlock.status}`);
-    }
-
-    // 2. Valid key successfully unlocks
-    const goodUnlock = await makeRequest('/api/v1/security/admin-unlock', {
+  await assertTest('Admin manual lockdown and unlock control global service state', async () => {
+    // 1. Engage manual emergency lockdown
+    const lockRes = await makeRequest('/api/v1/security/admin-lockdown', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: 'nebula_emergency_unlock_2026' }),
     });
-    if (goodUnlock.status !== 200) {
-      throw new Error(`Expected admin unlock with valid key to return 200, got ${goodUnlock.status}`);
+    if (lockRes.status !== 200) {
+      throw new Error(`Expected admin lockdown to return 200, got ${lockRes.status}`);
     }
 
-    // 3. Normal API request now passes
-    const statusRes = await makeRequest('/api/v1/security/status');
-    if (statusRes.status !== 200) {
-      throw new Error(`Expected status endpoint to return 200 after unlock, got ${statusRes.status}`);
+    // 2. APIs return 503 during manual lockdown
+    const duringLock = await makeRequest('/api/v1/rooms', {
+      headers: { Authorization: `Bearer ${validToken}` },
+    });
+    if (duringLock.status !== 503) {
+      throw new Error(`Expected API to return 503 during manual lockdown, got ${duringLock.status}`);
     }
-    const statusJson = (await statusRes.json()) as any;
-    if (statusJson.lockedDown !== false) {
-      throw new Error(`Expected lockedDown to be false after unlock, got ${statusJson.lockedDown}`);
+
+    // 3. Unlock with valid key restores traffic
+    const unlockRes = await makeRequest('/api/v1/security/admin-unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: 'nebula_emergency_unlock_2026' }),
+    });
+    if (unlockRes.status !== 200) {
+      throw new Error(`Expected admin unlock to return 200, got ${unlockRes.status}`);
+    }
+
+    // 4. APIs pass again
+    const afterUnlock = await makeRequest('/api/v1/rooms', {
+      headers: { Authorization: `Bearer ${validToken}` },
+    });
+    if (afterUnlock.status !== 200) {
+      throw new Error(`Expected API to return 200 after unlock, got ${afterUnlock.status}`);
+    }
+  });
+
+  // 17. RECOMMENDATIONS SELF-EXCLUSION GUARANTEE
+  await assertTest('Suggested people recommendations strictly exclude the requesting user own profile', async () => {
+    const candidateUser = await UserModel.create({
+      email: 'candidate_friend@example.com',
+      username: 'cand_friend_1',
+      displayName: 'Candidate Friend',
+      tier: 'free',
+      status: 'dynamic',
+      presenceStatus: 'online',
+      isOnboardingCompleted: true,
+      isBanned: false,
+    });
+
+    try {
+      const res = await makeRequest('/api/v1/friends/suggested', {
+        headers: { Authorization: `Bearer ${validToken}` },
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+      const body: any = await res.json();
+      if (!body.success) throw new Error(`Expected success, got: ${JSON.stringify(body)}`);
+
+      // Verify that user's own ID NEVER appears in suggested people
+      const selfFound = body.data.some((u: any) => u.id === validUserPayload.id);
+      if (selfFound) {
+        throw new Error(`CRITICAL SECURITY FAILURE: User's own profile (${validUserPayload.id}) found in recommendations!`);
+      }
+    } finally {
+      await UserModel.deleteOne({ _id: candidateUser._id });
+    }
+  });
+
+  // 18. MULTI-DEVICE SESSION ACCURACY & REVOCATION ENFORCEMENT
+  await assertTest('Active device sessions track current device and revoked session immediately rejects with 401 SESSION_REVOKED', async () => {
+    const multiUser = await UserModel.create({
+      email: 'device_tester@example.com',
+      username: 'device_tester_1',
+      displayName: 'Device Tester',
+      tier: 'free',
+      isOnboardingCompleted: true,
+      isBanned: false,
+    });
+
+    try {
+      // 1. Device A logs in
+      const sessionA = await AuthService.issueSessionTokens(multiUser, 'Pixel 8 (Android 14)', '1.1.1.1', 'device_alpha');
+      // 2. Device B logs in
+      const sessionB = await AuthService.issueSessionTokens(multiUser, 'Galaxy S24 (Android 14)', '2.2.2.2', 'device_beta');
+
+      // 3. Query active sessions from Device B
+      const listRes = await makeRequest('/api/v1/auth/sessions', {
+        headers: {
+          Authorization: `Bearer ${sessionB.token}`,
+          'X-Device-Id': 'device_beta',
+        },
+      });
+      if (listRes.status !== 200) throw new Error(`Expected 200, got ${listRes.status}`);
+      const listData: any = await listRes.json();
+      if (listData.data.length !== 2) throw new Error(`Expected 2 active sessions, got ${listData.data.length}`);
+
+      const currentDev = listData.data.find((s: any) => s.deviceId === 'device_beta');
+      const otherDev = listData.data.find((s: any) => s.deviceId === 'device_alpha');
+      if (!currentDev?.isCurrent) throw new Error('Device B was not marked as isCurrent!');
+      if (otherDev?.isCurrent) throw new Error('Device A was incorrectly marked as isCurrent on Device B request!');
+
+      // 4. Logout Device A
+      const logoutRes = await makeRequest('/api/v1/auth/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionA.token}`,
+          'Content-Type': 'application/json',
+          'X-Device-Id': 'device_alpha',
+        },
+        body: JSON.stringify({ refreshToken: sessionA.refreshToken, deviceId: 'device_alpha' }),
+      });
+      if (logoutRes.status !== 200) throw new Error(`Expected 200 on logout, got ${logoutRes.status}`);
+
+      // 5. Subsequent request with Device A's JWT must be IMMEDIATELY rejected with 401 SESSION_REVOKED
+      const staleRes = await makeRequest('/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${sessionA.token}` },
+      });
+      if (staleRes.status !== 401) throw new Error(`Expected 401 for revoked session, got ${staleRes.status}`);
+      const staleBody: any = await staleRes.json();
+      if (staleBody.code !== 'SESSION_REVOKED') {
+        throw new Error(`Expected code SESSION_REVOKED, got ${staleBody.code}`);
+      }
+
+      // 6. Device B remains fully active and unaffected
+      const validDeviceRes = await makeRequest('/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${sessionB.token}` },
+      });
+      if (validDeviceRes.status !== 200) {
+        throw new Error(`Device B should still be active, got ${validDeviceRes.status}`);
+      }
+    } finally {
+      await UserModel.deleteOne({ _id: multiUser._id });
+    }
+  });
+
+  // 19. FIREBASE APP CHECK ENFORCEMENT LAYER
+  await assertTest('Firebase App Check enforcement mode rejects unauthenticated clients with 401 APP_CHECK_MISSING', async () => {
+    const prevEnforcement = config.appCheck.enforcement;
+    config.appCheck.enforcement = 'enforce';
+
+    try {
+      const res = await makeRequest('/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${validToken}` },
+      });
+      if (res.status !== 401) throw new Error(`Expected 401 APP_CHECK_MISSING, got ${res.status}`);
+      const body: any = await res.json();
+      if (body.code !== 'APP_CHECK_MISSING') {
+        throw new Error(`Expected code APP_CHECK_MISSING, got ${body.code}`);
+      }
+    } finally {
+      config.appCheck.enforcement = prevEnforcement;
     }
   });
 

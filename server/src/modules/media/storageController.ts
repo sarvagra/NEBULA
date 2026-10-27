@@ -4,7 +4,8 @@ import { config } from '../../config/env';
 import { getPrivateObjectRedirect } from '../../services/objectStorage';
 
 export async function redirectToObject(req: Request, res: Response): Promise<void> {
-  const encodedKey = req.params.encodedKey;
+  const rawKey = req.params.encodedKey || '';
+  const encodedKey = rawKey.replace(/\.[a-zA-Z0-9]+$/, '');
   const token = typeof req.query.token === 'string' ? req.query.token : '';
   let key: string;
   try {

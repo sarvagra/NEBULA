@@ -39,6 +39,7 @@ export interface IRoom extends Document {
   isEnded: boolean;
   mediaState: IRoomMediaState;
   participants: IRoomParticipant[];
+  invitedUserIds: string[];
   kickedUserIds: string[];
   maxParticipants: number;
   isMicAllowed: boolean;
@@ -84,6 +85,7 @@ const RoomSchema = new Schema<IRoom>(
         isCameraOff: { type: Boolean, default: false },
       },
     ],
+    invitedUserIds: { type: [String], default: [] },
     // A host kick blocks re-entry until the room changes host or is removed.
     kickedUserIds: { type: [String], default: [] },
     maxParticipants: { type: Number, default: 25 },

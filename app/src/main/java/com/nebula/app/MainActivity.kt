@@ -54,11 +54,11 @@ class MainActivity : ComponentActivity() {
     private val sessionManager by lazy { com.nebula.app.data.local.SessionManager.getInstance(this) }
 
     // Repositories & Auth Manager
-    private val themeRepository = ThemeRepositoryImpl()
+    private val themeRepository by lazy { ThemeRepositoryImpl(sessionManager) }
     private val profileRepository by lazy { ProfileRepositoryImpl(sessionManager) }
     private val chatRepository = ChatRepositoryImpl()
-    private val roomRepository = RoomRepositoryImpl()
-    private val socialRepository = SocialRepositoryImpl()
+    private val roomRepository by lazy { RoomRepositoryImpl(sessionManager = sessionManager) }
+    private val socialRepository by lazy { SocialRepositoryImpl(sessionManager = sessionManager) }
     private val authManager by lazy { NebulaAuthManager(this) }
 
     private val homeViewModel by lazy {

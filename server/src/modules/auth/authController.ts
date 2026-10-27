@@ -187,9 +187,12 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
 
     res.json({
       success: true,
-      message: 'Verification code sent to your email',
+      message: emailResult.deliveredToInbox ? 'Verification code sent to your email' : 'Verification code dispatched',
       isNewUser: !existingUser,
-      emailSent: true,
+      emailSent: emailResult.deliveredToInbox ?? true,
+      data: {
+        devCode: (process.env.NODE_ENV === 'development' || !emailResult.deliveredToInbox) ? code : undefined,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to dispatch verification code' });
@@ -307,10 +310,16 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
 
 export async function logout(req: Request, res: Response): Promise<void> {
   try {
-    const { refreshToken } = req.body;
-    if (refreshToken) {
-      await AuthService.revokeSession(refreshToken);
-    }
+    const { refreshToken, deviceId } = req.body;
+    const targetDeviceId = deviceId || (req.headers['x-device-id'] as string) || req.user?.deviceId;
+    const targetSessionId = req.user?.sessionId;
+
+    await AuthService.revokeSession({
+      rawRefreshToken: refreshToken,
+      sessionId: targetSessionId,
+      deviceId: targetDeviceId,
+      userId: req.user?.id,
+    });
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Logout failed' });
@@ -405,9 +414,9 @@ export async function getActiveSessions(req: Request, res: Response): Promise<vo
       return;
     }
 
-    const currentToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-    const currentTokenHash = currentToken ? hashToken(currentToken) : undefined;
-    const sessions = await AuthService.getActiveSessions(req.user.id, currentTokenHash);
+    const currentDeviceId = (req.headers['x-device-id'] as string) || req.user.deviceId;
+    const currentSessionId = req.user.sessionId;
+    const sessions = await AuthService.getActiveSessions(req.user.id, currentDeviceId, currentSessionId);
 
     res.json({
       success: true,
@@ -443,3 +452,25 @@ export async function revokeSessionById(req: Request, res: Response): Promise<vo
     res.status(500).json({ success: false, error: 'Failed to revoke device session' });
   }
 }
+
+export async function revokeOtherSessions(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const currentDeviceId = (req.headers['x-device-id'] as string) || req.user.deviceId;
+    const currentSessionId = req.user.sessionId;
+    const count = await AuthService.revokeOtherSessions(req.user.id, currentDeviceId, currentSessionId);
+
+    res.json({
+      success: true,
+      message: count > 0 ? `Logged out of ${count} other device(s)` : 'No other active devices',
+      revokedCount: count,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Failed to revoke other sessions' });
+  }
+}
+

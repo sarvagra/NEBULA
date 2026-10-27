@@ -80,6 +80,9 @@ export const config = {
   playIntegrity: {
     cloudProjectNumber: process.env.PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER || '',
   },
+  appCheck: {
+    enforcement: (process.env.APP_CHECK_ENFORCEMENT || 'warn') as 'enforce' | 'warn' | 'off',
+  },
   billing: {
     packageName: process.env.PLAY_PACKAGE_NAME || 'com.nebula.app',
     serviceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
@@ -120,7 +123,6 @@ export const config = {
     smtpSecure: process.env.SMTP_SECURE === 'true',
     smtpUser: process.env.SMTP_USER || '',
     smtpPass: process.env.SMTP_PASS || '',
-    fromEmail: process.env.EMAIL_FROM || process.env.SMTP_USER || 'Nebula Auth <no-reply@nebula.app>',
-    resendApiKey: requireExternal('RESEND_API_KEY'),
+    fromEmail: process.env.EMAIL_FROM || process.env.SMTP_USER || 'Nebula <no-reply@nebula.app>',
   },
 };

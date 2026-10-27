@@ -78,17 +78,12 @@ import androidx.compose.foundation.Image
 import com.nebula.app.data.backend.NebulaApiClient
 import com.nebula.app.domain.model.UserProfile
 import com.nebula.app.theme.Theme
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val BANNER_PALETTES = listOf(
-    "Deep Indigo" to listOf(Color(0xFF1E1B4B), Color(0xFF312E81)),
-    "Nebula Violet" to listOf(Color(0xFF3B0764), Color(0xFF581C87)),
-    "Midnight Teal" to listOf(Color(0xFF042F2E), Color(0xFF115E59)),
-    "Cosmic Crimson" to listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)),
-    "Obsidian" to listOf(Color(0xFF090B10), Color(0xFF1E222D))
-)
+private val BANNER_PALETTES = com.nebula.app.ui.components.NebulaBannerThemes.ALL.map { it.name to it.colors }
 
 private val AVAILABLE_INTERESTS = listOf(
     "🎬 Sci-Fi", "🎧 Lo-Fi", "🍿 Watch Parties", "🌌 Ambient", "🎮 Gaming", "📚 Study", "🎧 Podcast", "🎨 Design"
@@ -118,7 +113,8 @@ fun NebulaEditProfileScreen(
     onSave: (displayName: String, username: String, bio: String, status: String, bannerIndex: Int, interests: List<String>, isFriendCountPublic: Boolean, avatarUrl: String?, bannerUrl: String?, customStatus: String) -> Unit,
     onBack: () -> Unit,
     onOpenMembership: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onProfilePreviewChanged: ((bannerIndex: Int, bannerUrl: String?, avatarUrl: String?) -> Unit)? = null
 ) {
     val theme = Theme.current
     val context = LocalContext.current
@@ -131,6 +127,8 @@ fun NebulaEditProfileScreen(
     var customStatusText by remember { mutableStateOf(userProfile.customStatus) }
     var selectedBannerIndex by remember { mutableIntStateOf(userProfile.bannerIndex) }
     var customBannerUri by remember { mutableStateOf(userProfile.bannerUrl) }
+    var selectedBannerCategory by remember { mutableStateOf("All") }
+    val bannerCategories = remember { listOf("All", "Gradients", "Shapes", "Emojis") }
     var selectedInterests by remember { mutableStateOf(userProfile.interests.toSet()) }
 
     var isFriendCountPublic by remember { mutableStateOf(userProfile.isFriendCountPublic) }
@@ -142,6 +140,48 @@ fun NebulaEditProfileScreen(
     var pendingBannerCropBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var showBannerCropDialog by remember { mutableStateOf(false) }
     var isUploadingBanner by remember { mutableStateOf(false) }
+    var isSavingProfile by remember { mutableStateOf(false) }
+
+    // Staged/pending changes (only committed when user clicks Save)
+    var pendingAvatarDataUrl by remember { mutableStateOf<String?>(null) }
+    var pendingBannerDataUrl by remember { mutableStateOf<String?>(null) }
+    var pendingVideoFile by remember { mutableStateOf<File?>(null) }
+    var pendingVideoBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var pendingVideoMime by remember { mutableStateOf<String?>("video/mp4") }
+    var pendingSelectedAvatarAssetId by remember { mutableStateOf<String?>(null) }
+    var pendingSelectedBannerAssetId by remember { mutableStateOf<String?>(null) }
+
+    // Profile Asset History state
+    var assetHistory by remember { mutableStateOf<List<ProfileAssetUiItem>>(emptyList()) }
+    var isAssetLoading by remember { mutableStateOf(false) }
+    var assetToDelete by remember { mutableStateOf<ProfileAssetUiItem?>(null) }
+
+    fun refreshAssets() {
+        scope.launch {
+            isAssetLoading = true
+            when (val res = NebulaApiClient.getProfileAssets()) {
+                is NebulaApiClient.ApiResponse.Success -> {
+                    val rawList = res.data
+                    val items = mutableListOf<ProfileAssetUiItem>()
+                    for (i in 0 until rawList.length()) {
+                        val obj = rawList.getJSONObject(i)
+                        items.add(
+                            ProfileAssetUiItem(
+                                id = obj.optString("id", obj.optString("_id")),
+                                assetType = obj.optString("assetType", "avatar"),
+                                mediaUrl = obj.optString("url", obj.optString("mediaUrl", "")),
+                                isCurrent = obj.optBoolean("isCurrent", false),
+                                createdAt = obj.optString("createdAt", "").take(10)
+                            )
+                        )
+                    }
+                    assetHistory = items
+                }
+                else -> {}
+            }
+            isAssetLoading = false
+        }
+    }
 
     val bannerPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -149,24 +189,37 @@ fun NebulaEditProfileScreen(
         uri?.let { selectedUri ->
             scope.launch {
                 val mimeType = context.contentResolver.getType(selectedUri) ?: ""
-                val isVideo = mimeType.startsWith("video")
+                var isVideo = mimeType.startsWith("video")
+                if (!isVideo) {
+                    try {
+                        context.contentResolver.openFileDescriptor(selectedUri, "r")?.use { pfd ->
+                            val retriever = MediaMetadataRetriever()
+                            retriever.setDataSource(pfd.fileDescriptor)
+                            val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
+                            retriever.release()
+                            if (hasVideo == "yes") {
+                                isVideo = true
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
 
                 if (isVideo) {
                     var durationMs = 0L
-                    var frameBmp: android.graphics.Bitmap? = null
                     try {
-                        val retriever = MediaMetadataRetriever()
-                        retriever.setDataSource(context, selectedUri)
-                        val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                        durationMs = durStr?.toLongOrNull() ?: 0L
-                        frameBmp = retriever.getFrameAtTime(0)
-                        retriever.release()
+                        context.contentResolver.openFileDescriptor(selectedUri, "r")?.use { pfd ->
+                            val retriever = MediaMetadataRetriever()
+                            retriever.setDataSource(pfd.fileDescriptor)
+                            val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                            durationMs = durStr?.toLongOrNull() ?: 0L
+                            retriever.release()
+                        }
                     } catch (e: Exception) {
                         android.util.Log.e("NebulaBanner", "Error checking video duration", e)
                     }
 
-                    if (durationMs > 5500L) {
-                        Toast.makeText(context, "Video banner must be 5 seconds or shorter (${(durationMs + 999) / 1000}s selected)", Toast.LENGTH_LONG).show()
+                    if (durationMs > 15500L) {
+                        Toast.makeText(context, "Video banner must be 15 seconds or shorter (${(durationMs + 999) / 1000}s selected)", Toast.LENGTH_LONG).show()
                         return@launch
                     }
 
@@ -180,11 +233,41 @@ fun NebulaEditProfileScreen(
                         return@launch
                     }
 
-                    if (frameBmp != null) {
-                        pendingBannerCropBitmap = frameBmp
+                    // ⚡ Cache locally and extract representative frame for 16:9 crop / framing option:
+                    val localVideoFile = File(context.cacheDir, "banner_picked_video_${System.currentTimeMillis()}.mp4")
+                    val videoBytes = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(selectedUri)?.use { input ->
+                            val bytes = input.readBytes()
+                            localVideoFile.writeBytes(bytes)
+                            bytes
+                        }
+                    }
+                    val localUriStr = Uri.fromFile(localVideoFile).toString()
+                    val extractedFrame = withContext(Dispatchers.IO) {
+                        try {
+                            val mmr = android.media.MediaMetadataRetriever()
+                            mmr.setDataSource(localVideoFile.absolutePath)
+                            val frame = mmr.getFrameAtTime(500_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                ?: mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                            mmr.release()
+                            frame
+                        } catch (t: Throwable) {
+                            android.util.Log.e("NebulaBanner", "Error extracting frame from video", t)
+                            null
+                        }
+                    }
+
+                    pendingVideoFile = localVideoFile
+                    pendingVideoBytes = videoBytes
+                    pendingVideoMime = if (mimeType.isNotBlank() && mimeType.startsWith("video")) mimeType else "video/mp4"
+                    pendingBannerDataUrl = null
+                    pendingSelectedBannerAssetId = null
+
+                    if (extractedFrame != null) {
+                        pendingBannerCropBitmap = extractedFrame
                         showBannerCropDialog = true
                     } else {
-                        customBannerUri = selectedUri.toString()
+                        customBannerUri = localUriStr
                     }
                 } else {
                     val fileSize = withContext(Dispatchers.IO) {
@@ -221,6 +304,9 @@ fun NebulaEditProfileScreen(
                         showBannerCropDialog = true
                     } else {
                         customBannerUri = selectedUri.toString()
+                        pendingBannerDataUrl = null
+                        pendingVideoFile = null
+                        pendingVideoBytes = null
                     }
                 }
             }
@@ -266,37 +352,7 @@ fun NebulaEditProfileScreen(
         }
     }
 
-    // Profile Asset History state
-    var assetHistory by remember { mutableStateOf<List<ProfileAssetUiItem>>(emptyList()) }
-    var isAssetLoading by remember { mutableStateOf(false) }
-    var assetToDelete by remember { mutableStateOf<ProfileAssetUiItem?>(null) }
 
-    fun refreshAssets() {
-        scope.launch {
-            isAssetLoading = true
-            when (val res = NebulaApiClient.getProfileAssets()) {
-                is NebulaApiClient.ApiResponse.Success -> {
-                    val rawList = res.data
-                    val items = mutableListOf<ProfileAssetUiItem>()
-                    for (i in 0 until rawList.length()) {
-                        val obj = rawList.getJSONObject(i)
-                        items.add(
-                            ProfileAssetUiItem(
-                                id = obj.optString("id", obj.optString("_id")),
-                                assetType = obj.optString("assetType", "avatar"),
-                                mediaUrl = obj.optString("url", obj.optString("mediaUrl", "")),
-                                isCurrent = obj.optBoolean("isCurrent", false),
-                                createdAt = obj.optString("createdAt", "").take(10)
-                            )
-                        )
-                    }
-                    assetHistory = items
-                }
-                else -> {}
-            }
-            isAssetLoading = false
-        }
-    }
 
     LaunchedEffect(Unit) {
         refreshAssets()
@@ -347,37 +403,19 @@ fun NebulaEditProfileScreen(
                 showCropDialog = false
                 scope.launch {
                     try {
-                        isUploadingAvatar = true
                         val outputStream = java.io.ByteArrayOutputStream()
                         cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, outputStream)
                         val compressedBytes = outputStream.toByteArray()
                         val base64 = android.util.Base64.encodeToString(compressedBytes, android.util.Base64.NO_WRAP)
                         val dataUrl = "data:image/jpeg;base64,$base64"
 
-                        val upload = NebulaApiClient.uploadProfileAsset(
-                            assetType = "avatar",
-                            url = dataUrl,
-                            name = "avatar_${System.currentTimeMillis()}.jpg"
-                        )
-                        if (upload is NebulaApiClient.ApiResponse.Success) {
-                            val asset = upload.data.optJSONObject("data")
-                            val assetId = asset?.optString("id").orEmpty()
-                            val applied = assetId.takeIf { it.isNotBlank() }?.let { NebulaApiClient.applyProfileAsset(it) }
-                            val uploadedUrl = asset?.optString("url")?.takeIf { !it.isNullOrBlank() }
-                                ?: upload.data.optString("url").takeIf { it.isNotBlank() }
-                            if (applied is NebulaApiClient.ApiResponse.Success && uploadedUrl != null) {
-                                currentAvatarUri = uploadedUrl
-                                onSave(displayName, username, bio, statusText, selectedBannerIndex, selectedInterests.toList(), isFriendCountPublic, uploadedUrl, customBannerUri, customStatusText)
-                            }
-                            else Toast.makeText(context, "Avatar upload did not return a saved image", Toast.LENGTH_LONG).show()
-                        } else if (upload is NebulaApiClient.ApiResponse.Error) {
-                            Toast.makeText(context, "Avatar upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
-                        }
-                        refreshAssets()
+                        // Staging only: reflect locally in avatar preview
+                        currentAvatarUri = dataUrl
+                        pendingAvatarDataUrl = dataUrl
+                        pendingSelectedAvatarAssetId = null
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Avatar upload failed. Please try again.", Toast.LENGTH_LONG).show()
+                        android.util.Log.e("NebulaAvatar", "Error staging avatar", e)
                     } finally {
-                        isUploadingAvatar = false
                         pendingCropBitmap = null
                     }
                 }
@@ -396,37 +434,28 @@ fun NebulaEditProfileScreen(
                 showBannerCropDialog = false
                 scope.launch {
                     try {
-                        isUploadingBanner = true
-                        val outputStream = java.io.ByteArrayOutputStream()
-                        cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, outputStream)
-                        val compressedBytes = outputStream.toByteArray()
-                        val base64 = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
-                        val dataUrl = "data:image/jpeg;base64,$base64"
+                        if (pendingVideoFile != null) {
+                            // Video banner was framed! Reflect the local video URI for playback preview
+                            customBannerUri = Uri.fromFile(pendingVideoFile).toString()
+                            pendingBannerDataUrl = null
+                            pendingSelectedBannerAssetId = null
+                        } else {
+                            val outputStream = java.io.ByteArrayOutputStream()
+                            cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, outputStream)
+                            val compressedBytes = outputStream.toByteArray()
+                            val base64 = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+                            val dataUrl = "data:image/jpeg;base64,$base64"
 
-                        val upload = NebulaApiClient.uploadProfileAsset(
-                            assetType = "banner",
-                            url = dataUrl,
-                            name = "banner_${System.currentTimeMillis()}.jpg"
-                        )
-                        if (upload is NebulaApiClient.ApiResponse.Success) {
-                            val asset = upload.data.optJSONObject("data")
-                            val assetId = asset?.optString("id").orEmpty()
-                            val applied = assetId.takeIf { it.isNotBlank() }?.let { NebulaApiClient.applyProfileAsset(it) }
-                            val uploadedUrl = asset?.optString("url")?.takeIf { !it.isNullOrBlank() }
-                                ?: upload.data.optString("url").takeIf { it.isNotBlank() }
-                            if (applied is NebulaApiClient.ApiResponse.Success && uploadedUrl != null) {
-                                customBannerUri = uploadedUrl
-                                onSave(displayName, username, bio, statusText, selectedBannerIndex, selectedInterests.toList(), isFriendCountPublic, currentAvatarUri, uploadedUrl, customStatusText)
-                            }
-                            else Toast.makeText(context, "Banner upload did not return a saved image", Toast.LENGTH_LONG).show()
-                        } else if (upload is NebulaApiClient.ApiResponse.Error) {
-                            Toast.makeText(context, "Banner upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
+                            // Staging only: reflect locally in banner preview
+                            customBannerUri = dataUrl
+                            pendingBannerDataUrl = dataUrl
+                            pendingVideoFile = null
+                            pendingVideoBytes = null
+                            pendingSelectedBannerAssetId = null
                         }
-                        refreshAssets()
                     } catch (e: Exception) {
-                        android.util.Log.e("NebulaBanner", "Error uploading banner", e)
+                        android.util.Log.e("NebulaBanner", "Error staging banner crop", e)
                     } finally {
-                        isUploadingBanner = false
                         pendingBannerCropBitmap = null
                     }
                 }
@@ -475,35 +504,150 @@ fun NebulaEditProfileScreen(
             )
 
             // Save Action Button
-            val canSave = usernameState !is UsernameValidationState.Taken && usernameState !is UsernameValidationState.Invalid
+            val canSave = usernameState !is UsernameValidationState.Taken && usernameState !is UsernameValidationState.Invalid && !isSavingProfile
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (canSave) theme.colors.primaryAccent else theme.colors.primaryAccent.copy(alpha = 0.4f))
                     .clickable(enabled = canSave) {
-                        onSave(
-                            displayName,
-                            username,
-                            bio,
-                            statusText,
-                            selectedBannerIndex,
-                            selectedInterests.toList(),
-                            isFriendCountPublic,
-                            currentAvatarUri,
-                            customBannerUri,
-                            customStatusText
-                        )
+                        scope.launch {
+                            isSavingProfile = true
+                            try {
+                                var finalAvatarUrl = currentAvatarUri
+                                var finalBannerUrl = customBannerUri
+
+                                // 1. Upload pending avatar if newly cropped
+                                if (pendingAvatarDataUrl != null) {
+                                    val upload = NebulaApiClient.uploadProfileAsset(
+                                        assetType = "avatar",
+                                        url = pendingAvatarDataUrl!!,
+                                        name = "avatar_${System.currentTimeMillis()}.jpg"
+                                    )
+                                    if (upload is NebulaApiClient.ApiResponse.Success) {
+                                        val asset = upload.data.optJSONObject("data")
+                                        val assetId = asset?.optString("id").orEmpty()
+                                        if (assetId.isNotBlank()) {
+                                            NebulaApiClient.applyProfileAsset(assetId)
+                                        }
+                                        val uploadedUrl = asset?.optString("url")?.takeIf { it.isNotBlank() }
+                                            ?: upload.data.optString("url").takeIf { it.isNotBlank() }
+                                        if (!uploadedUrl.isNullOrBlank()) {
+                                            finalAvatarUrl = uploadedUrl
+                                        }
+                                    } else if (upload is NebulaApiClient.ApiResponse.Error) {
+                                        Toast.makeText(context, "Avatar upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
+                                        isSavingProfile = false
+                                        return@launch
+                                    }
+                                } else if (pendingSelectedAvatarAssetId != null) {
+                                    NebulaApiClient.applyProfileAsset(pendingSelectedAvatarAssetId!!)
+                                }
+
+                                // 2. Upload pending video or banner image if newly picked
+                                if (pendingVideoBytes != null) {
+                                    val base64Video = Base64.encodeToString(pendingVideoBytes, Base64.NO_WRAP)
+                                    val mime = pendingVideoMime ?: "video/mp4"
+                                    val videoDataUrl = "data:$mime;base64,$base64Video"
+                                    val upload = NebulaApiClient.uploadProfileAsset(
+                                        assetType = "banner",
+                                        url = videoDataUrl,
+                                        name = "banner_${System.currentTimeMillis()}.mp4",
+                                        mimeType = mime
+                                    )
+                                    if (upload is NebulaApiClient.ApiResponse.Success) {
+                                        val asset = upload.data.optJSONObject("data")
+                                        val assetId = asset?.optString("id").orEmpty()
+                                        if (assetId.isNotBlank()) {
+                                            NebulaApiClient.applyProfileAsset(assetId)
+                                        }
+                                        val uploadedUrl = asset?.optString("url")?.takeIf { it.isNotBlank() }
+                                            ?: upload.data.optString("url").takeIf { it.isNotBlank() }
+                                        if (!uploadedUrl.isNullOrBlank()) {
+                                            finalBannerUrl = uploadedUrl
+                                        }
+                                    } else if (upload is NebulaApiClient.ApiResponse.Error) {
+                                        Toast.makeText(context, "Video banner upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
+                                        isSavingProfile = false
+                                        return@launch
+                                    }
+                                } else if (pendingBannerDataUrl != null) {
+                                    val upload = NebulaApiClient.uploadProfileAsset(
+                                        assetType = "banner",
+                                        url = pendingBannerDataUrl!!,
+                                        name = "banner_${System.currentTimeMillis()}.jpg"
+                                    )
+                                    if (upload is NebulaApiClient.ApiResponse.Success) {
+                                        val asset = upload.data.optJSONObject("data")
+                                        val assetId = asset?.optString("id").orEmpty()
+                                        if (assetId.isNotBlank()) {
+                                            NebulaApiClient.applyProfileAsset(assetId)
+                                        }
+                                        val uploadedUrl = asset?.optString("url")?.takeIf { it.isNotBlank() }
+                                            ?: upload.data.optString("url").takeIf { it.isNotBlank() }
+                                        if (!uploadedUrl.isNullOrBlank()) {
+                                            finalBannerUrl = uploadedUrl
+                                        }
+                                    } else if (upload is NebulaApiClient.ApiResponse.Error) {
+                                        Toast.makeText(context, "Banner upload failed: ${upload.message}", Toast.LENGTH_LONG).show()
+                                        isSavingProfile = false
+                                        return@launch
+                                    }
+                                } else if (pendingSelectedBannerAssetId != null) {
+                                    NebulaApiClient.applyProfileAsset(pendingSelectedBannerAssetId!!)
+                                }
+
+                                val safeBannerUrl = if (customBannerUri.isNullOrBlank()) "" else (finalBannerUrl ?: "")
+
+                                onSave(
+                                    displayName,
+                                    username,
+                                    bio,
+                                    statusText,
+                                    selectedBannerIndex,
+                                    selectedInterests.toList(),
+                                    isFriendCountPublic,
+                                    finalAvatarUrl,
+                                    safeBannerUrl,
+                                    customStatusText
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.e("NebulaEditProfile", "Error saving profile", e)
+                                Toast.makeText(context, "Failed to save profile. Please try again.", Toast.LENGTH_SHORT).show()
+                                isSavingProfile = false
+                            }
+                        }
                     }
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
-                Text(
-                    text = "Save",
-                    style = theme.typography.bodyMedium.copy(
-                        color = if (canSave) Color.White else Color.White.copy(alpha = 0.5f),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp
+                if (isSavingProfile) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = "Saving...",
+                            style = theme.typography.bodyMedium.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Save",
+                        style = theme.typography.bodyMedium.copy(
+                            color = if (canSave) Color.White else Color.White.copy(alpha = 0.5f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -553,13 +697,11 @@ fun NebulaEditProfileScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Banner Preview with fixed 16:9 ratio
-                    val currentColors = BANNER_PALETTES[selectedBannerIndex.coerceIn(0, BANNER_PALETTES.lastIndex)].second
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Brush.horizontalGradient(currentColors))
                             .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
                             .clickable {
                                 bannerPickerLauncher.launch(
@@ -568,46 +710,99 @@ fun NebulaEditProfileScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!customBannerUri.isNullOrBlank()) {
-                            val bUri = customBannerUri!!
-                            val base64Bitmap = remember(bUri) {
-                                if (bUri.startsWith("data:image")) {
-                                    try {
-                                        val data = bUri.substringAfter("base64,")
-                                        val decoded = Base64.decode(data, Base64.DEFAULT)
-                                        BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
-                                    } catch (e: Exception) {
-                                        null
-                                    }
-                                } else null
-                            }
-                            if (base64Bitmap != null) {
-                                Image(
-                                    bitmap = base64Bitmap.asImageBitmap(),
-                                    contentDescription = "Custom Media Banner",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                coil.compose.AsyncImage(
-                                    model = bUri,
-                                    contentDescription = "Custom Media Banner",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
+                        com.nebula.app.ui.components.NebulaBannerView(
+                            bannerUrl = customBannerUri,
+                            bannerIndex = selectedBannerIndex,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        if (customBannerUri.isNullOrBlank()) {
+                            val activeTheme = com.nebula.app.ui.components.NebulaBannerThemes.getTheme(selectedBannerIndex)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.55f))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${activeTheme.name} • Tap to choose media",
+                                    style = theme.typography.caption.copy(
+                                        color = Color.White.copy(alpha = 0.9f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
                                 )
                             }
-                        } else {
-                            Text(
-                                text = BANNER_PALETTES[selectedBannerIndex.coerceIn(0, BANNER_PALETTES.lastIndex)].first,
-                                style = theme.typography.bodyMedium.copy(
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            )
+                        }
+
+                        if (isUploadingBanner) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.35f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color.Black.copy(alpha = 0.7f))
+                                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = theme.colors.primaryAccent,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text(
+                                        text = "Syncing banner to cloud...",
+                                        style = theme.typography.caption.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.5.sp
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    // Category Filter Pills: All, Gradients, Shapes, Emojis
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        bannerCategories.forEach { cat ->
+                            val isCatSelected = selectedBannerCategory == cat
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isCatSelected) theme.colors.primaryAccent else theme.colors.surfaceElevated)
+                                    .border(
+                                        1.dp,
+                                        if (isCatSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { selectedBannerCategory = cat }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = cat,
+                                    style = theme.typography.caption.copy(
+                                        color = if (isCatSelected) Color.White else theme.colors.textSecondary,
+                                        fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
 
                     // Banner Palette Selector Chips + Custom Media Banner
                     LazyRow(
@@ -645,7 +840,7 @@ fun NebulaEditProfileScreen(
                                         modifier = Modifier.size(13.dp)
                                     )
                                     Text(
-                                        text = "Custom Media Banner",
+                                        text = "Custom Media",
                                         style = theme.typography.caption.copy(
                                             color = theme.colors.textPrimary,
                                             fontWeight = FontWeight.Bold,
@@ -663,11 +858,17 @@ fun NebulaEditProfileScreen(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(theme.colors.surfaceElevated)
                                         .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                                        .clickable { customBannerUri = null }
+                                        .clickable {
+                                            customBannerUri = null
+                                            pendingBannerDataUrl = null
+                                            pendingVideoFile = null
+                                            pendingVideoBytes = null
+                                            pendingSelectedBannerAssetId = null
+                                        }
                                         .padding(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
                                     Text(
-                                        text = "Reset to Palette",
+                                        text = "Reset to Default",
                                         style = theme.typography.caption.copy(
                                             color = theme.colors.textSecondary,
                                             fontSize = 11.sp
@@ -677,31 +878,51 @@ fun NebulaEditProfileScreen(
                             }
                         }
 
-                        itemsIndexed(BANNER_PALETTES) { index, (name, colors) ->
-                            val isSelected = selectedBannerIndex == index && customBannerUri == null
+                        val visibleThemes = if (selectedBannerCategory == "All") {
+                            com.nebula.app.ui.components.NebulaBannerThemes.ALL
+                        } else {
+                            com.nebula.app.ui.components.NebulaBannerThemes.ALL.filter { it.category == selectedBannerCategory }
+                        }
+
+                        items(visibleThemes, key = { it.id }) { themeItem ->
+                            val isSelected = selectedBannerIndex == themeItem.id && customBannerUri == null
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Brush.horizontalGradient(colors))
+                                    .background(Brush.horizontalGradient(themeItem.colors))
                                     .border(
                                         width = if (isSelected) 2.dp else 1.dp,
                                         color = if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable {
-                                        selectedBannerIndex = index
+                                        selectedBannerIndex = themeItem.id
                                         customBannerUri = null
+                                        pendingBannerDataUrl = null
+                                        pendingVideoFile = null
+                                        pendingVideoBytes = null
+                                        pendingSelectedBannerAssetId = null
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
-                                Text(
-                                    text = name,
-                                    style = theme.typography.caption.copy(
-                                        color = Color.White,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 11.sp
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (themeItem.emojis.isNotEmpty()) {
+                                        Text(text = themeItem.emojis.first(), fontSize = 11.sp)
+                                    } else if (themeItem.patternType != com.nebula.app.ui.components.BannerPatternType.CLEAN_GRADIENT) {
+                                        Text(text = "◆", fontSize = 9.sp, color = Color.White.copy(alpha = 0.9f))
+                                    }
+                                    Text(
+                                        text = themeItem.name,
+                                        style = theme.typography.caption.copy(
+                                            color = Color.White,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 11.sp
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
@@ -1253,8 +1474,14 @@ fun NebulaEditProfileScreen(
                                             // DRAFT SELECTION: Updates preview in editor, does NOT commit to server immediately
                                             if (asset.assetType == "avatar") {
                                                 currentAvatarUri = asset.url
+                                                pendingAvatarDataUrl = null
+                                                pendingSelectedAvatarAssetId = asset.id
                                             } else if (asset.assetType == "banner") {
                                                 customBannerUri = asset.url
+                                                pendingBannerDataUrl = null
+                                                pendingVideoFile = null
+                                                pendingVideoBytes = null
+                                                pendingSelectedBannerAssetId = asset.id
                                             }
                                         }
                                 ) {

@@ -84,9 +84,19 @@ export async function uploadAsset(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const resolvedMime = mimeType || 'image/jpeg';
+    let resolvedMime = mimeType;
+    if (!resolvedMime && url.startsWith('data:')) {
+      const dataMatch = url.match(/^data:([^;,]+);base64,/);
+      if (dataMatch) {
+        resolvedMime = dataMatch[1];
+      }
+    }
+    if (!resolvedMime) {
+      resolvedMime = 'image/jpeg';
+    }
+
     if (!ALLOWED_MIME_TYPES.includes(resolvedMime.toLowerCase())) {
-      res.status(400).json({ success: false, error: 'Unsupported file type. Only JPEG, PNG, WEBP, and GIF are permitted.' });
+      res.status(400).json({ success: false, error: 'Unsupported file type. Only JPEG, PNG, WEBP, GIF, MP4, and WEBM are permitted.' });
       return;
     }
 

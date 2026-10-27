@@ -170,7 +170,7 @@ export async function markConversationRead(req: Request, res: Response): Promise
     // messages were opened. Without this the sender's ticks stayed single until
     // they happened to reload the thread.
     if (result.modifiedCount > 0) {
-      notifyConversationRead(conversationId, req.user.id, readAt.toISOString(), result.modifiedCount);
+      notifyConversationRead(req.user.id, conversationId, readAt.toISOString(), result.modifiedCount);
     }
 
     res.json({

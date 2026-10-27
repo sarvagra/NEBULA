@@ -69,13 +69,7 @@ private val PROFILE_BANNER_HEIGHT = 156.dp
  * These are deliberately hardcoded artwork, not theme tokens: the palette is part of the saved
  * profile content (it travels with `bannerIndex`) and must look identical across all four themes.
  */
-private val BANNER_PALETTES = listOf(
-    listOf(Color(0xFF1E1B4B), Color(0xFF312E81)), // Deep Indigo
-    listOf(Color(0xFF3B0764), Color(0xFF581C87)), // Nebula Violet
-    listOf(Color(0xFF042F2E), Color(0xFF115E59)), // Midnight Teal
-    listOf(Color(0xFF450A0A), Color(0xFF7F1D1D)), // Cosmic Crimson
-    listOf(Color(0xFF090B10), Color(0xFF1E222D))  // Obsidian Glass
-)
+private val BANNER_PALETTES = com.nebula.app.ui.components.NebulaBannerThemes.ALL.map { it.colors }
 
 /**
  * Raw status modes persisted by the profile payload (mirrors `NebulaUser.status`).
@@ -228,21 +222,14 @@ fun NebulaProfileScreen(
             ) {
                 // Background Banner behind the avatar: fixed proportional height, rounded by the
                 // parent card clip. The banner carries no share affordance any more.
-                Box(
+                com.nebula.app.ui.components.NebulaBannerView(
+                    bannerUrl = user.bannerUrl,
+                    bannerIndex = user.bannerIndex,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(PROFILE_BANNER_HEIGHT)
-                        .background(Brush.horizontalGradient(bannerColors))
-                ) {
-                    if (!user.bannerUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = user.bannerUrl,
-                            contentDescription = "Profile banner",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                        )
-                    }
-                }
+                        .height(PROFILE_BANNER_HEIGHT),
+                    shape = RoundedCornerShape(0.dp)
+                )
 
                 // Profile card content with spacious and de-congested layout
                 Column(

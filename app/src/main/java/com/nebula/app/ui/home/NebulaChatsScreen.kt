@@ -190,6 +190,8 @@ fun NebulaChatsScreen(
                 }
             }
         } else {
+            var lastItemClickTime by remember { mutableStateOf(0L) }
+
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
@@ -198,7 +200,13 @@ fun NebulaChatsScreen(
                 itemsIndexed(filtered) { index, conv ->
                     ChatListItem(
                         conversation = conv,
-                        onClick = { onSelectConversation(conv.id) }
+                        onClick = {
+                            val now = System.currentTimeMillis()
+                            if (now - lastItemClickTime > 400L) {
+                                lastItemClickTime = now
+                                onSelectConversation(conv.id)
+                            }
+                        }
                     )
                     if (index < filtered.lastIndex) {
                         Box(

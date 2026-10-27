@@ -1,5 +1,6 @@
 import { initializeApp, getApps, App, cert } from 'firebase-admin/app';
 import { getAuth, UserRecord } from 'firebase-admin/auth';
+import { getAppCheck } from 'firebase-admin/app-check';
 import { config } from '../config/env';
 
 let firebaseApp: App | null = null;
@@ -60,6 +61,20 @@ export class FirebaseService {
       name: (decoded as any).name || '',
       picture: (decoded as any).picture,
       emailVerified: decoded.email_verified || false,
+    };
+  }
+
+  /**
+   * Cryptographically verifies an incoming Firebase App Check token (backed by Play Integrity on Android).
+   * Ensures requests originate exclusively from the legitimate, untampered mobile binary.
+   */
+  static async verifyAppCheckToken(token: string): Promise<{ appId: string; alreadyConsumed?: boolean }> {
+    const app = getFirebaseAdmin();
+    const appCheck = getAppCheck(app);
+    const result = await appCheck.verifyToken(token);
+    return {
+      appId: result.appId,
+      alreadyConsumed: result.alreadyConsumed,
     };
   }
 

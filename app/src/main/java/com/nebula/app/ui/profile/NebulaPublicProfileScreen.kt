@@ -44,6 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,16 +82,22 @@ fun NebulaPublicProfileScreen(
     onRemoveFriend: (NebulaUser) -> Unit = {},
     onAcceptRequest: (NebulaUser) -> Unit = {},
     onBlockUser: (NebulaUser) -> Unit = {},
-    onInviteToRoom: (NebulaUser) -> Unit,
-    onOpenEditProfile: () -> Unit,
+    onInviteToRoom: (NebulaUser) -> Unit = {},
+    onOpenEditProfile: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    var isFriendState by remember(user.id) { mutableStateOf(user.isFriend) }
-    var isRequestPending by remember(user.id) { mutableStateOf(user.friendRequestPending) }
-    var isRequestReceived by remember(user.id) { mutableStateOf(user.friendRequestReceived) }
+    var isFriendState by remember(user.id, user.isFriend) { mutableStateOf(user.isFriend) }
+    var isRequestPending by remember(user.id, user.friendRequestPending) { mutableStateOf(user.friendRequestPending) }
+    var isRequestReceived by remember(user.id, user.friendRequestReceived) { mutableStateOf(user.friendRequestReceived) }
     var showProfileMenu by remember { mutableStateOf(false) }
     var showBlockConfirmation by remember { mutableStateOf(false) }
+
+    LaunchedEffect(user.isFriend, user.friendRequestPending, user.friendRequestReceived) {
+        isFriendState = user.isFriend
+        isRequestPending = user.friendRequestPending
+        isRequestReceived = user.friendRequestReceived
+    }
 
     val bannerGradient = remember(user.bannerIndex) {
         val safeIndex = (user.bannerIndex).coerceIn(0, NebulaBannerPalettes.lastIndex)
@@ -151,47 +158,15 @@ fun NebulaPublicProfileScreen(
                 ) {
                     Column {
                         // Visible Profile Banner
-                        Box(
+                        com.nebula.app.ui.components.NebulaBannerView(
+                            bannerUrl = user.bannerUrl,
+                            bannerIndex = user.bannerIndex,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(120.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .then(
-                                    if (user.bannerUrl.isNullOrBlank()) Modifier.background(Brush.horizontalGradient(bannerGradient))
-                                    else Modifier.background(Color.Black)
-                                )
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(18.dp))
-                        ) {
-                            if (!user.bannerUrl.isNullOrBlank()) {
-                                val bannerUri = user.bannerUrl
-                                val base64Bitmap = remember(bannerUri) {
-                                    if (bannerUri.startsWith("data:image")) {
-                                        try {
-                                            val data = bannerUri.substringAfter("base64,")
-                                            val decoded = Base64.decode(data, Base64.DEFAULT)
-                                            BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
-                                        } catch (e: Exception) {
-                                            null
-                                        }
-                                    } else null
-                                }
-                                if (base64Bitmap != null) {
-                                    Image(
-                                        bitmap = base64Bitmap.asImageBitmap(),
-                                        contentDescription = "Profile Banner",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    AsyncImage(
-                                        model = bannerUri,
-                                        contentDescription = "Profile Banner",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-                            }
-                        }
+                                .height(120.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            borderColor = theme.colors.surfaceBorder
+                        )
 
                         // 120dp banner + 44dp spacer = 164dp = hero height.
                         Spacer(modifier = Modifier.height(44.dp))
@@ -439,7 +414,7 @@ fun NebulaPublicProfileScreen(
                                     )
                                     Text(
                                         text = when {
-                                            isFriendState -> "Remove Friend"
+                                            isFriendState -> "Friends"
                                             isRequestReceived -> "Accept Request"
                                             isRequestPending -> "Withdraw Request"
                                             else -> "Add Friend"

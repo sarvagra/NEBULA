@@ -18,9 +18,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
+import com.nebula.app.data.local.SessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 class SocialRepositoryImpl(
-    private val apiClient: NebulaApiClient = NebulaApiClient
+    private val apiClient: NebulaApiClient = NebulaApiClient,
+    private val sessionManager: SessionManager? = null
 ) : ISocialRepository {
+
+    private val backgroundScope = CoroutineScope(Dispatchers.IO)
 
     fun clearLocalState() {
         _friends.value = emptyList()
@@ -30,7 +38,7 @@ class SocialRepositoryImpl(
         _activeConversation.value = null
     }
 
-    private val _friends = MutableStateFlow<List<NebulaUser>>(emptyList())
+    private val _friends = MutableStateFlow<List<NebulaUser>>(sessionManager?.getCachedFriends() ?: emptyList())
     override val friends: StateFlow<List<NebulaUser>> = _friends.asStateFlow()
 
     private val _friendRequests = MutableStateFlow<List<NebulaFriendRequest>>(emptyList())
@@ -42,7 +50,7 @@ class SocialRepositoryImpl(
     private val _searchResults = MutableStateFlow<List<NebulaUser>>(emptyList())
     override val searchResults: StateFlow<List<NebulaUser>> = _searchResults.asStateFlow()
 
-    private val _conversations = MutableStateFlow<List<NebulaConversation>>(emptyList())
+    private val _conversations = MutableStateFlow<List<NebulaConversation>>(sessionManager?.getCachedConversations() ?: emptyList())
     override val conversations: StateFlow<List<NebulaConversation>> = _conversations.asStateFlow()
 
     private val _activeConversation = MutableStateFlow<NebulaConversation?>(null)
@@ -51,38 +59,50 @@ class SocialRepositoryImpl(
     override suspend fun selectConversation(id: String) {
         val target = _conversations.value.firstOrNull { it.id == id }
         if (target != null) {
-            // Refresh the public profile at conversation entry so the header and
-            // old messages reflect the partner's current avatar/name.
-            val freshPartner = apiClient.getPublicProfileById(id).let { response ->
-                if (response is ApiResponse.Success) {
-                    response.data.optJSONObject("data")?.let { parseUsers(JSONArray().put(it)).firstOrNull() }
-                } else null
-            } ?: target.partnerUser
-            val history = apiClient.getConversationMessages(id)
-            val messages = if (history is ApiResponse.Success) {
-                buildList {
-                    for (index in 0 until history.data.length()) {
-                        val item = history.data.optJSONObject(index) ?: continue
-                        val parsed = messageFromJson(item, id)
-                        val senderIsPartner = parsed.role == MessageRole.ASSISTANT
-                        add(if (senderIsPartner && freshPartner != null) parsed.copy(
-                            senderName = freshPartner.displayName,
-                            senderAvatarUrl = freshPartner.avatarUrl,
-                            senderAvatarLetter = freshPartner.avatarLetter
-                        ) else parsed)
+            // STEP 1: INSTANT OPTIMISTIC TRANSITION (0ms latency, no blocking network calls)
+            val readTarget = target.copy(unreadCount = 0)
+            _activeConversation.value = readTarget
+            _conversations.value = _conversations.value.map { if (it.id == id) readTarget else it }
+
+            // STEP 2: Asynchronous background synchronization without freezing the UI
+            backgroundScope.launch {
+                val freshPartner = apiClient.getPublicProfileById(id).let { response ->
+                    if (response is ApiResponse.Success) {
+                        response.data.optJSONObject("data")?.let { parseUsers(JSONArray().put(it)).firstOrNull() }
+                    } else null
+                } ?: target.partnerUser
+
+                val history = apiClient.getConversationMessages(id)
+                val messages = if (history is ApiResponse.Success) {
+                    buildList {
+                        for (index in 0 until history.data.length()) {
+                            val item = history.data.optJSONObject(index) ?: continue
+                            val parsed = messageFromJson(item, id)
+                            val senderIsPartner = parsed.role == MessageRole.ASSISTANT
+                            add(if (senderIsPartner && freshPartner != null) parsed.copy(
+                                senderName = freshPartner.displayName,
+                                senderAvatarUrl = freshPartner.avatarUrl,
+                                senderAvatarLetter = freshPartner.avatarLetter
+                            ) else parsed)
+                        }
                     }
+                } else target.messages
+
+                val updatedTarget = readTarget.copy(
+                    title = freshPartner?.displayName ?: target.title,
+                    partnerUser = freshPartner ?: target.partnerUser,
+                    messages = messages
+                )
+
+                if (_activeConversation.value?.id == id) {
+                    _activeConversation.value = updatedTarget
                 }
-            } else target.messages
-            val updatedTarget = target.copy(title = freshPartner?.displayName ?: target.title, partnerUser = freshPartner ?: target.partnerUser, messages = messages)
-            _activeConversation.value = updatedTarget
-            _conversations.value = _conversations.value.map {
-                if (it.id == id) updatedTarget else it
-            }
-            // Opening a conversation is the only point at which messages become seen.
-            if (apiClient.markConversationRead(id) is ApiResponse.Success) {
-                val readTarget = updatedTarget.copy(unreadCount = 0)
-                if (_activeConversation.value?.id == id) _activeConversation.value = readTarget
-                _conversations.value = _conversations.value.map { if (it.id == id) readTarget else it }
+                _conversations.value = _conversations.value.map {
+                    if (it.id == id) updatedTarget else it
+                }
+                sessionManager?.saveCachedConversations(_conversations.value)
+
+                apiClient.markConversationRead(id)
             }
         }
     }
@@ -155,6 +175,7 @@ class SocialRepositoryImpl(
         if (req != null) {
             _friends.value = _friends.value + req.sender
             _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
+            _suggestedPeople.value = _suggestedPeople.value.filter { it.id != req.sender.id }
         }
         return true
     }
@@ -215,12 +236,24 @@ class SocialRepositoryImpl(
                 )
             }
         }
-        val suggestions = apiClient.getSuggestedPeople()
-        if (suggestions is ApiResponse.Success) _suggestedPeople.value = parseUsers(suggestions.data)
         val requests = apiClient.getFriendRequests()
         if (requests is ApiResponse.Success) {
             _friendRequests.value = parseRequests(requests.data)
         }
+        val suggestions = apiClient.getSuggestedPeople()
+        if (suggestions is ApiResponse.Success) {
+            val currentUserId = sessionManager?.getUserProfile()?.id
+            val friendIds = _friends.value.map { it.id }.toSet()
+            val requestSenderIds = _friendRequests.value.map { it.sender.id }.toSet()
+            _suggestedPeople.value = parseUsers(suggestions.data).filter { candidate ->
+                candidate.id.isNotBlank() &&
+                candidate.id != currentUserId &&
+                !friendIds.contains(candidate.id) &&
+                !requestSenderIds.contains(candidate.id)
+            }
+        }
+        sessionManager?.saveCachedFriends(_friends.value)
+        sessionManager?.saveCachedConversations(_conversations.value)
     }
 
     /** Chat-list timestamp: time for today, "Yesterday", else a short date. */
@@ -270,7 +303,8 @@ class SocialRepositoryImpl(
     override suspend fun refreshSuggestions(): Boolean {
         val result = apiClient.refreshSuggestedPeople(_suggestedPeople.value.map { it.id })
         if (result is ApiResponse.Success) {
-            _suggestedPeople.value = attachRoomPresence(parseUsers(result.data))
+            val currentUserId = sessionManager?.getUserProfile()?.id
+            _suggestedPeople.value = attachRoomPresence(parseUsers(result.data)).filter { it.id.isNotBlank() && it.id != currentUserId }
             return true
         }
         return false

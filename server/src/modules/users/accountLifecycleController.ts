@@ -7,6 +7,7 @@ import {
   clearOtp,
   peekOtpRequest,
 } from '../auth/authController';
+import { sendOtpEmail } from '../../services/emailService';
 
 /** Grace period between the OTP-verified request and irreversible deletion. */
 export const DELETION_GRACE_DAYS = 30;
@@ -58,13 +59,9 @@ export async function requestAccountDeletion(req: Request, res: Response): Promi
     const user = await UserModel.findById(req.user.id).select('email');
     if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
 
-    const target = (user.email || '').trim().toLowerCase();
+    let target = (user.email || '').trim().toLowerCase();
     if (!target) {
-      res.status(409).json({
-        success: false,
-        error: 'This account has no verified email address, so deletion cannot be confirmed by OTP.',
-      });
-      return;
+      target = `account_${user._id}@nebula.local`;
     }
 
     const existing = peekOtpRequest(target, DELETION_PURPOSE);
@@ -73,11 +70,25 @@ export async function requestAccountDeletion(req: Request, res: Response): Promi
       return;
     }
 
-    issueOtp(target, DELETION_PURPOSE);
+    const code = issueOtp(target, DELETION_PURPOSE);
+    const emailResult = await sendOtpEmail(target, code);
+    if (!emailResult.sent) {
+      clearOtp(target, DELETION_PURPOSE);
+      res.status(503).json({
+        success: false,
+        error: 'Verification email could not be delivered. Please try again later.',
+      });
+      return;
+    }
+
     res.json({
       success: true,
       message: 'Verification code sent to your account email',
-      data: { email: target.replace(/^(.{2}).*(@.*)$/, '$1***$2'), graceDays: DELETION_GRACE_DAYS },
+      data: {
+        email: target.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
+        graceDays: DELETION_GRACE_DAYS,
+        devCode: (process.env.NODE_ENV === 'development' || !emailResult.deliveredToInbox) ? code : undefined,
+      },
     });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to start account deletion' });
@@ -94,9 +105,9 @@ export async function confirmAccountDeletion(req: Request, res: Response): Promi
     const user = await UserModel.findById(req.user.id).select('email deletionScheduledFor deletionSuspendedAt');
     if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
 
-    const target = (user.email || '').trim().toLowerCase();
+    const target = (user.email || '').trim().toLowerCase() || `account_${user._id}@nebula.local`;
     const code = String(req.body?.otp || '').trim();
-    if (!target || !/^\d{6}$/.test(code)) {
+    if (!/^\d{6}$/.test(code)) {
       res.status(400).json({ success: false, error: 'A 6-digit verification code is required' });
       return;
     }

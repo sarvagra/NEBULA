@@ -61,8 +61,28 @@ export class AuthService {
       );
     }
 
+    const resolvedDeviceId = deviceId || crypto.randomUUID();
+    const rawRefreshToken = crypto.randomBytes(40).toString('hex');
+    const tokenHash = hashToken(rawRefreshToken);
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
+
+    const sessionDoc = await RefreshTokenModel.create({
+      userId,
+      tokenHash,
+      deviceId: resolvedDeviceId,
+      deviceInfo: deviceInfo || 'Android Device',
+      ipAddress: ipAddress || 'unknown',
+      expiresAt,
+      lastActiveAt: new Date(),
+      revoked: false,
+    });
+
     const payload = {
       id: userId,
+      sessionId: sessionDoc._id.toString(),
+      deviceId: resolvedDeviceId,
       username: user.username,
       displayName: user.displayName,
       tier: user.tier,
@@ -70,22 +90,6 @@ export class AuthService {
     };
 
     const token = jwt.sign(payload, config.auth.jwtSecret, { expiresIn: config.auth.jwtExpiresIn as any });
-    const rawRefreshToken = crypto.randomBytes(40).toString('hex');
-    const tokenHash = hashToken(rawRefreshToken);
-
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
-
-    await RefreshTokenModel.create({
-      userId,
-      tokenHash,
-      deviceId: deviceId || crypto.randomUUID(),
-      deviceInfo: deviceInfo || 'Android Device',
-      ipAddress: ipAddress || 'unknown',
-      expiresAt,
-      lastActiveAt: new Date(),
-      revoked: false,
-    });
 
     return {
       token,
@@ -117,6 +121,8 @@ export class AuthService {
 
     const payload = {
       id: user._id.toString(),
+      sessionId: session._id.toString(),
+      deviceId: session.deviceId,
       username: user.username,
       displayName: user.displayName,
       tier: user.tier,
@@ -130,7 +136,11 @@ export class AuthService {
   /**
    * Returns active sessions for user (up to 2), with device details and activity timestamps.
    */
-  static async getActiveSessions(userId: string, currentTokenHash?: string): Promise<Array<{
+  static async getActiveSessions(
+    userId: string,
+    currentDeviceId?: string,
+    currentSessionId?: string
+  ): Promise<Array<{
     id: string;
     deviceId?: string;
     deviceInfo: string;
@@ -145,17 +155,53 @@ export class AuthService {
       expiresAt: { $gt: new Date() },
     })
       .sort({ lastActiveAt: -1, createdAt: -1 })
-      .limit(2);
+      .limit(10);
 
-    return sessions.map((s) => ({
-      id: s._id.toString(),
-      deviceId: s.deviceId,
-      deviceInfo: s.deviceInfo || 'Android Device',
-      ipAddress: s.ipAddress || 'unknown',
-      lastActiveAt: s.lastActiveAt || s.createdAt,
-      createdAt: s.createdAt,
-      isCurrent: Boolean(currentTokenHash && s.tokenHash === currentTokenHash),
-    }));
+    let hasCurrent = false;
+    const cleanCurrentDevId = (currentDeviceId || '').trim();
+    const cleanCurrentSessId = (currentSessionId || '').trim();
+
+    const mapped = sessions.map((s) => {
+      const sDevId = (s.deviceId || '').trim();
+      const sId = s._id.toString();
+      const isCurrent = Boolean(
+        (cleanCurrentSessId && sId === cleanCurrentSessId) ||
+        (cleanCurrentDevId && sDevId && cleanCurrentDevId === sDevId)
+      );
+      if (isCurrent) hasCurrent = true;
+      return {
+        id: sId,
+        deviceId: s.deviceId,
+        deviceInfo: s.deviceInfo || 'Android Device',
+        ipAddress: s.ipAddress || 'unknown',
+        lastActiveAt: s.lastActiveAt || s.createdAt,
+        createdAt: s.createdAt,
+        isCurrent,
+      };
+    });
+
+    if (!hasCurrent && mapped.length > 0) {
+      mapped[0].isCurrent = true;
+    }
+
+    mapped.sort((a, b) => (b.isCurrent ? 1 : 0) - (a.isCurrent ? 1 : 0));
+    return mapped;
+  }
+
+  /**
+   * Revokes all sessions belonging to the user except the caller's current session.
+   */
+  static async revokeOtherSessions(userId: string, currentDeviceId?: string, currentSessionId?: string): Promise<number> {
+    const query: any = { userId, revoked: false };
+    if (currentSessionId) {
+      query._id = { $ne: currentSessionId };
+    } else if (currentDeviceId) {
+      query.deviceId = { $ne: currentDeviceId };
+    }
+    const res = await RefreshTokenModel.updateMany(query, {
+      $set: { revoked: true, revokedAt: new Date() },
+    });
+    return res.modifiedCount;
   }
 
   /**
@@ -170,14 +216,49 @@ export class AuthService {
   }
 
   /**
-   * Revokes a specific refresh token (e.g. on logout).
+   * Revokes a specific refresh token / session (e.g. on logout).
+   * Supports raw refresh token string, or structured criteria (sessionId, deviceId, userId).
    */
-  static async revokeSession(rawRefreshToken: string): Promise<void> {
-    const tokenHash = hashToken(rawRefreshToken);
-    await RefreshTokenModel.findOneAndUpdate(
-      { tokenHash },
-      { revoked: true, revokedAt: new Date() }
-    );
+  static async revokeSession(target: string | {
+    rawRefreshToken?: string;
+    sessionId?: string;
+    userId?: string;
+    deviceId?: string;
+  }): Promise<void> {
+    if (typeof target === 'string') {
+      const tokenHash = hashToken(target);
+      await RefreshTokenModel.findOneAndUpdate(
+        { tokenHash },
+        { revoked: true, revokedAt: new Date() }
+      );
+      return;
+    }
+
+    const query: any = { revoked: false };
+    if (target.rawRefreshToken) {
+      query.tokenHash = hashToken(target.rawRefreshToken);
+    } else if (target.sessionId) {
+      query._id = target.sessionId;
+    } else if (target.userId && target.deviceId) {
+      query.userId = target.userId;
+      query.deviceId = target.deviceId;
+    } else if (target.userId && (target as any).allSessions) {
+      query.userId = target.userId;
+    } else if (target.userId) {
+      const latestSession = await RefreshTokenModel.findOne({ userId: target.userId, revoked: false })
+        .sort({ lastActiveAt: -1, createdAt: -1 });
+      if (latestSession) {
+        query._id = latestSession._id;
+      } else {
+        return;
+      }
+    } else {
+      return;
+    }
+
+    await RefreshTokenModel.updateMany(query, {
+      $set: { revoked: true, revokedAt: new Date() },
+    });
   }
 
   /**

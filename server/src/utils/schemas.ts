@@ -2,21 +2,19 @@ import { z } from 'zod';
 
 export const GoogleAuthSchema = z.object({
   idToken: z.string().min(10, 'Invalid token length').max(4096),
+  deviceId: z.string().trim().max(128).optional(),
+  deviceInfo: z.string().trim().max(256).optional(),
 });
 
 export const OtpRequestSchema = z.object({
-  email: z.string().email('Invalid email address format').refine(
-    (email) => email.toLowerCase().endsWith('@gmail.com'),
-    'Only Gmail addresses ending in @gmail.com are supported'
-  ),
+  email: z.string().email('Invalid email address format'),
 });
 
 export const OtpVerifySchema = z.object({
-  email: z.string().email('Invalid email address format').refine(
-    (email) => email.toLowerCase().endsWith('@gmail.com'),
-    'Only Gmail addresses ending in @gmail.com are supported'
-  ),
+  email: z.string().email('Invalid email address format'),
   otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+  deviceId: z.string().trim().max(128).optional(),
+  deviceInfo: z.string().trim().max(256).optional(),
 });
 
 export const RefreshTokenSchema = z.object({
@@ -29,10 +27,10 @@ export const UpdateProfileSchema = z.object({
   bio: z.string().trim().max(500).optional(),
   status: z.enum(['dynamic', 'offline', 'custom']).optional(),
   customStatus: z.string().trim().max(80).optional(),
-  bannerIndex: z.number().int().min(0).max(4).optional(),
-  bannerUrl: z.string().trim().max(5000000).optional(),
+  bannerIndex: z.number().int().min(0).max(30).optional(),
+  bannerUrl: z.string().trim().max(50_000_000).optional(),
   interests: z.array(z.string().trim().max(30)).max(5).optional(),
-  avatarUrl: z.string().trim().max(5000000).optional(),
+  avatarUrl: z.string().trim().max(50_000_000).optional(),
   isFriendCountPublic: z.boolean().optional(),
   isOnboardingCompleted: z.boolean().optional(),
   dateOfBirth: z.string().trim().max(60).optional(),
@@ -44,16 +42,16 @@ export const CompleteOnboardingSchema = z.object({
   username: z.string().trim().min(3).max(16).regex(/^(?!_)(?!.*_$)[a-z0-9_]+$/, 'Username must be 3 to 16 characters using lowercase letters, numbers, and underscores, without leading or trailing underscores'),
   dateOfBirth: z.string().trim().max(60).optional(),
   gender: z.string().trim().max(60).optional(),
-  avatarUrl: z.string().trim().max(5000000).optional(),
+  avatarUrl: z.string().trim().max(50_000_000).optional(),
   bio: z.string().trim().max(500).optional(),
 });
 
 export const CreateAssetSchema = z.object({
   assetType: z.enum(['avatar', 'banner']),
-  url: z.string().trim().min(1).max(5000000),
+  url: z.string().trim().min(1).max(50_000_000),
   name: z.string().trim().max(100).optional(),
   mimeType: z.string().trim().max(50).optional(),
-  sizeBytes: z.number().int().nonnegative().max(10 * 1024 * 1024).optional(),
+  sizeBytes: z.number().int().nonnegative().max(35 * 1024 * 1024).optional(),
 });
 
 export const CreateRoomSchema = z.object({

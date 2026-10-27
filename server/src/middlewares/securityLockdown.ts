@@ -12,9 +12,12 @@ export interface SecurityIncident {
   timestamp: string;
 }
 
-// Global atomic circuit breaker state
+// Global atomic circuit breaker state (strictly controlled by authorized administrators)
 let isServiceLockedDown = false;
 let activeIncident: SecurityIncident | null = null;
+
+// Attacker IP quarantine list (IP -> expiry timestamp)
+const quarantinedIps = new Map<string, number>();
 
 // Admin override key (fallback to secure default if env var unset)
 const ADMIN_UNLOCK_TOKEN = process.env.ADMIN_UNLOCK_SECRET || 'nebula_emergency_unlock_2026';
@@ -51,12 +54,16 @@ const EXPLOIT_QUERY_PATTERNS = [
   /`.*curl.*`/i,
 ];
 
+function extractClientIp(req: Request): string {
+  return (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+}
+
 /**
- * Triggers an immediate emergency freeze of the entire backend.
- * Dispatches a high-priority alert email to the admin with full incident forensics.
+ * Quarantines a malicious attacker IP for 24 hours and dispatches an incident forensic alert.
+ * DOES NOT crash or freeze the service for legitimate users.
  */
-export async function tripSecurityLockdown(req: Request, reason: string): Promise<void> {
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+export async function quarantineAttacker(req: Request, reason: string): Promise<SecurityIncident> {
+  const ip = extractClientIp(req);
   const incident: SecurityIncident = {
     reason,
     ip,
@@ -68,26 +75,42 @@ export async function tripSecurityLockdown(req: Request, reason: string): Promis
     timestamp: new Date().toISOString(),
   };
 
-  if (!isServiceLockedDown) {
-    isServiceLockedDown = true;
-    activeIncident = incident;
+  // Quarantine attacker IP for 24 hours
+  quarantinedIps.set(ip, Date.now() + 24 * 60 * 60 * 1000);
+  activeIncident = incident;
 
-    console.error('================================================================');
-    console.error('🚨 [SECURITY CIRCUIT BREAKER TRIPPED] EMERGENCY LOCKDOWN ENGAGED');
-    console.error(`  REASON: ${incident.reason}`);
-    console.error(`  ATTACKER IP: ${incident.ip}`);
-    console.error(`  REQUEST: ${incident.method} ${incident.path}`);
-    console.error(`  TIME: ${incident.timestamp}`);
-    console.error('  ACTION: Backend is now FREEZING all incoming traffic (0 requests accepted).');
-    console.error('================================================================');
+  console.warn('================================================================');
+  console.warn('🛡️ [ATTACKER IP QUARANTINED] Automated Honeypot / Exploit Defense');
+  console.warn(`  REASON: ${incident.reason}`);
+  console.warn(`  ATTACKER IP: ${incident.ip}`);
+  console.warn(`  REQUEST: ${incident.method} ${incident.path}`);
+  console.warn(`  TIME: ${incident.timestamp}`);
+  console.warn('  ACTION: Banned attacker IP for 24 hours. Legitimate traffic continues unaffected.');
+  console.warn('================================================================');
 
-    // Asynchronously dispatch urgent alert email to administrator
-    try {
-      await sendEmergencySecurityAlert(ADMIN_ALERT_EMAIL, incident);
-    } catch (err: any) {
-      console.error('[SECURITY ALERT] Error dispatching incident email:', err.message);
-    }
+  try {
+    await sendEmergencySecurityAlert(ADMIN_ALERT_EMAIL, incident);
+  } catch (err: any) {
+    console.error('[SECURITY ALERT] Error dispatching incident email:', err.message);
   }
+
+  return incident;
+}
+
+/**
+ * Triggers an immediate emergency freeze of the entire backend (manual administrative command).
+ */
+export function tripSecurityLockdown(incident: SecurityIncident): void {
+  isServiceLockedDown = true;
+  activeIncident = incident;
+
+  console.error('================================================================');
+  console.error('🚨 [SECURITY CIRCUIT BREAKER TRIPPED] MANUAL EMERGENCY LOCKDOWN ENGAGED');
+  console.error(`  REASON: ${incident.reason}`);
+  console.error(`  TRIGGERED BY: ${incident.ip}`);
+  console.error(`  TIME: ${incident.timestamp}`);
+  console.error('  ACTION: Backend is now FREEZING all incoming traffic (0 requests accepted).');
+  console.error('================================================================');
 }
 
 /**
@@ -107,11 +130,22 @@ export function getActiveIncident(): SecurityIncident | null {
   return activeIncident;
 }
 
+export function isIpQuarantined(ip: string): boolean {
+  const expiresAt = quarantinedIps.get(ip);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    quarantinedIps.delete(ip);
+    return false;
+  }
+  return true;
+}
+
 /**
  * Express middleware that guards every incoming request:
- * 1. Checks if the request is an admin unlock command.
- * 2. Checks if circuit breaker is active -> rejects with HTTP 503.
- * 3. Inspects path & queries for honeypots/malicious payloads -> trips lockdown if detected.
+ * 1. Checks if the request is an admin lock/unlock command.
+ * 2. Checks if global circuit breaker is active -> rejects with HTTP 503.
+ * 3. Checks if client IP is quarantined -> rejects with HTTP 403.
+ * 4. Inspects path & queries for honeypots/malicious payloads -> bans attacker IP immediately.
  */
 export async function securityLockdownMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   // Allow health/readiness probes to avoid Docker/orchestrator crash-loops
@@ -119,14 +153,45 @@ export async function securityLockdownMiddleware(req: Request, res: Response, ne
     return next();
   }
 
+  const clientIp = extractClientIp(req);
+
   // 1. Admin unlock endpoint
   if (req.path === '/api/v1/security/admin-unlock' && req.method === 'POST') {
     const providedSecret = req.headers['x-admin-key'] || req.body?.secret;
     if (providedSecret === ADMIN_UNLOCK_TOKEN) {
       resetSecurityLockdown();
+      quarantinedIps.delete(clientIp);
       res.status(200).json({
         success: true,
         message: 'Security lockdown successfully released. Service restored to normal operations.',
+      });
+      return;
+    } else {
+      res.status(403).json({
+        success: false,
+        error: 'Invalid administrator authorization key.',
+      });
+      return;
+    }
+  }
+
+  // Admin manual lockdown endpoint
+  if (req.path === '/api/v1/security/admin-lockdown' && req.method === 'POST') {
+    const providedSecret = req.headers['x-admin-key'] || req.body?.secret;
+    if (providedSecret === ADMIN_UNLOCK_TOKEN) {
+      tripSecurityLockdown({
+        reason: req.body?.reason || 'Administrative manual emergency freeze',
+        ip: clientIp,
+        method: req.method,
+        path: req.path,
+        query: req.query,
+        bodySnippet: 'none',
+        userAgent: (req.headers['user-agent'] as string) || 'unknown',
+        timestamp: new Date().toISOString(),
+      });
+      res.status(200).json({
+        success: true,
+        message: 'Emergency security lockdown engaged.',
       });
       return;
     } else {
@@ -144,43 +209,54 @@ export async function securityLockdownMiddleware(req: Request, res: Response, ne
       success: true,
       lockedDown: isServiceLockedDown,
       incident: activeIncident,
+      isIpQuarantined: isIpQuarantined(clientIp),
     });
     return;
   }
 
-  // 2. If already locked down, block all traffic immediately
+  // 2. If global service is manually locked down, block traffic with 503
   if (isServiceLockedDown) {
     res.status(503).json({
       success: false,
       error: 'CRITICAL_SECURITY_LOCKDOWN',
-      message: 'Emergency security lockdown active: Service is temporarily frozen due to suspicious activity. Administrative notification dispatched.',
+      message: 'Emergency maintenance active: Nebula backend is temporarily frozen for scheduled security maintenance.',
     });
     return;
   }
 
-  // 3. Inspect URL for Honeypot traps
+  // 3. If attacker IP is quarantined, reject with 403 Forbidden
+  if (isIpQuarantined(clientIp)) {
+    res.status(403).json({
+      success: false,
+      error: 'IP_QUARANTINED',
+      message: 'Access denied: Your IP address has been temporarily banned due to suspicious activity.',
+    });
+    return;
+  }
+
+  // 4. Inspect URL for Honeypot traps
   const path = req.path;
   for (const pattern of HONEYPOT_PATTERNS) {
     if (pattern.test(path)) {
-      await tripSecurityLockdown(req, `Honeypot probe access attempted: ${path}`);
-      res.status(503).json({
+      await quarantineAttacker(req, `Honeypot probe access attempted: ${path}`);
+      res.status(403).json({
         success: false,
-        error: 'CRITICAL_SECURITY_LOCKDOWN',
-        message: 'Emergency security lockdown active: Access to forbidden resource triggered instant service freeze.',
+        error: 'ACCESS_DENIED',
+        message: 'Forbidden: Probing restricted administrative resources is logged and banned.',
       });
       return;
     }
   }
 
-  // 4. Inspect query string for injection / exploit attempts
+  // 5. Inspect query string for injection / exploit attempts
   const originalUrl = req.originalUrl || '';
   for (const pattern of EXPLOIT_QUERY_PATTERNS) {
     if (pattern.test(originalUrl)) {
-      await tripSecurityLockdown(req, `Exploit pattern detected in request URL: ${pattern}`);
-      res.status(503).json({
+      await quarantineAttacker(req, `Exploit pattern detected in request URL: ${pattern}`);
+      res.status(403).json({
         success: false,
-        error: 'CRITICAL_SECURITY_LOCKDOWN',
-        message: 'Emergency security lockdown active: Exploit attempt triggered instant service freeze.',
+        error: 'ACCESS_DENIED',
+        message: 'Forbidden: Exploit signatures are rejected and origin IP has been banned.',
       });
       return;
     }

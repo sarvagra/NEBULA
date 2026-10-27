@@ -2,9 +2,15 @@ package com.nebula.app.ui.home
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material.icons.filled.Close
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -110,14 +116,15 @@ fun NebulaChatDetailScreen(
 ) {
     val theme = Theme.current
     var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var showTimestamps by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val maxDragPx = with(density) { 75.dp.toPx() }
+    val dragOffsetAnimatable = remember { Animatable(0f) }
     // A finished upload waits here until the user confirms spoiler state and sends.
     var pendingMediaUrl by remember { mutableStateOf<String?>(null) }
     var pendingMediaMime by remember { mutableStateOf("image/jpeg") }
     var pendingMediaIsVideo by remember { mutableStateOf(false) }
     var pendingSpoiler by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    var timestampRevealJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var inputText by remember { mutableStateOf("") }
     val composerFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // Editing re-uses the composer instead of spawning a dialog: the text comes
@@ -295,23 +302,30 @@ fun NebulaChatDetailScreen(
                     .weight(1f)
                     .padding(horizontal = 14.dp)
                     .pointerInput(conversation.id) {
-                        // Instagram-style peek: sliding left uncovers the per-message
-                        // time without permanently occupying space under every bubble.
-                        var dragged = 0f
                         detectHorizontalDragGestures(
-                            onDragStart = { dragged = 0f },
+                            onDragStart = { },
                             onDragEnd = {
-                                if (dragged < -48f) {
-                                    showTimestamps = true
-                                    timestampRevealJob?.cancel()
-                                    timestampRevealJob = scope.launch {
-                                        kotlinx.coroutines.delay(2600)
-                                        showTimestamps = false
-                                    }
+                                scope.launch {
+                                    dragOffsetAnimatable.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
                                 }
-                                dragged = 0f
                             },
-                            onHorizontalDrag = { _, delta -> dragged += delta }
+                            onDragCancel = {
+                                scope.launch {
+                                    dragOffsetAnimatable.animateTo(0f)
+                                }
+                            },
+                            onHorizontalDrag = { _, delta ->
+                                scope.launch {
+                                    val next = (dragOffsetAnimatable.value + delta).coerceIn(-maxDragPx, 0f)
+                                    dragOffsetAnimatable.snapTo(next)
+                                }
+                            }
                         )
                     },
                 contentPadding = PaddingValues(vertical = 12.dp),
@@ -339,9 +353,8 @@ fun NebulaChatDetailScreen(
                             showAvatar = startsGroup,
                             isGroupedWithPrevious = !startsGroup,
                             isGroupedWithNext = !endsGroup,
-                            // Receipts belong to the newest message the user sent only.
                             showsReceipt = message.id == lastOwnMessageId,
-                            showTimestamp = showTimestamps,
+                            dragOffset = dragOffsetAnimatable.value,
                             onEdit = { editingMessage = message },
                             onUnsend = { onUnsendMessage(message.id) }
                         )
@@ -584,23 +597,49 @@ fun NebulaChatDetailScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder)
             ) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = if (pendingMediaIsVideo) "Video ready to send" else "Photo ready to send",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SubcomposeAsyncImage(
+                            model = mediaUrl,
+                            contentDescription = "Attachment preview",
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(theme.colors.surfaceElevated),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "Cancel",
-                            modifier = Modifier.clickable {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (pendingMediaIsVideo) "Video ready to send" else "Photo ready to send",
+                                style = theme.typography.bodySmall.copy(
+                                    color = theme.colors.textPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                            Text(
+                                text = "Tap Send to dispatch",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                            )
+                        }
+                        IconButton(
+                            onClick = {
                                 pendingMediaUrl = null
                                 pendingSpoiler = false
                             },
-                            style = theme.typography.caption.copy(color = theme.colors.textSecondary)
-                        )
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel",
+                                tint = theme.colors.textSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -888,10 +927,11 @@ private fun ModernChatBubble(
     isGroupedWithPrevious: Boolean,
     isGroupedWithNext: Boolean,
     showsReceipt: Boolean,
-    showTimestamp: Boolean,
+    dragOffset: Float,
     onEdit: () -> Unit,
     onUnsend: () -> Unit
 ) {
+    val density = LocalDensity.current
     var showActions by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
@@ -933,13 +973,15 @@ private fun ModernChatBubble(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = if (isGroupedWithPrevious) 2.dp else 10.dp),
-        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
-    ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { translationX = dragOffset }
+                .padding(top = if (isGroupedWithPrevious) 2.dp else 10.dp),
+            horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Bottom
+        ) {
         if (!isMe) {
             if (showAvatar) {
                 NebulaAvatarImage(message.senderAvatarUrl, message.senderAvatarLetter, modifier = Modifier.size(28.dp))
@@ -1170,52 +1212,54 @@ private fun ModernChatBubble(
             }
         }
 
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showTimestamp,
-            enter = androidx.compose.animation.fadeIn() +
-                androidx.compose.animation.expandVertically(),
-            exit = androidx.compose.animation.fadeOut() +
-                androidx.compose.animation.shrinkVertically()
-        ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(top = 2.dp)
-        ) {
-            // Revealed by sliding the thread; hidden otherwise to keep it clean.
-            Text(
-                text = message.timestamp.clockLabel(),
-                style = theme.typography.caption.copy(
-                    color = theme.colors.textTertiary,
-                    fontSize = 10.5.sp
-                )
-            )
-            if (isMe && message.deletedAt == null && showsReceipt) {
-                // One tick = delivered, two accent ticks = the recipient opened it.
-                val isRead = message.readAt != null
-                Icon(
-                    imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Done,
-                    contentDescription = if (isRead) "Read" else "Delivered",
-                    tint = if (isRead) theme.colors.primaryAccent else theme.colors.textTertiary,
-                    modifier = Modifier.size(12.dp)
-                )
+                if (showActions) {
+                    MessageActionSheet(
+                        message = message,
+                        onEdit = {
+                            showActions = false
+                            onEdit()
+                        },
+                        onUnsend = {
+                            showActions = false
+                            onUnsend()
+                        },
+                        onDismiss = { showActions = false }
+                    )
+                }
             }
         }
-        }
-        if (showActions) {
-            MessageActionSheet(
-                message = message,
-                onEdit = {
-                    showActions = false
-                    onEdit()
-                },
-                onUnsend = {
-                    showActions = false
-                    onUnsend()
-                },
-                onDismiss = { showActions = false }
-            )
-        }
+
+        // Instagram-style timestamp & tick mark revealed on the far right when sliding left
+        val revealAlpha = (kotlin.math.abs(dragOffset) / with(density) { 35.dp.toPx() }).coerceIn(0f, 1f)
+        if (revealAlpha > 0.02f) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .graphicsLayer {
+                        translationX = with(density) { 72.dp.toPx() } + dragOffset
+                        alpha = revealAlpha
+                    }
+                    .padding(end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = message.timestamp.clockLabel(),
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textTertiary,
+                        fontSize = 11.sp
+                    )
+                )
+                if (isMe && message.deletedAt == null) {
+                    val isRead = message.readAt != null
+                    Icon(
+                        imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Done,
+                        contentDescription = if (isRead) "Read" else "Delivered",
+                        tint = if (isRead) theme.colors.primaryAccent else theme.colors.textTertiary,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
         }
     }
 }

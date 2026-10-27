@@ -63,7 +63,8 @@ fun NebulaGoogleAccountScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .height(56.dp)
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
@@ -78,22 +79,31 @@ fun NebulaGoogleAccountScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.size(4.dp))
+
             Text(
                 text = "Google Account",
                 style = theme.typography.titleMedium.copy(
                     color = theme.colors.textPrimary,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
+                    fontSize = 18.sp
                 )
             )
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(theme.colors.surfaceBorder.copy(alpha = 0.6f))
+        )
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .navigationBarsPadding(),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Google Identity Card

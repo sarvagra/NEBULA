@@ -24,10 +24,12 @@ services:
       - key: MONGODB_DATABASE
         value: nebula
       - key: OTP_PROVIDER
-        value: resend
-      - key: OTP_API_KEY
+        value: gmail
+      - key: SMTP_USER
         sync: false
-      - key: RESEND_API_KEY
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
         sync: false
       - key: JWT_SECRET
         sync: false

@@ -40,8 +40,15 @@ export async function listRooms(req: Request, res: Response): Promise<void> {
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
     const tag = typeof req.query.tag === 'string' ? req.query.tag.trim() : undefined;
 
+    // Prune any dangling empty or ghost rooms where participants is empty
+    await RoomModel.deleteMany({
+      $or: [
+        { 'participants.0': { $exists: false } },
+        { participants: { $size: 0 } },
+      ],
+    });
+
     const filter: Record<string, any> = {
-      privacy: { $in: ['public', 'friends'] },
       isEnded: { $ne: true },
       'participants.0': { $exists: true },
     };
@@ -56,6 +63,41 @@ export async function listRooms(req: Request, res: Response): Promise<void> {
 
     if (tag) {
       filter.tags = tag;
+    }
+
+    // Strict Privacy Filtering:
+    // - public: visible to all
+    // - friends: visible ONLY if requester is host OR an accepted friend of the host
+    // - invite_only: visible ONLY if requester is host, current participant, or holds an active unexpired invite
+    if (req.user) {
+      const friendships = await FriendshipModel.find({
+        status: 'accepted',
+        $or: [{ requesterId: req.user.id }, { recipientId: req.user.id }],
+      }).select('requesterId recipientId');
+      const friendIds = friendships.map((f) => (f.requesterId === req.user!.id ? f.recipientId : f.requesterId));
+
+      const activeInvites = await NotificationModel.find({
+        userId: req.user.id,
+        type: 'room_invite',
+        expiresAt: { $gt: new Date() },
+      }).select('actionData.roomId');
+      const invitedRoomIds = activeInvites.map((n) => n.actionData?.roomId).filter(Boolean);
+
+      filter.$or = [
+        { privacy: 'public' },
+        { privacy: 'friends', hostId: { $in: [req.user.id, ...friendIds] } },
+        {
+          privacy: 'invite_only',
+          $or: [
+            { hostId: req.user.id },
+            { 'participants.userId': req.user.id },
+            { invitedUserIds: req.user.id },
+            { _id: { $in: invitedRoomIds } },
+          ],
+        },
+      ];
+    } else {
+      filter.privacy = 'public';
     }
 
     const rooms = await RoomModel.find(filter)
@@ -81,7 +123,7 @@ export async function getRoom(req: Request, res: Response): Promise<void> {
       return;
     }
     if (room.participants.length === 0) {
-      await RoomModel.deleteOne({ _id: room._id, 'participants.0': { $exists: false } });
+      await RoomModel.deleteOne({ _id: room._id });
       res.status(404).json({ success: false, error: 'Room has no active members' });
       return;
     }
@@ -90,10 +132,38 @@ export async function getRoom(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Visibility check: invite-only rooms can only be viewed by participants
-    if (room.privacy === 'invite_only') {
-      const isMember = req.user ? room.participants.some((p) => p.userId === req.user!.id) : false;
-      if (!isMember && req.user?.role !== 'admin') {
+    // Visibility & Privacy checks
+    if (room.privacy === 'friends') {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Authentication required to view this room' });
+        return;
+      }
+      if (room.hostId !== req.user.id && !room.participants.some((p) => p.userId === req.user!.id)) {
+        const isFriend = await FriendshipModel.exists({
+          status: 'accepted',
+          $or: [
+            { requesterId: req.user.id, recipientId: room.hostId },
+            { requesterId: room.hostId, recipientId: req.user.id },
+          ],
+        });
+        if (!isFriend && req.user.role !== 'admin') {
+          res.status(403).json({ success: false, error: 'This room is only open to friends of the host' });
+          return;
+        }
+      }
+    } else if (room.privacy === 'invite_only') {
+      const isMember = req.user ? (room.hostId === req.user.id || room.participants.some((p) => p.userId === req.user!.id)) : false;
+      const isInvited = Boolean(req.user && (room.invitedUserIds?.includes(req.user.id)));
+      let hasInvite = isInvited;
+      if (req.user && !isMember && !hasInvite) {
+        hasInvite = !!(await NotificationModel.exists({
+          userId: req.user.id,
+          type: 'room_invite',
+          'actionData.roomId': room._id.toString(),
+          expiresAt: { $gt: new Date() },
+        }));
+      }
+      if (!isMember && !hasInvite && req.user?.role !== 'admin') {
         res.status(403).json({ success: false, error: 'This room is invite-only' });
         return;
       }
@@ -220,10 +290,26 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Check invite_only privacy
+    // 1. Strict Privacy Check: Friends
+    if (room.privacy === 'friends' && room.hostId !== req.user.id && !room.participants.some((p) => p.userId === req.user!.id)) {
+      const isFriend = await FriendshipModel.exists({
+        status: 'accepted',
+        $or: [
+          { requesterId: req.user.id, recipientId: room.hostId },
+          { requesterId: room.hostId, recipientId: req.user.id },
+        ],
+      });
+      if (!isFriend && req.user.role !== 'admin') {
+        res.status(403).json({ success: false, error: 'This room is only open to friends of the host' });
+        return;
+      }
+    }
+
+    // 2. Strict Privacy Check: Invite Only
     let acceptedInvite: any = null;
+    const isInvited = Boolean(room.invitedUserIds?.includes(req.user.id));
     if (room.privacy === 'invite_only' && room.hostId !== req.user.id &&
-        !room.participants.some((p) => p.userId === req.user!.id)) {
+        !room.participants.some((p) => p.userId === req.user!.id) && !isInvited) {
       acceptedInvite = await NotificationModel.findOne({
         userId: req.user.id,
         type: 'room_invite',
@@ -236,12 +322,12 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
       }
     }
 
+    // 3. Re-entry check: if user is already a member/host of this room (e.g. app restart or reconnect),
+    // allow seamless recovery instead of blocking with 409 conflict.
     const alreadyIn = room.participants.some((p) => p.userId === req.user!.id);
     if (alreadyIn) {
-      res.status(409).json({
-        success: false,
-        error: 'Your account is already active in this room on another device. Only one device per account is allowed to join a room at any time.',
-      });
+      await claimActiveRoom(req.user.id, room._id.toString());
+      res.json({ success: true, data: toPublicRoomDTO(room, req.user.id) });
       return;
     }
 
@@ -253,14 +339,14 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-    if (!alreadyIn) {
-      const updated = await RoomModel.findOneAndUpdate(
-        {
-          _id: room._id,
-          'participants.userId': { $ne: req.user.id },
-          $expr: { $lt: [{ $size: '$participants' }, '$maxParticipants'] },
-        } as any,
-        { $push: { participants: {
+
+    const updated = await RoomModel.findOneAndUpdate(
+      {
+        _id: room._id,
+        'participants.userId': { $ne: req.user.id },
+        $expr: { $lt: [{ $size: '$participants' }, '$maxParticipants'] },
+      } as any,
+      { $push: { participants: {
         userId: req.user.id,
         username: joiningProfile?.username || req.user.username,
         displayName: joiningProfile?.displayName || req.user.displayName,
@@ -272,24 +358,24 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
         interests: joiningProfile?.interests || [],
         joinedAt: new Date(),
         isHost: room.hostId === req.user.id,
-        } } },
-        { new: true }
-      );
-      if (!updated) {
-        await releaseActiveRoom(req.user.id, room._id.toString());
-        res.status(409).json({ success: false, error: 'Room is full or your membership changed. Refresh and try again.' });
-        return;
-      }
-      room = updated;
-
-      // Record trusted server analytics event
-      await AnalyticsEventModel.create({
-        userId: req.user.id,
-        eventName: 'ROOM_JOINED',
-        metadata: { roomId: room._id.toString() },
-      });
-      await UserModel.findByIdAndUpdate(req.user.id, { $inc: { 'stats.roomsJoinedCount': 1 } });
+      } } },
+      { new: true }
+    );
+    if (!updated) {
+      await releaseActiveRoom(req.user.id, room._id.toString());
+      res.status(409).json({ success: false, error: 'Room is full or your membership changed. Refresh and try again.' });
+      return;
     }
+    room = updated;
+
+    // Record trusted server analytics event
+    await AnalyticsEventModel.create({
+      userId: req.user.id,
+      eventName: 'ROOM_JOINED',
+      metadata: { roomId: room._id.toString() },
+    });
+    await UserModel.findByIdAndUpdate(req.user.id, { $inc: { 'stats.roomsJoinedCount': 1 } });
+
     if (acceptedInvite) {
       acceptedInvite.isRead = true;
       await acceptedInvite.save();
@@ -372,6 +458,7 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
       actionData: { roomId: room._id.toString(), inviterId: req.user.id },
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
+    await RoomModel.updateOne({ _id: room._id }, { $addToSet: { invitedUserIds: userId } });
     void notifyUser(userId, 'Room invitation', `${req.user.displayName} invited you to ${room.name}.`, { type: 'room_invite', roomId: room._id.toString() });
     res.status(201).json({ success: true, data: invite.toJSON() });
   } catch {
@@ -617,6 +704,7 @@ export async function kickParticipant(req: Request, res: Response): Promise<void
     }
 
     room.participants = room.participants.filter((p) => p.userId !== targetUserId);
+    room.invitedUserIds = (room.invitedUserIds || []).filter((uid) => uid !== targetUserId);
     room.kickedUserIds = [...new Set([...(room.kickedUserIds || []), targetUserId])];
     await room.save();
     await releaseActiveRoom(targetUserId, id);

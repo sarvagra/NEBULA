@@ -127,3 +127,18 @@ export async function deleteNotification(req: Request, res: Response): Promise<v
     res.status(500).json({ success: false, error: 'Failed to delete notification' });
   }
 }
+
+export async function clearAllNotifications(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    await NotificationModel.deleteMany({ userId: req.user.id });
+    res.json({ success: true, message: 'All notifications cleared' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to clear notifications' });
+  }
+}
+

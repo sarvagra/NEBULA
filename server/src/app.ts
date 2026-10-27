@@ -18,6 +18,7 @@ import { analyticsRouter } from './modules/analytics/analyticsRoutes';
 import { mediaRouter } from './modules/media/mediaRoutes';
 import { redirectToObject } from './modules/media/storageController';
 import { securityLockdownMiddleware } from './middlewares/securityLockdown';
+import { appCheckMiddleware } from './middlewares/appCheckMiddleware';
 
 export function createApp(): express.Application {
   const app = express();
@@ -62,7 +63,15 @@ export function createApp(): express.Application {
         return callback(new Error('CORS request blocked: Origin not allowed by Nebula security policy'));
       },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Admin-Key'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'X-Admin-Key',
+        'X-Firebase-AppCheck',
+        'X-Device-Id',
+        'X-Device-Info',
+      ],
       credentials: true,
     })
   );
@@ -73,9 +82,10 @@ export function createApp(): express.Application {
   app.use((req, res, next) => {
     const isMediaUpload =
       req.path === '/api/v1/chat/upload' ||
-      req.path === '/api/v1/users/me/assets';
+      req.path === '/api/v1/users/me/assets' ||
+      req.path === '/api/v1/users/profile';
     // A 30 MiB binary video grows to roughly 40 MiB as a JSON base64 data URL.
-    express.json({ limit: isMediaUpload ? '42mb' : '100kb' })(req, res, next);
+    express.json({ limit: isMediaUpload ? '45mb' : '100kb' })(req, res, next);
   });
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
@@ -84,7 +94,11 @@ export function createApp(): express.Application {
 
   // Media uploads can be 30 MiB; allow time for mobile uplinks while retaining a bounded timeout for other APIs.
   app.use((req, res, next) => {
-    const uploadTimeoutMs = req.path === '/api/v1/chat/upload' ? 120000 : 15000;
+    const isMediaUpload =
+      req.path === '/api/v1/chat/upload' ||
+      req.path === '/api/v1/users/me/assets' ||
+      req.path === '/api/v1/users/profile';
+    const uploadTimeoutMs = isMediaUpload ? 120000 : 15000;
     req.setTimeout(uploadTimeoutMs, () => {
       res.status(504).json({ success: false, error: 'Gateway timeout: Request processing exceeded 15 seconds' });
     });
@@ -136,7 +150,10 @@ export function createApp(): express.Application {
   // 7. Global Rate Limiter (applied only to /api/v1/* routes below)
   app.use(globalApiRateLimiter);
 
-  // 8. Mount Protected API v1 Routers
+  // 8. Attestation Layer: Firebase App Check & Play Integrity Verification
+  app.use('/api/v1', appCheckMiddleware);
+
+  // 9. Mount Protected API v1 Routers
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/users', userRouter);
   app.use('/api/v1/rooms', roomRouter);

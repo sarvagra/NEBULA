@@ -122,52 +122,10 @@ fun LiquidGlassProfileOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // Liquid-glass backdrop, layer 1+2: the translucent theme scrim
-                // token dims whatever is behind the overlay, and a theme-tinted
-                // vertical vignette adds depth without ever going fully opaque.
-                // Fully opaque themed backdrop: the overlay is a screen, not a
-                // translucent sheet, so nothing underneath may bleed through.
                 .background(theme.colors.background)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            theme.colors.background,
-                            theme.colors.background.copy(alpha = 0.96f)
-                        )
-                    )
-                )
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            // Ambient accent glow that sits behind the identity card. It is a soft
-            // radial brush on its own and is additionally blurred on API 31+ via
-            // Modifier.blur. Below API 31 that modifier is a no-op, so the radial
-            // gradient alone still reads correctly and minSdk stays 26.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .offset(y = 44.dp)
-                    .height(210.dp)
-                    .then(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            // Unbounded so the blur bleeds past the node bounds instead
-                            // of being cut into a hard-edged rectangle.
-                            Modifier.blur(56.dp, BlurredEdgeTreatment.Unbounded)
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                theme.colors.primaryAccent.copy(alpha = 0.40f),
-                                theme.colors.secondaryAccent.copy(alpha = 0.16f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
 
             Column(
                 modifier = Modifier
@@ -618,24 +576,31 @@ private fun ProfileOverlayBanner(
         )
     ) {
         if (!bannerUrl.isNullOrBlank()) {
-            val base64Bitmap = remember(bannerUrl) { decodeBase64Image(bannerUrl) }
-            if (base64Bitmap != null) {
-                Image(
-                    bitmap = base64Bitmap.asImageBitmap(),
-                    contentDescription = "Profile banner",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+            if (isVideoBanner(bannerUrl)) {
+                VideoBannerPlayer(
+                    videoUrl = bannerUrl,
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
-                SubcomposeAsyncImage(
-                    model = bannerUrl,
-                    contentDescription = "Profile banner",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    loading = { },
-                    error = { },
-                    success = { SubcomposeAsyncImageContent() }
-                )
+                val base64Bitmap = remember(bannerUrl) { decodeBase64Image(bannerUrl) }
+                if (base64Bitmap != null) {
+                    Image(
+                        bitmap = base64Bitmap.asImageBitmap(),
+                        contentDescription = "Profile banner",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    SubcomposeAsyncImage(
+                        model = bannerUrl,
+                        contentDescription = "Profile banner",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        loading = { },
+                        error = { },
+                        success = { SubcomposeAsyncImageContent() }
+                    )
+                }
             }
         }
     }

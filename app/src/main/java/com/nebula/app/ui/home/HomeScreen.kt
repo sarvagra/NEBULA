@@ -231,34 +231,36 @@ fun HomeScreen(
                 friends = uiState.friends,
                 friendRequests = uiState.friendRequests,
                 suggestedPeople = uiState.suggestedPeople,
-                onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
-                onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
-                onCancelFriendRequest = { viewModel.onCancelFriendRequest(it) },
-                onModerateParticipant = { userId, isMuted, isCameraOff ->
-                    viewModel.onModerateRoomParticipant(userId, isMuted, isCameraOff)
-                },
-                onKickParticipant = { viewModel.onKickRoomParticipant(it) },
-                onAddFriend = { viewModel.onAddFriend(it) },
-                onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
-                onLeaveRoom = { newHostId -> viewModel.onLeaveRoom(newHostId) },
-                onRefreshRoom = { viewModel.refreshActiveRoom() },
-                onHostPlaybackSample = { positionMs, playing -> viewModel.onHostPlaybackSample(positionMs, playing) },
-                onHostVideoEnded = { viewModel.onHostVideoEnded(it) },
-                onRestartVideo = { viewModel.onRestartRoomVideo() },
-                onViewParticipantProfile = { viewModel.onOpenFriendProfile(it) },
-                onUpdateRoomSettings = { name, max, mic, vid, tags ->
-                    viewModel.onUpdateRoomSettings(name, max, mic, vid, tags)
-                },
-                onTransferHost = { newHostId, random ->
-                    viewModel.onTransferHost(newHostId, random)
-                },
-                onTogglePlayPause = { viewModel.onToggleRoomPlayPause() },
-                onSendRoomMessage = { viewModel.onSendRoomMessage(it) },
-                onSendReaction = { viewModel.onSendRoomReaction(it) },
-                onVotePoll = { viewModel.onVotePoll(it) },
-                onSeekTo = { viewModel.onSeekTo(it) },
-                onUpdateMedia = { title, url -> viewModel.onUpdateRoomMedia(title, url) },
-                onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) }
+                actions = NebulaRoomActions(
+                    onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
+                    onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
+                    onCancelFriendRequest = { viewModel.onCancelFriendRequest(it) },
+                    onModerateParticipant = { userId, isMuted, isCameraOff ->
+                        viewModel.onModerateRoomParticipant(userId, isMuted, isCameraOff)
+                    },
+                    onKickParticipant = { viewModel.onKickRoomParticipant(it) },
+                    onAddFriend = { viewModel.onAddFriend(it) },
+                    onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
+                    onLeaveRoom = { newHostId -> viewModel.onLeaveRoom(newHostId) },
+                    onRefreshRoom = { viewModel.refreshActiveRoom() },
+                    onHostPlaybackSample = { positionMs, playing -> viewModel.onHostPlaybackSample(positionMs, playing) },
+                    onHostVideoEnded = { viewModel.onHostVideoEnded(it) },
+                    onRestartVideo = { viewModel.onRestartRoomVideo() },
+                    onViewParticipantProfile = { viewModel.onOpenFriendProfile(it) },
+                    onUpdateRoomSettings = { name, max, mic, vid, tags ->
+                        viewModel.onUpdateRoomSettings(name, max, mic, vid, tags)
+                    },
+                    onTransferHost = { newHostId, random ->
+                        viewModel.onTransferHost(newHostId, random)
+                    },
+                    onTogglePlayPause = { viewModel.onToggleRoomPlayPause() },
+                    onSendRoomMessage = { viewModel.onSendRoomMessage(it) },
+                    onSendReaction = { viewModel.onSendRoomReaction(it) },
+                    onVotePoll = { viewModel.onVotePoll(it) },
+                    onSeekTo = { viewModel.onSeekTo(it) },
+                    onUpdateMedia = { title, url -> viewModel.onUpdateRoomMedia(title, url) },
+                    onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) }
+                )
             )
         } else if (uiState.activeSocialConversation != null) {
             NebulaChatDetailScreen(
@@ -627,6 +629,15 @@ fun HomeScreen(
                     notifications = uiState.notifications,
                     onAcceptNotification = { viewModel.onAcceptNotification(it) },
                     onDismissNotification = { viewModel.onDismissNotification(it) },
+                    onClearAll = { viewModel.onClearAllNotifications() },
+                    onOpenPreferences = {
+                        viewModel.onDismissModalSheet()
+                        viewModel.onOpenSettings()
+                    },
+                    onOpenUserProfile = { userId ->
+                        viewModel.onDismissModalSheet()
+                        viewModel.onOpenUserProfileById(userId)
+                    },
                     onDismiss = { viewModel.onDismissModalSheet() }
                 )
             }
