@@ -14,28 +14,33 @@ function getTransporter(): Transporter | null {
 
   const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass } = config.email;
 
-  if (!smtpUser || !smtpPass) {
+  const cleanUser = smtpUser?.trim();
+  const cleanPass = smtpPass?.replace(/\s+/g, '');
+
+  if (!cleanUser || !cleanPass) {
     return null;
   }
 
   try {
-    if (smtpHost) {
+    if (smtpHost && !smtpHost.includes('gmail')) {
       transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
         secure: smtpSecure || smtpPort === 465,
         auth: {
-          user: smtpUser,
-          pass: smtpPass,
+          user: cleanUser,
+          pass: cleanPass,
         },
       });
     } else {
-      // Standard Gmail service with App Password
+      // Direct Gmail SMTP via port 465 SSL for maximum cloud container reliability
       transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
         auth: {
-          user: smtpUser,
-          pass: smtpPass,
+          user: cleanUser,
+          pass: cleanPass,
         },
       });
     }
@@ -65,7 +70,10 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendOtpRes
   }
 
   try {
-    const fromAddress = config.email.fromEmail || config.email.smtpUser || 'Nebula <no-reply@nebula.app>';
+    const cleanUser = config.email.smtpUser?.trim();
+    const fromAddress = config.email.fromEmail && config.email.fromEmail.includes('@')
+      ? config.email.fromEmail
+      : (cleanUser ? `Nebula <${cleanUser}>` : 'Nebula <no-reply@nebula.app>');
 
     const mailOptions = {
       from: fromAddress,
