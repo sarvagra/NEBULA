@@ -33,11 +33,9 @@ function getTransporter(): Transporter | null {
         },
       });
     } else {
-      // Direct Gmail SMTP via port 465 SSL for maximum cloud container reliability
+      // Standard Gmail service transport with Google App Password
       transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+        service: 'gmail',
         auth: {
           user: cleanUser,
           pass: cleanPass,

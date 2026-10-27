@@ -123,10 +123,10 @@ export const config = {
   },
   email: {
     smtpHost: process.env.SMTP_HOST || '',
-    smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
-    smtpSecure: process.env.SMTP_SECURE === 'true',
-    smtpUser: process.env.SMTP_USER || '',
-    smtpPass: process.env.SMTP_PASS || '',
-    fromEmail: process.env.EMAIL_FROM || process.env.SMTP_USER || 'Nebula <no-reply@nebula.app>',
+    smtpPort: parseInt(process.env.SMTP_PORT || '465', 10),
+    smtpSecure: process.env.SMTP_SECURE === 'true' || true,
+    smtpUser: process.env.SMTP_USER || 'nebula.app.auth@gmail.com',
+    smtpPass: process.env.SMTP_PASS || 'xucvmentujprvxom',
+    fromEmail: process.env.EMAIL_FROM || 'Nebula <nebula.app.auth@gmail.com>',
   },
 };

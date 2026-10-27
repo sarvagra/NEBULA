@@ -25,12 +25,18 @@ services:
         value: nebula
       - key: OTP_PROVIDER
         value: gmail
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: '465'
+      - key: SMTP_SECURE
+        value: 'true'
       - key: SMTP_USER
-        sync: false
+        value: nebula.app.auth@gmail.com
       - key: SMTP_PASS
-        sync: false
+        value: xucvmentujprvxom
       - key: EMAIL_FROM
-        sync: false
+        value: Nebula <nebula.app.auth@gmail.com>
       - key: JWT_SECRET
         sync: false
       - key: JWT_REFRESH_SECRET
