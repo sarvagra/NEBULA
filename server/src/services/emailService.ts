@@ -1,4 +1,4 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from '../config/env';
 
 export interface SendOtpResult {
@@ -7,120 +7,93 @@ export interface SendOtpResult {
   reason?: string;
 }
 
-let transporter: Transporter | null = null;
+let resendClient: Resend | null = null;
 
-function getTransporter(): Transporter | null {
-  if (transporter) return transporter;
-
-  const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass } = config.email;
-
-  const cleanUser = smtpUser?.trim();
-  const cleanPass = smtpPass?.replace(/\s+/g, '');
-
-  if (!cleanUser || !cleanPass) {
-    return null;
+function getResendClient(): Resend | null {
+  if (resendClient) return resendClient;
+  const apiKey = config.email?.resendApiKey || process.env.RESEND_API_KEY;
+  if (apiKey) {
+    resendClient = new Resend(apiKey);
   }
-
-  try {
-    if (smtpHost && !smtpHost.includes('gmail')) {
-      transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpSecure || smtpPort === 465,
-        auth: {
-          user: cleanUser,
-          pass: cleanPass,
-        },
-      });
-    } else {
-      // Standard Gmail service transport with Google App Password
-      transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: cleanUser,
-          pass: cleanPass,
-        },
-      });
-    }
-  } catch (err: any) {
-    console.error('[EMAIL SERVICE] Failed to initialize Gmail/SMTP transporter:', err.message);
-    transporter = null;
-  }
-
-  return transporter;
+  return resendClient;
 }
 
 /**
- * Sends a 6-digit OTP verification email directly to the recipient inbox using Gmail SMTP.
+ * Sends a 6-digit OTP verification email directly to the recipient inbox using Resend (HTTPS Port 443).
  */
 export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
-  const mailer = getTransporter();
+  const resend = getResendClient();
 
-  if (!mailer) {
+  if (!resend) {
     if (process.env.NODE_ENV === 'test') {
       return { sent: true, deliveredToInbox: false };
     }
-    console.error(`[EMAIL SERVICE] No Gmail SMTP credentials configured (SMTP_USER/SMTP_PASS missing).`);
+    console.error(`[EMAIL SERVICE] No Resend API key configured.`);
     return {
       sent: false,
-      reason: 'SMTP credentials not configured on server',
+      reason: 'Resend API key not configured on server',
     };
   }
 
   try {
-    const cleanUser = config.email.smtpUser?.trim();
-    const fromAddress = config.email.fromEmail && config.email.fromEmail.includes('@')
-      ? config.email.fromEmail
-      : (cleanUser ? `Nebula <${cleanUser}>` : 'Nebula <no-reply@nebula.app>');
+    const fromAddress = config.email?.fromEmail || 'Nebula <onboarding@resend.dev>';
 
-    const mailOptions = {
-      from: fromAddress,
-      to,
-      subject: `Your Nebula Verification Code: ${code}`,
-      text: `Your Nebula verification code is: ${code}\n\nThis code is valid for 10 minutes.\nIf you did not request this code, you can safely ignore this email.`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { margin: 0; padding: 0; background-color: #0b0c10; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f0f2fa; }
-            .container { max-width: 460px; margin: 30px auto; background: #13151f; border: 1px solid #25283b; border-radius: 16px; padding: 32px 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-            .logo { font-size: 24px; font-weight: 800; letter-spacing: 4px; color: #8b5cf6; text-align: center; margin-bottom: 6px; }
-            .subtitle { font-size: 13px; color: #828aa0; text-align: center; margin-bottom: 28px; }
-            .otp-box { background: #1b1e2c; border: 1px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0; }
-            .otp-code { font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #a78bfa; font-family: monospace; }
-            .text { font-size: 14px; line-height: 1.6; color: #d0d5e5; }
-            .footer { margin-top: 28px; font-size: 12px; color: #636b83; text-align: center; border-top: 1px solid #202334; padding-top: 18px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="logo">NEBULA</div>
-            <div class="subtitle">Synchronized Watch Parties & Shared Spaces</div>
-            <p class="text">Hello,</p>
-            <p class="text">Use the 6-digit verification code below to access your account:</p>
-            <div class="otp-box">
-              <span class="otp-code">${code}</span>
-            </div>
-            <p class="text" style="font-size: 12px; color: #94a3b8;">This code will expire in <strong>10 minutes</strong>. Do not share this code with anyone.</p>
-            <div class="footer">
-              If you didn't request this login code, you can safely disregard this email.
-            </div>
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { margin: 0; padding: 0; background-color: #0b0c10; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f0f2fa; }
+          .container { max-width: 460px; margin: 30px auto; background: #13151f; border: 1px solid #25283b; border-radius: 16px; padding: 32px 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .logo { font-size: 24px; font-weight: 800; letter-spacing: 4px; color: #8b5cf6; text-align: center; margin-bottom: 6px; }
+          .subtitle { font-size: 13px; color: #828aa0; text-align: center; margin-bottom: 28px; }
+          .otp-box { background: #1b1e2c; border: 1px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0; }
+          .otp-code { font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #a78bfa; font-family: monospace; }
+          .text { font-size: 14px; line-height: 1.6; color: #d0d5e5; }
+          .footer { margin-top: 28px; font-size: 12px; color: #636b83; text-align: center; border-top: 1px solid #202334; padding-top: 18px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">NEBULA</div>
+          <div class="subtitle">Synchronized Watch Parties & Shared Spaces</div>
+          <p class="text">Hello,</p>
+          <p class="text">Use the 6-digit verification code below to access your account:</p>
+          <div class="otp-box">
+            <span class="otp-code">${code}</span>
           </div>
-        </body>
-        </html>
-      `,
-    };
+          <p class="text" style="font-size: 12px; color: #94a3b8;">This code will expire in <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+          <div class="footer">
+            If you didn't request this login code, you can safely disregard this email.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
 
-    const info = await mailer.sendMail(mailOptions);
-    console.log(`[NEBULA AUTH] ✉️ Successfully sent OTP email to ${to} via Gmail/SMTP (MessageID: ${info.messageId})`);
+    const { data, error } = await resend.emails.send({
+      from: fromAddress,
+      to: [to],
+      subject: `Your Nebula Verification Code: ${code}`,
+      html,
+    });
+
+    if (error) {
+      console.error(`[NEBULA AUTH] ⚠️ Failed to send OTP email via Resend to ${to}:`, error.message);
+      return {
+        sent: false,
+        reason: error.message,
+      };
+    }
+
+    console.log(`[NEBULA AUTH] ✉️ Successfully dispatched OTP email to ${to} via Resend (ID: ${data?.id})`);
     return {
       sent: true,
       deliveredToInbox: true,
     };
   } catch (err: any) {
-    console.error(`[NEBULA AUTH] ⚠️ Failed to send OTP email via Gmail/SMTP to ${to}:`, err.message);
+    console.error(`[NEBULA AUTH] ⚠️ Resend exception to ${to}:`, err.message);
     return {
       sent: false,
       reason: err.message,
@@ -147,19 +120,24 @@ export async function sendAutomatedNotificationEmail(
     return { sent: false, reason: 'email_updates_disabled_by_user' };
   }
 
-  const mailer = getTransporter();
-  if (mailer) {
+  const resend = getResendClient();
+  if (resend) {
     try {
-      const fromAddress = config.email.fromEmail || config.email.smtpUser || 'Nebula <no-reply@nebula.app>';
-      await mailer.sendMail({
+      const fromAddress = config.email?.fromEmail || 'Nebula <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
         from: fromAddress,
-        to: user.email,
+        to: [user.email],
         subject,
         html,
       });
-      return { sent: true, deliveredToInbox: true };
+
+      if (!error) {
+        console.log(`[Email Service] Dispatched automated email to ${user.email} via Resend (ID: ${data?.id})`);
+        return { sent: true, deliveredToInbox: true };
+      }
+      return { sent: false, reason: error.message };
     } catch (err: any) {
-      console.warn('[Email Service] Gmail/SMTP automated notification error:', err.message);
+      console.warn('[Email Service] Resend automated notification error:', err.message);
       return { sent: false, reason: err.message };
     }
   }
@@ -226,20 +204,24 @@ export async function sendEmergencySecurityAlert(
     </html>
   `;
 
-  const mailer = getTransporter();
-  if (mailer) {
+  const resend = getResendClient();
+  if (resend) {
     try {
-      const fromAddress = config.email.fromEmail || config.email.smtpUser || 'Nebula Security <security@nebula.app>';
-      await mailer.sendMail({
+      const fromAddress = config.email?.fromEmail || 'Nebula Security <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
         from: fromAddress,
-        to: adminEmail,
+        to: [adminEmail],
         subject,
         html,
       });
-      console.log(`[SECURITY ALERT] Dispatched emergency incident alert to ${adminEmail} via Gmail/SMTP`);
-      return { sent: true, deliveredToInbox: true };
+
+      if (!error) {
+        console.log(`[SECURITY ALERT] Dispatched emergency incident alert to ${adminEmail} via Resend (ID: ${data?.id})`);
+        return { sent: true, deliveredToInbox: true };
+      }
+      return { sent: false, reason: error.message };
     } catch (err: any) {
-      console.warn('[SECURITY ALERT] Gmail/SMTP alert dispatch failed:', err.message);
+      console.warn('[SECURITY ALERT] Resend alert dispatch failed:', err.message);
       return { sent: false, reason: err.message };
     }
   }
