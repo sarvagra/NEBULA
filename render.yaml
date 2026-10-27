@@ -24,11 +24,13 @@ services:
       - key: MONGODB_DATABASE
         value: nebula
       - key: OTP_PROVIDER
-        value: resend
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
-        value: Nebula <onboarding@resend.dev>
+        value: Nebula <nebula.app.auth@gmail.com>
       - key: JWT_SECRET
         sync: false
       - key: JWT_REFRESH_SECRET

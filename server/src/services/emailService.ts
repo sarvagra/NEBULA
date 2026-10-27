@@ -19,86 +19,149 @@ function getResendClient(): Resend | null {
 }
 
 /**
- * Sends a 6-digit OTP verification email directly to the recipient inbox using Resend (HTTPS Port 443).
+ * Sends transactional email via Brevo HTTPS REST API (Port 443).
+ * Supports delivery to ANY recipient email worldwide without custom domain restrictions.
  */
-export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
-  const resend = getResendClient();
-
-  if (!resend) {
-    if (process.env.NODE_ENV === 'test') {
-      return { sent: true, deliveredToInbox: false };
-    }
-    console.error(`[EMAIL SERVICE] No Resend API key configured.`);
-    return {
-      sent: false,
-      reason: 'Resend API key not configured on server',
-    };
+async function sendViaBrevo(
+  to: string,
+  subject: string,
+  htmlContent: string
+): Promise<{ sent: boolean; messageId?: string; reason?: string }> {
+  const apiKey = config.email?.brevoApiKey || process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    return { sent: false, reason: 'Brevo API key not configured' };
   }
 
   try {
-    const fromAddress = config.email?.fromEmail || 'Nebula <onboarding@resend.dev>';
+    const fromAddress = config.email?.fromEmail || 'nebula.app.auth@gmail.com';
+    // Parse sender name & email if formatted like "Nebula <email>"
+    const match = fromAddress.match(/^(.*?)\s*<(.+?)>$/);
+    const senderName = match ? match[1].trim() : 'Nebula';
+    const senderEmail = match ? match[2].trim() : fromAddress;
 
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          body { margin: 0; padding: 0; background-color: #0b0c10; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f0f2fa; }
-          .container { max-width: 460px; margin: 30px auto; background: #13151f; border: 1px solid #25283b; border-radius: 16px; padding: 32px 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-          .logo { font-size: 24px; font-weight: 800; letter-spacing: 4px; color: #8b5cf6; text-align: center; margin-bottom: 6px; }
-          .subtitle { font-size: 13px; color: #828aa0; text-align: center; margin-bottom: 28px; }
-          .otp-box { background: #1b1e2c; border: 1px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0; }
-          .otp-code { font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #a78bfa; font-family: monospace; }
-          .text { font-size: 14px; line-height: 1.6; color: #d0d5e5; }
-          .footer { margin-top: 28px; font-size: 12px; color: #636b83; text-align: center; border-top: 1px solid #202334; padding-top: 18px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="logo">NEBULA</div>
-          <div class="subtitle">Synchronized Watch Parties & Shared Spaces</div>
-          <p class="text">Hello,</p>
-          <p class="text">Use the 6-digit verification code below to access your account:</p>
-          <div class="otp-box">
-            <span class="otp-code">${code}</span>
-          </div>
-          <p class="text" style="font-size: 12px; color: #94a3b8;">This code will expire in <strong>10 minutes</strong>. Do not share this code with anyone.</p>
-          <div class="footer">
-            If you didn't request this login code, you can safely disregard this email.
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-
-    const { data, error } = await resend.emails.send({
-      from: fromAddress,
-      to: [to],
-      subject: `Your Nebula Verification Code: ${code}`,
-      html,
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: {
+          name: senderName,
+          email: senderEmail,
+        },
+        to: [
+          {
+            email: to,
+          },
+        ],
+        subject,
+        htmlContent,
+      }),
     });
 
-    if (error) {
-      console.error(`[NEBULA AUTH] ⚠️ Failed to send OTP email via Resend to ${to}:`, error.message);
+    const responseData = (await response.json()) as any;
+
+    if (!response.ok) {
+      console.warn(`[EMAIL SERVICE] Brevo HTTP error (${response.status}):`, responseData?.message || responseData);
       return {
         sent: false,
-        reason: error.message,
+        reason: responseData?.message || `Brevo returned HTTP ${response.status}`,
       };
     }
 
-    console.log(`[NEBULA AUTH] ✉️ Successfully dispatched OTP email to ${to} via Resend (ID: ${data?.id})`);
+    console.log(`[EMAIL SERVICE] ✉️ Dispatched email to ${to} via Brevo (MessageId: ${responseData?.messageId})`);
     return {
       sent: true,
-      deliveredToInbox: true,
+      messageId: responseData?.messageId,
     };
   } catch (err: any) {
-    console.error(`[NEBULA AUTH] ⚠️ Resend exception to ${to}:`, err.message);
+    console.warn(`[EMAIL SERVICE] Brevo request failed:`, err.message);
     return {
       sent: false,
       reason: err.message,
     };
   }
+}
+
+/**
+ * Sends a 6-digit OTP verification email directly to the recipient inbox.
+ * Attempts Brevo first (unrestricted recipient delivery to any Gmail).
+ * Falls back to Resend if Brevo encounters an error.
+ */
+export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { margin: 0; padding: 0; background-color: #0b0c10; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f0f2fa; }
+        .container { max-width: 460px; margin: 30px auto; background: #13151f; border: 1px solid #25283b; border-radius: 16px; padding: 32px 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .logo { font-size: 24px; font-weight: 800; letter-spacing: 4px; color: #8b5cf6; text-align: center; margin-bottom: 6px; }
+        .subtitle { font-size: 13px; color: #828aa0; text-align: center; margin-bottom: 28px; }
+        .otp-box { background: #1b1e2c; border: 1px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0; }
+        .otp-code { font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #a78bfa; font-family: monospace; }
+        .text { font-size: 14px; line-height: 1.6; color: #d0d5e5; }
+        .footer { margin-top: 28px; font-size: 12px; color: #636b83; text-align: center; border-top: 1px solid #202334; padding-top: 18px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo">NEBULA</div>
+        <div class="subtitle">Synchronized Watch Parties & Shared Spaces</div>
+        <p class="text">Hello,</p>
+        <p class="text">Use the 6-digit verification code below to access your account:</p>
+        <div class="otp-box">
+          <span class="otp-code">${code}</span>
+        </div>
+        <p class="text" style="font-size: 12px; color: #94a3b8;">This code will expire in <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+        <div class="footer">
+          If you didn't request this login code, you can safely disregard this email.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  const subject = `Your Nebula Verification Code: ${code}`;
+
+  // 1. Primary: Try Brevo (Port 443 HTTPS - supports ANY recipient email)
+  const brevoResult = await sendViaBrevo(to, subject, html);
+  if (brevoResult.sent) {
+    return { sent: true, deliveredToInbox: true };
+  }
+
+  // 2. Secondary: Fall back to Resend (Port 443 HTTPS)
+  const resend = getResendClient();
+  if (resend) {
+    try {
+      const fromAddress = 'Nebula <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
+        from: fromAddress,
+        to: [to],
+        subject,
+        html,
+      });
+
+      if (!error) {
+        console.log(`[NEBULA AUTH] ✉️ Successfully dispatched OTP email to ${to} via Resend fallback (ID: ${data?.id})`);
+        return { sent: true, deliveredToInbox: true };
+      }
+      console.warn(`[NEBULA AUTH] Resend failed for ${to}:`, error.message);
+    } catch (err: any) {
+      console.warn(`[NEBULA AUTH] Resend exception for ${to}:`, err.message);
+    }
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    return { sent: true, deliveredToInbox: false };
+  }
+
+  return {
+    sent: false,
+    reason: brevoResult.reason || 'All email dispatch providers failed',
+  };
 }
 
 /**
@@ -120,10 +183,15 @@ export async function sendAutomatedNotificationEmail(
     return { sent: false, reason: 'email_updates_disabled_by_user' };
   }
 
+  const brevoResult = await sendViaBrevo(user.email, subject, html);
+  if (brevoResult.sent) {
+    return { sent: true, deliveredToInbox: true };
+  }
+
   const resend = getResendClient();
   if (resend) {
     try {
-      const fromAddress = config.email?.fromEmail || 'Nebula <onboarding@resend.dev>';
+      const fromAddress = 'Nebula <onboarding@resend.dev>';
       const { data, error } = await resend.emails.send({
         from: fromAddress,
         to: [user.email],
@@ -204,10 +272,15 @@ export async function sendEmergencySecurityAlert(
     </html>
   `;
 
+  const brevoResult = await sendViaBrevo(adminEmail, subject, html);
+  if (brevoResult.sent) {
+    return { sent: true, deliveredToInbox: true };
+  }
+
   const resend = getResendClient();
   if (resend) {
     try {
-      const fromAddress = config.email?.fromEmail || 'Nebula Security <onboarding@resend.dev>';
+      const fromAddress = 'Nebula Security <onboarding@resend.dev>';
       const { data, error } = await resend.emails.send({
         from: fromAddress,
         to: [adminEmail],
