@@ -19,6 +19,7 @@ import { mediaRouter } from './modules/media/mediaRoutes';
 import { redirectToObject } from './modules/media/storageController';
 import { securityLockdownMiddleware } from './middlewares/securityLockdown';
 import { appCheckMiddleware } from './middlewares/appCheckMiddleware';
+import { clientAttestationMiddleware } from './middlewares/clientAttestationMiddleware';
 
 export function createApp(): express.Application {
   const app = express();
@@ -71,6 +72,9 @@ export function createApp(): express.Application {
         'X-Firebase-AppCheck',
         'X-Device-Id',
         'X-Device-Info',
+        'X-Nebula-App-Signature',
+        'X-Nebula-Timestamp',
+        'X-Nebula-Client',
       ],
       credentials: true,
     })
@@ -110,12 +114,9 @@ export function createApp(): express.Application {
 
   // 6. Health, readiness, and storage routes — registered BEFORE the global rate
   //    limiter so infrastructure probes and media token checks are never throttled.
+  // Root URL is completely cloaked (returns 404 with no revealing server banner)
   app.get('/', (req, res) => {
-    res.json({
-      name: 'Nebula API Server',
-      status: 'online',
-      version: '2.0.0',
-    });
+    res.status(404).end();
   });
 
   app.get('/health', (req, res) => {
@@ -150,7 +151,8 @@ export function createApp(): express.Application {
   // 7. Global Rate Limiter (applied only to /api/v1/* routes below)
   app.use(globalApiRateLimiter);
 
-  // 8. Attestation Layer: Firebase App Check & Play Integrity Verification
+  // 8. Attestation Layer: App-Only Signature Attestation & Play Integrity
+  app.use('/api/v1', clientAttestationMiddleware);
   app.use('/api/v1', appCheckMiddleware);
 
   // 9. Mount Protected API v1 Routers

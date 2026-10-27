@@ -97,9 +97,20 @@ async function runSecurityTests() {
   }
 
   // Helper fetch
-  async function makeRequest(path: string, options: RequestInit = {}) {
+  async function makeRequest(path: string, options: RequestInit & { skipAttestation?: boolean } = {}) {
     const url = `${baseUrl}${path}`;
-    return fetch(url, options);
+    const headers = new Headers(options.headers || {});
+    if (!options.skipAttestation && !headers.has('X-Nebula-App-Signature') && path.startsWith('/api/v1')) {
+      const now = Date.now();
+      const method = (options.method || 'GET').toUpperCase();
+      const normalizedPath = path.replace(/^\/api\/v1/, '').split('?')[0] || '/';
+      const payload = `${now}:${method}:${normalizedPath}`;
+      const sig = crypto.createHmac('sha256', config.clientAttestation.secret).update(payload).digest('hex');
+      headers.set('X-Nebula-App-Signature', sig);
+      headers.set('X-Nebula-Timestamp', now.toString());
+      headers.set('X-Nebula-Client', 'com.nebula.app');
+    }
+    return fetch(url, { ...options, headers });
   }
 
   // 1. UNAUTHENTICATED REQUEST -> 401
@@ -1911,6 +1922,77 @@ async function runSecurityTests() {
       }
     } finally {
       config.appCheck.enforcement = prevEnforcement;
+    }
+  });
+
+  await assertTest('Endpoint cloaking: root endpoint returns 404 without server disclosure', async () => {
+    const res = await makeRequest('/', { method: 'GET' });
+    if (res.status !== 404) throw new Error(`Expected 404, got ${res.status}`);
+  });
+
+  await assertTest('App Attestation Shield: direct request without app signature blocked with 403 APP_CLIENT_REQUIRED', async () => {
+    const prevEnforcement = config.clientAttestation.enforcement;
+    config.clientAttestation.enforcement = 'enforce';
+
+    try {
+      const res = await makeRequest('/api/v1/auth/me', {
+        skipAttestation: true,
+        headers: { Authorization: `Bearer ${validToken}` },
+      });
+      if (res.status !== 403) throw new Error(`Expected 403, got ${res.status}`);
+      const body: any = await res.json();
+      if (body.code !== 'APP_CLIENT_REQUIRED') {
+        throw new Error(`Expected APP_CLIENT_REQUIRED, got ${body.code}`);
+      }
+    } finally {
+      config.clientAttestation.enforcement = prevEnforcement;
+    }
+  });
+
+  await assertTest('App Attestation Shield: forged app signature blocked with 403 APP_SIGNATURE_INVALID', async () => {
+    const prevEnforcement = config.clientAttestation.enforcement;
+    config.clientAttestation.enforcement = 'enforce';
+
+    try {
+      const res = await makeRequest('/api/v1/auth/me', {
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          'X-Nebula-App-Signature': '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+          'X-Nebula-Timestamp': Date.now().toString(),
+          'X-Nebula-Client': 'com.nebula.app',
+        },
+      });
+      if (res.status !== 403) throw new Error(`Expected 403, got ${res.status}`);
+      const body: any = await res.json();
+      if (body.code !== 'APP_SIGNATURE_INVALID') {
+        throw new Error(`Expected APP_SIGNATURE_INVALID, got ${body.code}`);
+      }
+    } finally {
+      config.clientAttestation.enforcement = prevEnforcement;
+    }
+  });
+
+  await assertTest('App Attestation Shield: legitimate app signature accepted', async () => {
+    const prevEnforcement = config.clientAttestation.enforcement;
+    config.clientAttestation.enforcement = 'enforce';
+
+    try {
+      const now = Date.now();
+      const path = '/auth/me';
+      const payload = `${now}:GET:${path}`;
+      const sig = crypto.createHmac('sha256', config.clientAttestation.secret).update(payload).digest('hex');
+
+      const res = await makeRequest('/api/v1/auth/me', {
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          'X-Nebula-App-Signature': sig,
+          'X-Nebula-Timestamp': now.toString(),
+          'X-Nebula-Client': 'com.nebula.app',
+        },
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+    } finally {
+      config.clientAttestation.enforcement = prevEnforcement;
     }
   });
 

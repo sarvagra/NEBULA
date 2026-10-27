@@ -83,6 +83,10 @@ export const config = {
   appCheck: {
     enforcement: (process.env.APP_CHECK_ENFORCEMENT || 'warn') as 'enforce' | 'warn' | 'off',
   },
+  clientAttestation: {
+    enforcement: (process.env.APP_ATTESTATION_ENFORCEMENT || 'enforce') as 'enforce' | 'warn' | 'off',
+    secret: process.env.NEBULA_APP_CLIENT_SECRET || 'nebula_android_client_attestation_2026_x89a',
+  },
   billing: {
     packageName: process.env.PLAY_PACKAGE_NAME || 'com.nebula.app',
     serviceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',

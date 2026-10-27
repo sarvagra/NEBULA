@@ -43,6 +43,18 @@ object NebulaApiClient {
         data class Error(val message: String, val statusCode: Int = 0) : ApiResponse<Nothing>()
     }
 
+    private const val APP_CLIENT_SECRET = "nebula_android_client_attestation_2026_x89a"
+
+    private fun generateAppSignature(timestamp: Long, method: String, endpoint: String): String {
+        val normalizedPath = endpoint.substringBefore('?')
+        val payload = "$timestamp:${method.uppercase()}:$normalizedPath"
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        val key = javax.crypto.spec.SecretKeySpec(APP_CLIENT_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
+        mac.init(key)
+        val hash = mac.doFinal(payload.toByteArray(Charsets.UTF_8))
+        return hash.joinToString("") { "%02x".format(it) }
+    }
+
     private suspend fun request(
         endpoint: String,
         method: String = "GET",
@@ -63,6 +75,13 @@ object NebulaApiClient {
                 sessionManager?.getDeviceId()?.takeIf { it.isNotBlank() }?.let { setRequestProperty("X-Device-Id", it) }
                 sessionManager?.getDeviceInfo()?.takeIf { it.isNotBlank() }?.let { setRequestProperty("X-Device-Info", it) }
                 authToken?.takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
+
+                // Cryptographic App Attestation Handshake (blocks any non-app access to endpoints)
+                val now = System.currentTimeMillis()
+                val signature = generateAppSignature(now, method, endpoint)
+                setRequestProperty("X-Nebula-Timestamp", now.toString())
+                setRequestProperty("X-Nebula-App-Signature", signature)
+                setRequestProperty("X-Nebula-Client", "com.nebula.app")
 
                 try {
                     val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
