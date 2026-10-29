@@ -67,8 +67,32 @@ class RoomRepositoryImpl(
             if (reason == "kicked" && !removedRoomId.isNullOrBlank()) {
                 _rooms.value = _rooms.value.filterNot { it.id == removedRoomId }
             }
+        },
+        onReconnected = {
+            // Whatever the room broadcast while the socket was down was never queued
+            // for us, so recover it from the history cursor rather than showing a
+            // thread with a silent hole in it.
+            realtimeScope.launch {
+                syncActiveRoom()
+                backfillMissedChat()
+            }
         }
     )
+
+    /** Newest room-chat timestamp already shown, used as the reconnect backfill cursor. */
+    @Volatile private var lastChatCursor: String? = null
+    @Volatile private var lastChatRoomId: String? = null
+
+    private suspend fun backfillMissedChat() {
+        val current = _activeRoom.value ?: return
+        // A cursor only belongs to the room it came from; a different room needs a full page.
+        val cursor = if (lastChatRoomId == current.id) lastChatCursor else null
+        if (cursor == null) {
+            loadRoomMessages(current.id)
+        } else {
+            loadRoomMessages(current.id, since = cursor)
+        }
+    }
 
     init { socketClient.setOnEndedStateListener { positionMs, ended -> applyRealtimeEndedState(positionMs, ended) } }
 
@@ -102,16 +126,23 @@ class RoomRepositoryImpl(
         loadRoomMessages(current.id)
     }
 
-    private suspend fun loadRoomMessages(roomId: String) {
+    /**
+     * Loads room chat. With [since] the server returns only what was created at or after
+     * that cursor and the result is merged into the open thread; without it the page
+     * replaces the thread.
+     */
+    private suspend fun loadRoomMessages(roomId: String, since: String? = null) {
         val current = _activeRoom.value ?: return
-        val response = apiClient.getRoomMessages(roomId)
+        val response = apiClient.getRoomMessages(roomId, since)
         if (response !is ApiResponse.Success) return
         val messages = mutableListOf<RoomChatMessage>()
+        var cursor = if (since != null) lastChatCursor else null
         for (i in 0 until response.data.length()) {
             val json = response.data.optJSONObject(i) ?: continue
             val id = json.optString("id").ifBlank { json.optString("_id") }
             if (id.isBlank()) continue
             val createdAt = json.optString("createdAt")
+            if (createdAt.isNotBlank() && (cursor == null || createdAt > cursor!!)) cursor = createdAt
             messages += RoomChatMessage(
                 id = id,
                 roomId = json.optString("roomId", roomId),
@@ -129,8 +160,12 @@ class RoomRepositoryImpl(
             if (!message.senderAvatarUrl.isNullOrBlank()) message
             else rosterCurrent.participants.firstOrNull { it.user.id == message.senderId }?.user?.avatarUrl?.let { message.copy(senderAvatarUrl = it) } ?: message
         }
-        _activeRoom.value = rosterCurrent.copy(recentMessages = withAvatars)
-        _rooms.value = _rooms.value.map { if (it.id == roomId) rosterCurrent.copy(recentMessages = withAvatars) else it }
+        val base = if (since != null) rosterCurrent.recentMessages else emptyList()
+        val merged = base + withAvatars.filter { recovered -> base.none { it.id == recovered.id } }
+        lastChatCursor = cursor
+        lastChatRoomId = roomId
+        _activeRoom.value = rosterCurrent.copy(recentMessages = merged)
+        _rooms.value = _rooms.value.map { if (it.id == roomId) rosterCurrent.copy(recentMessages = merged) else it }
     }
 
     override suspend fun createRoom(
@@ -394,6 +429,12 @@ class RoomRepositoryImpl(
             timeLabel = formatRoomMessageTime(createdAt),
             isSystemMessage = json.optString("messageType") == "system"
         )
+        // Live messages advance the backfill cursor, so a later reconnect asks only for
+        // what genuinely arrived while the socket was down.
+        if (createdAt.isNotBlank() && (lastChatCursor == null || createdAt > lastChatCursor!!)) {
+            lastChatCursor = createdAt
+        }
+        lastChatRoomId = current.id
         val updated = current.copy(recentMessages = current.recentMessages + message)
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }

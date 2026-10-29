@@ -148,13 +148,8 @@ class MainActivity : ComponentActivity() {
                         if (!uiState.userProfile.isLoggedIn) {
                             com.nebula.app.ui.auth.NebulaAuthScreen(
                                 onSignInWithGoogle = { homeViewModel.signInWithGoogle(this@MainActivity) },
-                                onSignInWithEmail = { email, name -> homeViewModel.signInWithEmail(email, name) },
-                                onRequestOtp = { email, onSent -> homeViewModel.requestOtp(email, onSent) },
-                                onVerifyOtp = { email, otp -> homeViewModel.verifyOtp(email, otp) },
                                 isAuthLoading = uiState.isAuthLoading,
                                 errorMessage = uiState.authErrorMessage,
-                                currentBackendUrl = uiState.backendUrl,
-                                onUpdateBackendUrl = { homeViewModel.updateBackendUrl(it) },
                                 onExitApp = { finish() },
                                 modifier = Modifier.fillMaxSize()
                             )

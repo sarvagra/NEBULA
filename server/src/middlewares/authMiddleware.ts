@@ -75,11 +75,13 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         const firebaseVerified = await FirebaseService.verifyIdToken(token);
         if (firebaseVerified && firebaseVerified.uid) {
           if (mongoose.connection.readyState === 1) {
+            // Resolve strictly by the immutable Firebase UID. Matching on an
+            // email or phone claim would let a different identity claim an
+            // existing profile.
             user = await UserModel.findOne({
               $or: [
                 { firebaseUid: firebaseVerified.uid },
                 { googleId: firebaseVerified.uid },
-                { email: firebaseVerified.email },
               ],
             }).select('_id username displayName tier role isBanned');
 

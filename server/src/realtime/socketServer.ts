@@ -24,6 +24,49 @@ type LivePlayback = { positionMs: number; isPlaying: boolean; timestamp: number;
 const livePlaybackByRoom = new Map<string, LivePlayback>();
 const liveHostByRoom = new Map<string, string>();
 
+/**
+ * Playback ordering. Every accepted host command increments the room's version and
+ * every outbound playback event carries it. A command built against an older version
+ * is a packet that crossed a newer command on the wire: applying it would move the
+ * whole room backwards, so it is refused and the sender is corrected instead.
+ */
+const mediaVersionByRoom = new Map<string, number>();
+/** Highest host sample clock seen per room, so a late-arriving sample cannot rewind it. */
+const liveSampleClockByRoom = new Map<string, number>();
+
+export function playbackVersionForRoom(roomId: string): number {
+  return mediaVersionByRoom.get(roomId) ?? 0;
+}
+
+function bumpPlaybackVersion(roomId: string): number {
+  const next = playbackVersionForRoom(roomId) + 1;
+  mediaVersionByRoom.set(roomId, next);
+  return next;
+}
+
+function isStaleCommand(roomId: string, clientVersion: unknown): boolean {
+  // Clients that do not send a version yet keep working; they simply cannot be
+  // protected against reordering until they echo the version back (the Android
+  // client does).
+  if (typeof clientVersion !== 'number' || !Number.isFinite(clientVersion)) return false;
+  return clientVersion < playbackVersionForRoom(roomId);
+}
+
+function forbiddenPlayback(socket: Socket, roomId: string): void {
+  const state = livePlaybackByRoom.get(roomId);
+  socket.emit('media:state', {
+    roomId,
+    position: (state ? playbackPositionAtNow(state) : 0) / 1000,
+    positionMs: state ? playbackPositionAtNow(state) : 0,
+    isPlaying: state?.isPlaying ?? false,
+    ended: state?.ended ?? false,
+    version: playbackVersionForRoom(roomId),
+    timestamp: Date.now(),
+    senderId: 'server',
+    rejected: true,
+  });
+}
+
 function playbackPositionAtNow(state: LivePlayback, now = Date.now()): number {
   return Math.max(0, state.positionMs + (state.isPlaying ? Math.max(0, now - state.timestamp) : 0));
 }
@@ -52,10 +95,12 @@ export function notifyRoomsParticipantProfileUpdated(roomIds: string[], userId: 
 export function notifyRoomMediaSwitch(roomId: string, mediaState: { title: string; subtitle: string; mediaUrl: string; durationSeconds: number; playbackPosition: number; isPlaying: boolean }): void {
   if (!roomIo) return;
   const timestamp = Date.now();
+  const version = bumpPlaybackVersion(roomId);
+  liveSampleClockByRoom.delete(roomId);
   livePlaybackByRoom.set(roomId, { positionMs: 0, isPlaying: true, timestamp, ended: false });
   roomIo.to(`room:${roomId}`).emit('media:switch', {
     mediaState: { ...mediaState, playbackPosition: 0, playbackPositionMs: 0, isPlaying: true },
-    senderId: 'server', timestamp, ended: false,
+    senderId: 'server', timestamp, ended: false, version,
   });
 }
 
@@ -92,9 +137,37 @@ export function notifyRoomParticipantLeft(roomId: string, userId: string): void 
   roomIo?.to(`room:${roomId}`).emit('participant:left', { userId });
 }
 
+/**
+ * Presence is reclaimed only when a client stops proving it is alive. A killed
+ * process never runs its disconnect handler, so without this sweep a crashed app
+ * keeps advertising "Active" indefinitely to everyone who lists it.
+ */
+export const PRESENCE_STALE_MS = 120_000;
+
+/** Users whose app currently holds an open socket; they are never reclaimed. */
+const connectedSocketCounts = new Map<string, number>();
+
+export async function sweepStalePresence(): Promise<string[]> {
+  if (mongoose.connection.readyState !== 1) return [];
+  const cutoff = new Date(Date.now() - PRESENCE_STALE_MS);
+  const stale = await UserModel.find({
+    presenceStatus: { $in: ['online', 'in_a_room', 'private_chat'] },
+    $or: [{ lastActiveAt: { $lt: cutoff } }, { lastActiveAt: { $exists: false } }],
+  }).select('_id').limit(500);
+  const reclaimed = stale.map((user) => user._id.toString()).filter((id) => !connectedSocketCounts.get(id));
+  if (reclaimed.length === 0) return [];
+  await UserModel.updateMany({ _id: { $in: reclaimed } }, { $set: { presenceStatus: 'offline' } });
+  for (const userId of reclaimed) {
+    roomIo?.emit('presence:updated', { userId, status: 'offline' });
+  }
+  return reclaimed;
+}
+
 export function notifyRoomDissolved(roomId: string): void {
   livePlaybackByRoom.delete(roomId);
   liveHostByRoom.delete(roomId);
+  mediaVersionByRoom.delete(roomId);
+  liveSampleClockByRoom.delete(roomId);
   roomIo?.to(`room:${roomId}`).emit('room:removed', { roomId, reason: 'dissolved' });
 }
 
@@ -111,6 +184,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
   roomIo = io;
   livePlaybackByRoom.clear();
   liveHostByRoom.clear();
+  mediaVersionByRoom.clear();
+  liveSampleClockByRoom.clear();
   const inactivityTimers = new Map<string, NodeJS.Timeout>();
   const inactivityGraceMs = 60_000;
   const mediaCheckpointAt = new Map<string, number>();
@@ -141,6 +216,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
           mediaCheckpointAt.delete(roomId);
           livePlaybackByRoom.delete(roomId);
           liveHostByRoom.delete(roomId);
+          mediaVersionByRoom.delete(roomId);
+          liveSampleClockByRoom.delete(roomId);
           io.to(`room:${roomId}`).emit('room:removed', { roomId, reason: 'dissolved' });
           for (const roomSocket of await io.in(`room:${roomId}`).fetchSockets()) roomSocket.leave(`room:${roomId}`);
         } else {
@@ -211,7 +288,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as AuthenticatedSocketUser;
     const joinedRooms = new Set<string>();
-    void UserModel.findByIdAndUpdate(user.id, { presenceStatus: 'online' });
+    connectedSocketCounts.set(user.id, (connectedSocketCounts.get(user.id) ?? 0) + 1);
+    // lastActiveAt is the presence TTL anchor: the sweep only reclaims presence for
+    // users that stopped proving they are alive, so it must be refreshed here too.
+    void UserModel.findByIdAndUpdate(user.id, { presenceStatus: 'online', lastActiveAt: new Date() });
     console.log(`[Socket Authenticated] ${user.displayName} (@${user.username}) connected [${socket.id}]`);
 
     // Rate limiting tracking for this socket
@@ -282,6 +362,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
           positionMs: currentPositionMs,
           isPlaying: livePlayback?.isPlaying ?? room.mediaState.isPlaying,
           ended: livePlayback?.ended ?? false,
+          version: playbackVersionForRoom(room._id.toString()),
           mediaState: {
             title: room.mediaState.title,
             subtitle: room.mediaState.subtitle,
@@ -321,6 +402,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
             mediaCheckpointAt.delete(data.roomId);
             livePlaybackByRoom.delete(data.roomId);
             liveHostByRoom.delete(data.roomId);
+            mediaVersionByRoom.delete(data.roomId);
+            liveSampleClockByRoom.delete(data.roomId);
             io.to(`room:${data.roomId}`).emit('room:removed', { roomId: data.roomId, reason: 'dissolved' });
             for (const roomSocket of await io.in(`room:${data.roomId}`).fetchSockets()) roomSocket.leave(`room:${data.roomId}`);
           } else {
@@ -348,13 +431,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
           mediaCheckpointAt.delete(data.roomId);
           livePlaybackByRoom.delete(data.roomId);
           liveHostByRoom.delete(data.roomId);
+          mediaVersionByRoom.delete(data.roomId);
+          liveSampleClockByRoom.delete(data.roomId);
         }
       } catch (err: any) {
         // Ignored on leave
       }
     });
 
-    socket.on('media:switch', async (data: { roomId: string; title: string; subtitle?: string; mediaUrl: string; durationSeconds?: number }) => {
+    socket.on('media:switch', async (data: { roomId: string; title: string; subtitle?: string; mediaUrl: string; durationSeconds?: number; version?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -365,6 +450,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
           socket.emit('error', { message: 'Forbidden: Only the room host can switch media' });
           return;
         }
+        if (isStaleCommand(data.roomId, data.version)) {
+          forbiddenPlayback(socket, data.roomId);
+          return;
+        }
 
         room.mediaState.title = (data.title || 'Untitled').slice(0, 150);
         room.mediaState.subtitle = (data.subtitle || '').slice(0, 150);
@@ -373,7 +462,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
         room.mediaState.playbackPosition = 0;
         room.mediaState.isPlaying = true;
         await room.save();
+        const version = bumpPlaybackVersion(data.roomId);
+        liveSampleClockByRoom.delete(data.roomId);
         livePlaybackByRoom.set(data.roomId, { positionMs: 0, isPlaying: true, timestamp: Date.now(), ended: false });
+        socket.emit('media:ack', { roomId: data.roomId, version });
 
         io.to(`room:${data.roomId}`).emit('media:switch', {
           mediaState: {
@@ -388,49 +480,62 @@ export function initSocketServer(httpServer: HttpServer): Server {
           senderId: user.id,
           timestamp: Date.now(),
           ended: false,
+          version,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Media switch failed' });
       }
     });
 
-    socket.on('media:end', async (data: { roomId: string; positionMs?: number }) => {
+    socket.on('media:end', async (data: { roomId: string; positionMs?: number; version?: number }) => {
       try {
         const roomId = data?.roomId;
         if (!roomId || !isValidObjectId(roomId) || liveHostByRoom.get(roomId) !== user.id || !joinedRooms.has(roomId)) return;
+        if (isStaleCommand(roomId, data.version)) {
+          forbiddenPlayback(socket, roomId);
+          return;
+        }
         const room = await RoomModel.findById(roomId);
         if (!room || room.hostId !== user.id) return;
         const positionMs = Math.max(0, Number(data.positionMs) || 0);
         const timestamp = Date.now();
+        const version = bumpPlaybackVersion(roomId);
         livePlaybackByRoom.set(roomId, { positionMs, isPlaying: false, timestamp, ended: true });
         room.mediaState.playbackPosition = positionMs / 1000;
         room.mediaState.isPlaying = false;
         await room.save();
-        io.to(`room:${roomId}`).emit('media:ended', { roomId, positionMs, isPlaying: false, ended: true, timestamp, senderId: user.id });
+        socket.emit('media:ack', { roomId, version });
+        io.to(`room:${roomId}`).emit('media:ended', { roomId, positionMs, isPlaying: false, ended: true, timestamp, senderId: user.id, version });
       } catch {
         socket.emit('error', { message: 'Could not synchronize video end state' });
       }
     });
 
-    socket.on('media:restart', async (data: { roomId: string }) => {
+    socket.on('media:restart', async (data: { roomId: string; version?: number }) => {
       try {
         const roomId = data?.roomId;
         if (!roomId || !isValidObjectId(roomId) || liveHostByRoom.get(roomId) !== user.id || !joinedRooms.has(roomId)) return;
+        if (isStaleCommand(roomId, data.version)) {
+          forbiddenPlayback(socket, roomId);
+          return;
+        }
         const room = await RoomModel.findById(roomId);
         if (!room || room.hostId !== user.id) return;
         const timestamp = Date.now();
+        const version = bumpPlaybackVersion(roomId);
         livePlaybackByRoom.set(roomId, { positionMs: 0, isPlaying: true, timestamp, ended: false });
         room.mediaState.playbackPosition = 0;
         room.mediaState.isPlaying = true;
         await room.save();
-        io.to(`room:${roomId}`).emit('media:restart', { roomId, positionMs: 0, isPlaying: true, ended: false, timestamp, senderId: user.id });
+        socket.emit('media:ack', { roomId, version });
+        io.to(`room:${roomId}`).emit('media:restart', { roomId, positionMs: 0, isPlaying: true, ended: false, timestamp, senderId: user.id, version });
       } catch {
         socket.emit('error', { message: 'Could not restart video for this room' });
       }
     });
 
     // 2. SYNCHRONIZED MEDIA (STRICT HOST PERMISSION ONLY)
-    socket.on('media:play', async (data: { roomId: string; positionMs?: number; position?: number }) => {
+    socket.on('media:play', async (data: { roomId: string; positionMs?: number; position?: number; version?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -442,26 +547,34 @@ export function initSocketServer(httpServer: HttpServer): Server {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
+        if (isStaleCommand(data.roomId, data.version)) {
+          forbiddenPlayback(socket, data.roomId);
+          return;
+        }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
+        const version = bumpPlaybackVersion(data.roomId);
+        liveSampleClockByRoom.delete(data.roomId);
         livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: true, timestamp, ended: false });
         room.mediaState.isPlaying = true;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
+        socket.emit('media:ack', { roomId: data.roomId, version });
 
         socket.to(`room:${data.roomId}`).emit('media:play', {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
           timestamp,
+          version,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback synchronization failed' });
       }
     });
 
-    socket.on('media:pause', async (data: { roomId: string; positionMs?: number; position?: number }) => {
+    socket.on('media:pause', async (data: { roomId: string; positionMs?: number; position?: number; version?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -472,26 +585,34 @@ export function initSocketServer(httpServer: HttpServer): Server {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
+        if (isStaleCommand(data.roomId, data.version)) {
+          forbiddenPlayback(socket, data.roomId);
+          return;
+        }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
+        const version = bumpPlaybackVersion(data.roomId);
+        liveSampleClockByRoom.delete(data.roomId);
         livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: false, timestamp, ended: false });
         room.mediaState.isPlaying = false;
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
+        socket.emit('media:ack', { roomId: data.roomId, version });
 
         socket.to(`room:${data.roomId}`).emit('media:pause', {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
           timestamp,
+          version,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback synchronization failed' });
       }
     });
 
-    socket.on('media:seek', async (data: { roomId: string; positionMs?: number; position?: number }) => {
+    socket.on('media:seek', async (data: { roomId: string; positionMs?: number; position?: number; version?: number }) => {
       try {
         if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
 
@@ -502,19 +623,27 @@ export function initSocketServer(httpServer: HttpServer): Server {
           socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
           return;
         }
+        if (isStaleCommand(data.roomId, data.version)) {
+          forbiddenPlayback(socket, data.roomId);
+          return;
+        }
 
         const safePositionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
         const timestamp = Date.now();
         const prior = livePlaybackByRoom.get(data.roomId);
+        const version = bumpPlaybackVersion(data.roomId);
+        liveSampleClockByRoom.delete(data.roomId);
         livePlaybackByRoom.set(data.roomId, { positionMs: safePositionMs, isPlaying: prior?.isPlaying ?? room.mediaState.isPlaying, timestamp, ended: safePositionMs === 0 ? false : prior?.ended });
         room.mediaState.playbackPosition = safePositionMs / 1000;
         await room.save();
+        socket.emit('media:ack', { roomId: data.roomId, version });
 
         socket.to(`room:${data.roomId}`).emit('media:seek', {
           position: safePositionMs / 1000,
           positionMs: safePositionMs,
           senderId: user.id,
           timestamp,
+          version,
         });
       } catch (err: any) {
         socket.emit('error', { message: 'Playback seek failed' });
@@ -523,7 +652,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     socket.on(
       'media:sync',
-      async (data: { roomId: string; positionMs?: number; position?: number; isPlaying: boolean; timestamp: number }) => {
+      async (data: { roomId: string; positionMs?: number; position?: number; isPlaying: boolean; timestamp: number; version?: number }) => {
         try {
           if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
           // room:join already verified membership against Mongo. Keep the active host
@@ -532,10 +661,23 @@ export function initSocketServer(httpServer: HttpServer): Server {
             socket.emit('error', { message: 'Forbidden: Only the room host can synchronize playback' });
             return;
           }
+          // A sample produced before the latest play/pause/seek/switch belongs to the
+          // previous playback generation; applying it would drag every listener back.
+          if (isStaleCommand(data.roomId, data.version)) {
+            forbiddenPlayback(socket, data.roomId);
+            return;
+          }
+          // Samples can also arrive out of order while carrying the same version.
+          // The host clock is monotonic, so anything older than the newest accepted
+          // sample is a duplicate of an older frame and is dropped silently.
+          const sampleClock = Number(data.timestamp);
+          const lastSampleClock = liveSampleClockByRoom.get(data.roomId);
+          if (Number.isFinite(sampleClock) && lastSampleClock !== undefined && sampleClock < lastSampleClock) return;
 
           const positionMs = Math.max(0, Number(data.positionMs ?? ((data.position ?? 0) * 1000)) || 0);
           const isPlaying = data.isPlaying === true;
           const now = Date.now();
+          if (Number.isFinite(sampleClock)) liveSampleClockByRoom.set(data.roomId, sampleClock);
           const ended = livePlaybackByRoom.get(data.roomId)?.ended ?? false;
           livePlaybackByRoom.set(data.roomId, { positionMs, isPlaying: ended ? false : isPlaying, timestamp: now, ended });
           if (now - (mediaCheckpointAt.get(data.roomId) ?? 0) >= 5_000) {
@@ -553,6 +695,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
             ended,
             timestamp: now,
             senderId: user.id,
+            version: playbackVersionForRoom(data.roomId),
           });
         } catch {
           socket.emit('error', { message: 'Playback synchronization failed' });
@@ -665,7 +808,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       try {
         const validStatuses = ['online', 'in_a_room', 'private_chat', 'offline'];
         if (validStatuses.includes(data.status)) {
-          await UserModel.findByIdAndUpdate(user.id, { presenceStatus: data.status });
+          await UserModel.findByIdAndUpdate(user.id, { presenceStatus: data.status, lastActiveAt: new Date() });
           socket.broadcast.emit('presence:updated', {
             userId: user.id,
             status: data.status,
@@ -678,6 +821,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     socket.on('disconnect', async () => {
       clearInterval(rateLimitReset);
+      const remainingCount = (connectedSocketCounts.get(user.id) ?? 1) - 1;
+      if (remainingCount > 0) connectedSocketCounts.set(user.id, remainingCount);
+      else connectedSocketCounts.delete(user.id);
       console.log(`[Socket Disconnected] ${user.displayName} (${socket.id})`);
       for (const roomId of joinedRooms) scheduleInactivityRemoval(roomId, user);
       setTimeout(async () => {
@@ -689,6 +835,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
       }, 250);
     });
   });
+
+  const presenceSweep = setInterval(() => {
+    void sweepStalePresence().catch(() => {
+      // The next sweep retries; a failed pass must not take the socket server down.
+    });
+  }, 60_000);
+  presenceSweep.unref();
 
   return io;
 }

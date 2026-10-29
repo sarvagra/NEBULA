@@ -4,7 +4,6 @@ import { AuthService, hashToken } from '../../services/authService';
 import { UserModel } from '../../models/User';
 import { toPrivateUserDTO } from '../../utils/dto';
 import { config } from '../../config/env';
-import { sendOtpEmail } from '../../services/emailService';
 
 // Temporary in-memory OTP verification store (scoped to dev / OTP provider integration)
 export type OtpPurpose = 'login' | 'account_deletion';
@@ -45,7 +44,7 @@ export function clearOtp(target: string, purpose: OtpPurpose = 'login'): void {
  * period. The caller passes the outcome back in the response so the app can
  * tell the user their account was saved.
  */
-async function applyLoginDeletionGrace(user: any): Promise<{ deletionSuspended: boolean; deletionScheduledFor: Date | null }> {
+export async function applyLoginDeletionGrace(user: any): Promise<{ deletionSuspended: boolean; deletionScheduledFor: Date | null }> {
   if (!user?.deletionScheduledFor || user.deletionSuspendedAt) {
     return { deletionSuspended: false, deletionScheduledFor: null };
   }
@@ -75,11 +74,13 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
     const { idToken } = req.body;
     const verified = await AuthService.verifyIdToken(idToken);
 
+    // Identity is the Firebase UID. An email claim is mutable and must never be
+    // used to resolve an account, or a verified email could be pointed at
+    // someone else's profile.
     let user = await UserModel.findOne({
       $or: [
         { firebaseUid: verified.uid },
         { googleId: verified.uid },
-        { email: verified.email },
       ],
     });
 
@@ -101,8 +102,8 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
         finalUsername = `nebula_${Date.now().toString(36)}`;
       }
 
-      const isSpecialAdmin = verified.email === 'sarvagrawork@gmail.com' || verified.email === 'sarvagra2@gmail.com';
-
+      // New accounts always start unprivileged. Admin/moderator roles are
+      // granted through an audited administrative path, never by email match.
       user = await UserModel.create({
         email: verified.email,
         googleId: verified.uid,
@@ -111,8 +112,8 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
         username: finalUsername,
         avatarLetter: verified.displayName ? verified.displayName.charAt(0).toUpperCase() : 'N',
         avatarUrl: verified.picture,
-        tier: isSpecialAdmin ? 'premium_plus' : 'free',
-        role: isSpecialAdmin ? 'admin' : 'user',
+        tier: 'free',
+        role: 'user',
         status: 'dynamic',
         presenceStatus: 'online',
         bio: '',
@@ -133,7 +134,14 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
     const ip = req.ip || req.socket.remoteAddress;
     const deviceInfo = (req.body.deviceInfo || req.headers['x-device-info'] || req.headers['user-agent'] || 'Android Client').toString();
     const deviceId = (req.body.deviceId || req.headers['x-device-id'] || '').toString();
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
+    const tokens = await AuthService.issueSessionTokens(
+      user,
+      deviceInfo,
+      ip,
+      deviceId,
+      // Only an explicit opt-in may evict another device; the default stays a refusal.
+      req.body.replaceOldestDevice === true
+    );
     const grace = await applyLoginDeletionGrace(user);
 
     res.json({
@@ -150,137 +158,6 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
     res.status(status).json({
       success: false,
       error: err.message || 'Google authentication failed',
-      code: err.code || 'AUTH_FAILED',
-    });
-  }
-}
-
-export async function requestOtp(req: Request, res: Response): Promise<void> {
-  try {
-    const rawTarget = (req.body.email || req.body.phone || '').trim().toLowerCase();
-    if (!rawTarget) {
-      res.status(400).json({ success: false, error: 'A valid email address is required' });
-      return;
-    }
-
-    // Check rate limit on OTP store attempts
-    const existing = peekOtpRequest(rawTarget, 'login');
-    if (existing && Date.now() < existing.expiresAt && existing.attempts >= OTP_MAX_ATTEMPTS) {
-      res.status(429).json({ success: false, error: 'Too many OTP requests. Please wait before retrying.' });
-      return;
-    }
-
-    const existingUser = await UserModel.findOne({ email: rawTarget });
-
-    // Generate random 6-digit verification code
-    const code = issueOtp(rawTarget, 'login');
-
-    const emailResult = await sendOtpEmail(rawTarget, code);
-    if (!emailResult.sent) {
-      clearOtp(rawTarget, 'login');
-      res.status(503).json({
-        success: false,
-        error: 'Verification email could not be delivered. Please try again later.',
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      message: 'Verification code sent to your email',
-      isNewUser: !existingUser,
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: 'Failed to dispatch verification code' });
-  }
-}
-
-export async function verifyOtp(req: Request, res: Response): Promise<void> {
-  try {
-    const rawTarget = (req.body.email || '').trim().toLowerCase();
-    const otp = (req.body.otp || '').trim();
-
-    if (!rawTarget || !otp) {
-      res.status(400).json({ success: false, error: 'Target identifier and 6-digit OTP are required' });
-      return;
-    }
-
-    if (!consumeOtp(rawTarget, otp, 'login')) {
-      res.status(400).json({ success: false, error: 'Invalid or expired verification code' });
-      return;
-    }
-
-    const query = { email: rawTarget };
-    let user = await UserModel.findOne(query);
-    const isSpecialAdmin = rawTarget === 'sarvagrawork@gmail.com';
-    let isNewUser = false;
-
-    if (!user) {
-      isNewUser = true;
-      let finalUsername = '';
-      let isUnique = false;
-      let attempts = 0;
-      while (!isUnique && attempts < 15) {
-        const rand = Math.random().toString(36).substring(2, 8);
-        finalUsername = `nebula_${rand}`.toLowerCase();
-        const existing = await UserModel.findOne({ username: finalUsername });
-        if (!existing) isUnique = true;
-        attempts++;
-      }
-      if (!isUnique) finalUsername = `nebula_${Date.now().toString(36)}`;
-
-      user = await UserModel.create({
-        email: rawTarget,
-        displayName: isSpecialAdmin ? 'Sarvagra (Admin)' : '',
-        username: finalUsername,
-        avatarLetter: isSpecialAdmin ? 'S' : 'N',
-        tier: isSpecialAdmin ? 'premium_plus' : 'free',
-        role: isSpecialAdmin ? 'admin' : 'user',
-        status: 'dynamic',
-        presenceStatus: 'online',
-        bio: '',
-        isOnboardingCompleted: false,
-      });
-    } else {
-      if (isSpecialAdmin) {
-        user.role = 'admin';
-        user.tier = 'premium_plus';
-      }
-      // Completion is explicit; a generated internal handle is not a chosen identity.
-      if (user.isOnboardingCompleted) {
-        isNewUser = false;
-      } else {
-        isNewUser = true;
-      }
-      await user.save();
-    }
-
-    if (user.isBanned) {
-      res.status(403).json({ success: false, error: 'Account has been suspended' });
-      return;
-    }
-
-    const ip = req.ip || req.socket.remoteAddress;
-    const deviceInfo = (req.body.deviceInfo || req.headers['x-device-info'] || req.headers['user-agent'] || 'Android Client').toString();
-    const deviceId = (req.body.deviceId || req.headers['x-device-id'] || '').toString();
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
-    const grace = await applyLoginDeletionGrace(user);
-
-    res.json({
-      success: true,
-      data: {
-        user: toPrivateUserDTO(user),
-        tokens,
-        isNewUser,
-        deletionSuspended: grace.deletionSuspended,
-        deletionWasScheduledFor: grace.deletionScheduledFor,
-      },
-    });
-  } catch (err: any) {
-    const status = err.statusCode || 500;
-    res.status(status).json({
-      success: false,
-      error: err.message || 'OTP verification failed',
       code: err.code || 'AUTH_FAILED',
     });
   }
@@ -338,68 +215,6 @@ export async function getMe(req: Request, res: Response): Promise<void> {
     res.json({ success: true, data: toPrivateUserDTO(user) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve profile' });
-  }
-}
-
-export async function devLogin(req: Request, res: Response): Promise<void> {
-  try {
-    if (config.server.isProduction) {
-      res.status(403).json({ success: false, error: 'Developer login disabled in production' });
-      return;
-    }
-
-    const email = (req.body.email || '').trim().toLowerCase();
-    const requestedUsername = (req.body.username || (email ? email.split('@')[0] : 'nebula_explorer')).toLowerCase().trim().replace(/^@/, '');
-    const displayName = (req.body.displayName || (email ? email.split('@')[0] : 'Nebula Explorer')).trim();
-    let user = await UserModel.findOne({
-      $or: [
-        ...(email ? [{ email }] : []),
-        { username: requestedUsername }
-      ]
-    });
-
-    if (!user) {
-      user = await UserModel.create({
-        email: email || `${requestedUsername}@nebula.local`,
-        displayName: displayName || 'Nebula Explorer',
-        username: requestedUsername,
-        avatarLetter: (displayName || requestedUsername).charAt(0).toUpperCase() || 'N',
-        tier: 'free',
-        status: 'dynamic',
-        presenceStatus: 'online',
-        bio: '',
-        isOnboardingCompleted: true,
-      });
-    } else {
-      if (!user.isOnboardingCompleted) {
-        user.isOnboardingCompleted = true;
-        await user.save();
-      }
-    }
-
-    if (user.isBanned) {
-      res.status(403).json({ success: false, error: 'Account has been suspended' });
-      return;
-    }
-
-    const ip = req.ip || req.socket.remoteAddress;
-    const deviceInfo = (req.body.deviceInfo || req.headers['user-agent'] || 'Android Client Emulator').toString();
-    const deviceId = (req.body.deviceId || '').toString();
-    const tokens = await AuthService.issueSessionTokens(user, deviceInfo, ip, deviceId);
-    const grace = await applyLoginDeletionGrace(user);
-
-    res.json({
-      success: true,
-      data: {
-        user: toPrivateUserDTO(user),
-        tokens,
-        deletionSuspended: grace.deletionSuspended,
-        deletionWasScheduledFor: grace.deletionScheduledFor,
-      },
-    });
-  } catch (err: any) {
-    const status = err.statusCode || 500;
-    res.status(status).json({ success: false, error: err.message || 'Developer login failed', code: err.code });
   }
 }
 

@@ -4,17 +4,9 @@ export const GoogleAuthSchema = z.object({
   idToken: z.string().min(10, 'Invalid token length').max(4096),
   deviceId: z.string().trim().max(128).optional(),
   deviceInfo: z.string().trim().max(256).optional(),
-});
-
-export const OtpRequestSchema = z.object({
-  email: z.string().email('Invalid email address format'),
-});
-
-export const OtpVerifySchema = z.object({
-  email: z.string().email('Invalid email address format'),
-  otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
-  deviceId: z.string().trim().max(128).optional(),
-  deviceInfo: z.string().trim().max(256).optional(),
+  // Explicit opt-in: retire the least recently used device session instead of
+  // refusing a sign-in that the user is performing on a device they hold.
+  replaceOldestDevice: z.boolean().optional(),
 });
 
 export const RefreshTokenSchema = z.object({

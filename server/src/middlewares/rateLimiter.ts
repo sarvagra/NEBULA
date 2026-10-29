@@ -89,29 +89,6 @@ export const authRateLimiter = createRateLimiter({
   message: 'Too many authentication attempts. Please try again later.',
 });
 
-// Scoped to the target email: a user who mistypes then corrects, or re-sends
-// because a code never arrived, must not be blocked by unrelated traffic from the
-// same network. Five codes per 15 minutes per address is still tight enough to
-// stop enumeration.
-export const otpRequestRateLimiter = createRateLimiter({
-  prefix: 'otp-req',
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 5,
-  message: 'Too many codes were requested for this address. Please wait a few minutes before requesting another one.',
-  keyResolver: (req) => {
-    const email = typeof req.body?.email === 'string' ? req.body.email : '';
-    const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
-    return email || phone || undefined;
-  },
-});
-
-export const otpVerifyRateLimiter = createRateLimiter({
-  prefix: 'otp-verify',
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 5,
-  message: 'Too many OTP verification attempts. Please wait before trying again.',
-});
-
 export const refreshTokenRateLimiter = createRateLimiter({
   prefix: 'refresh-token',
   windowMs: 15 * 60 * 1000,

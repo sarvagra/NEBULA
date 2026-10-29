@@ -5,6 +5,17 @@ enum class MessageRole {
     ASSISTANT
 }
 
+/**
+ * Delivery state of an outgoing message. Only [SENT] means the server has persisted
+ * it; [SENDING] and [FAILED] are local placeholders that must never be presented as
+ * delivered.
+ */
+enum class MessageSendState {
+    SENDING,
+    SENT,
+    FAILED
+}
+
 enum class AssistantStatus {
     IDLE,
     THINKING,
@@ -49,4 +60,7 @@ data class ChatMessage(
     val readAt: Long? = null,
     val isSpoiler: Boolean = false,
     val mediaMimeType: String? = null,
+    val sendState: MessageSendState = MessageSendState.SENT,
+    /** Stable idempotency key so a retry cannot create a second copy on the server. */
+    val clientKey: String? = null,
 )

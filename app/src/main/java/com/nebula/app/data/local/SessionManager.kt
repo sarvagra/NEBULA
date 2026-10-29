@@ -2,6 +2,7 @@ package com.nebula.app.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.nebula.app.BuildConfig
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
 import com.nebula.app.domain.model.NebulaConversation
@@ -17,6 +18,18 @@ import com.nebula.app.domain.model.SharedMediaItem
 import com.nebula.app.domain.model.UserProfile
 import org.json.JSONArray
 import org.json.JSONObject
+
+/** A message that has not yet been confirmed as persisted by the server. */
+data class PendingOutgoingMessage(
+    val conversationId: String,
+    val clientKey: String,
+    val content: String,
+    val mediaUrl: String?,
+    val messageType: String,
+    val isSpoiler: Boolean,
+    val mediaMimeType: String?,
+    val timestamp: Long
+)
 
 /**
  * SessionManager:
@@ -34,6 +47,17 @@ class SessionManager(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "nebula_session_prefs"
+        private const val DEFAULT_BACKEND_URL = "https://nebula-73kb.onrender.com/api/v1"
+        /** Hosts that identify a developer machine rather than a public Nebula origin. */
+        private val LOCAL_BACKEND_HINTS = listOf(
+            "localhost",
+            "127.0.0.1",
+            "10.0.2.2",
+            "192.168.",
+            "172.",
+            ":5001",
+            "trycloudflare.com"
+        )
         private const val KEY_AUTH_TOKEN = "key_auth_token"
         private const val KEY_REFRESH_TOKEN = "key_refresh_token"
         private const val KEY_USER_PROFILE_JSON = "key_user_profile_json"
@@ -42,6 +66,7 @@ class SessionManager(context: Context) {
         private const val KEY_CACHED_ROOMS_JSON = "key_cached_rooms_json"
         private const val KEY_CACHED_CONVERSATIONS_JSON = "key_cached_conversations_json"
         private const val KEY_CACHED_FRIENDS_JSON = "key_cached_friends_json"
+        private const val KEY_PENDING_MESSAGES_JSON = "key_pending_messages_json"
         private const val KEY_CACHED_ANALYTICS_JSON = "key_cached_analytics_json"
         private const val KEY_CACHED_SETTINGS_JSON = "key_cached_settings_json"
         private const val KEY_DEVICE_ID = "key_device_id"
@@ -58,18 +83,29 @@ class SessionManager(context: Context) {
     }
 
     fun getBackendUrl(): String {
-        val saved = prefs.getString(KEY_BACKEND_URL, null)
-        if (!saved.isNullOrBlank() &&
-            saved.startsWith("https://") &&
-            !saved.contains("trycloudflare.com") &&
-            !saved.contains("localhost") &&
-            !saved.contains("10.0.2.2") &&
-            !saved.contains("192.168.") &&
-            !saved.contains("172.") &&
-            !saved.contains(":5001")
-        ) return saved
+        val saved = prefs.getString(KEY_BACKEND_URL, null)?.takeIf { it.isNotBlank() }
+        if (saved != null && isAcceptableBackendUrl(saved)) return saved
 
-        return "https://nebula-73kb.onrender.com/api/v1"
+        return DEFAULT_BACKEND_URL
+    }
+
+    /**
+     * A stored server address is only honoured when it is a real origin for this build.
+     *
+     * Release builds must never be redirected off the verified HTTPS production host by a
+     * persisted value, so only https origins outside the local/development ranges are used.
+     * Debug builds are how the app is exercised against a developer machine, so they also
+     * accept plain-http loopback and LAN addresses (10.0.2.2 is the emulator's host alias).
+     *
+     * Previously every local address was rejected here while the settings dialog still
+     * appeared to save it, which made the control silently revert to production.
+     */
+    private fun isAcceptableBackendUrl(url: String): Boolean {
+        val isLocalHost = LOCAL_BACKEND_HINTS.any { url.contains(it) }
+        if (BuildConfig.DEBUG) {
+            return if (url.startsWith("https://")) true else url.startsWith("http://") && isLocalHost
+        }
+        return url.startsWith("https://") && !isLocalHost
     }
 
     fun saveBackendUrl(url: String) {
@@ -554,11 +590,69 @@ class SessionManager(context: Context) {
         return prefs.getString(KEY_SELECTED_THEME_ID, null)
     }
 
+    /**
+     * Messages that were typed but never confirmed by the server. They are kept per
+     * account so a restart can offer them back instead of losing what was written.
+     */
+    fun savePendingMessages(messages: List<PendingOutgoingMessage>) {
+        try {
+            if (messages.isEmpty()) {
+                prefs.edit().remove(KEY_PENDING_MESSAGES_JSON).apply()
+                return
+            }
+            val array = JSONArray()
+            for (m in messages) {
+                array.put(JSONObject().apply {
+                    put("conversationId", m.conversationId)
+                    put("clientKey", m.clientKey)
+                    put("content", m.content)
+                    put("mediaUrl", m.mediaUrl ?: "")
+                    put("messageType", m.messageType)
+                    put("isSpoiler", m.isSpoiler)
+                    put("mediaMimeType", m.mediaMimeType ?: "")
+                    put("timestamp", m.timestamp)
+                })
+            }
+            prefs.edit().putString(KEY_PENDING_MESSAGES_JSON, array.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun getPendingMessages(): List<PendingOutgoingMessage> {
+        val raw = prefs.getString(KEY_PENDING_MESSAGES_JSON, null) ?: return emptyList()
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val conversationId = obj.optString("conversationId")
+                    val clientKey = obj.optString("clientKey")
+                    if (conversationId.isBlank() || clientKey.isBlank()) continue
+                    add(
+                        PendingOutgoingMessage(
+                            conversationId = conversationId,
+                            clientKey = clientKey,
+                            content = obj.optString("content"),
+                            mediaUrl = obj.optString("mediaUrl").ifBlank { null },
+                            messageType = obj.optString("messageType", "text"),
+                            isSpoiler = obj.optBoolean("isSpoiler", false),
+                            mediaMimeType = obj.optString("mediaMimeType").ifBlank { null },
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     fun clearSession() {
         prefs.edit()
             .remove(KEY_AUTH_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
             .remove(KEY_USER_PROFILE_JSON)
+            .remove(KEY_PENDING_MESSAGES_JSON)
+            .remove(KEY_CACHED_CONVERSATIONS_JSON)
             .putBoolean(KEY_IS_LOGGED_IN, false)
             .apply()
     }

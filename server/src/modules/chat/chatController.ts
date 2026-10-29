@@ -14,6 +14,20 @@ import { validateImageResolution } from '../../utils/imageSecurity';
 const UNSEND_WINDOW_MS = 2 * 60 * 1000;
 
 /**
+ * Incremental history reads. A client that lost its realtime connection asks for
+ * everything after the last message it already holds instead of pulling a full page
+ * and hoping nothing fell between two pages. An unparseable cursor is rejected rather
+ * than silently treated as "everything", which would hide a client bug behind a
+ * correct-looking response.
+ */
+function parseSinceCursor(raw: unknown): { since: Date | null; invalid: boolean } {
+  if (typeof raw !== 'string' || raw.trim() === '') return { since: null, invalid: false };
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return { since: null, invalid: true };
+  return { since: parsed, invalid: false };
+}
+
+/**
  * Retention for a two-party conversation. A thread is only as long-lived as the
  * shorter of the two participants' entitlement windows, so a Basic participant
  * never inherits Premium history depth (and vice versa).
@@ -44,6 +58,11 @@ export async function getRoomMessages(req: Request, res: Response): Promise<void
   try {
     const { roomId } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 50);
+    const { since, invalid } = parseSinceCursor(req.query.since);
+    if (invalid) {
+      res.status(400).json({ success: false, error: 'Invalid `since` cursor: expected an ISO-8601 timestamp' });
+      return;
+    }
 
     const room = await RoomModel.findById(roomId);
     if (!room) {
@@ -60,15 +79,21 @@ export async function getRoomMessages(req: Request, res: Response): Promise<void
       }
     }
 
-    const messages = await MessageModel.find({ roomId })
-      .sort({ createdAt: -1 })
+    const messages = await MessageModel.find(since ? { roomId, createdAt: { $gte: since } } : { roomId })
+      .sort({ createdAt: since ? 1 : -1 })
       .limit(limit);
-    const senders = await UserModel.find({ _id: { $in: [...new Set(messages.map((message) => message.senderId))] } }).select('_id avatarUrl');
+    const ordered = since ? messages : messages.reverse();
+    const senders = await UserModel.find({ _id: { $in: [...new Set(ordered.map((message) => message.senderId))] } }).select('_id avatarUrl');
     const avatarByUserId = new Map(senders.map((sender) => [sender._id.toString(), sender.avatarUrl]));
 
     res.json({
       success: true,
-      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
+      data: ordered.map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
+      meta: {
+        since: since ? since.toISOString() : null,
+        serverTime: new Date().toISOString(),
+        count: ordered.length,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve messages' });
@@ -84,6 +109,11 @@ export async function getConversationMessages(req: Request, res: Response): Prom
 
     const { conversationId } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 50);
+    const { since, invalid } = parseSinceCursor(req.query.since);
+    if (invalid) {
+      res.status(400).json({ success: false, error: 'Invalid `since` cursor: expected an ISO-8601 timestamp' });
+      return;
+    }
 
     const friendship = await FriendshipModel.findOne({
       $or: [
@@ -114,22 +144,32 @@ export async function getConversationMessages(req: Request, res: Response): Prom
     // History outside the window is no longer returned to either participant.
     const { cutoff, retention } = await retentionContext(req.user.id, conversationId);
 
+    // A backfill cursor never reaches behind the retention floor for this thread.
+    const historyFloor = since && since > cutoff ? since : cutoff;
     const messages = await MessageModel.find({
       $or: [
         { senderId: req.user.id, conversationId },
         { senderId: conversationId, conversationId: req.user.id },
       ],
-      createdAt: { $gte: cutoff },
+      createdAt: { $gte: historyFloor },
     })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: since ? 1 : -1 })
       .limit(limit);
+    const ordered = since ? messages : messages.reverse();
 
-    const senders = await UserModel.find({ _id: { $in: [...new Set(messages.map((message) => message.senderId))] } }).select('_id avatarUrl');
+    const senders = await UserModel.find({ _id: { $in: [...new Set(ordered.map((message) => message.senderId))] } }).select('_id avatarUrl');
     const avatarByUserId = new Map(senders.map((sender) => [sender._id.toString(), sender.avatarUrl]));
     res.json({
       success: true,
-      data: messages.reverse().map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
-      meta: { retentionDays: retention.dmRetentionDays, retentionLabel: retention.dmRetentionLabel, historyFrom: cutoff.toISOString() },
+      data: ordered.map((message) => ({ ...toMessageDTO(message), senderAvatarUrl: avatarByUserId.get(message.senderId) || message.senderAvatarUrl })),
+      meta: {
+        retentionDays: retention.dmRetentionDays,
+        retentionLabel: retention.dmRetentionLabel,
+        historyFrom: cutoff.toISOString(),
+        since: since ? since.toISOString() : null,
+        serverTime: new Date().toISOString(),
+        count: ordered.length,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve direct conversation' });

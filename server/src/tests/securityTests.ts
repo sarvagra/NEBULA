@@ -11,7 +11,7 @@ import { FriendshipModel } from '../models/Friendship';
 import { NotificationModel } from '../models/Notification';
 import { MessageModel } from '../models/Message';
 import { ProfileAssetModel } from '../models/ProfileAsset';
-import { issueOtp, consumeOtp, clearOtp } from '../modules/auth/authController';
+import { issueOtp, consumeOtp, clearOtp, applyLoginDeletionGrace } from '../modules/auth/authController';
 import { purgeDueAccountDeletions } from '../modules/users/accountLifecycleController';
 import { runReengagementSweep } from '../services/reengagementService';
 import { AuthService } from '../services/authService';
@@ -139,10 +139,10 @@ async function runSecurityTests() {
 
   // 4. MALFORMED MONGODB / NOSQL INJECTION -> 400
   await assertTest('NoSQL operator injection ($gt) blocked with 400', async () => {
-    const res = await makeRequest('/api/v1/auth/otp/request', {
+    const res = await makeRequest('/api/v1/auth/google', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: { $gt: '' } }),
+      body: JSON.stringify({ idToken: { $gt: '' } }),
     });
     if (res.status !== 400) throw new Error(`Expected 400, got ${res.status}`);
   });
@@ -1214,18 +1214,16 @@ async function runSecurityTests() {
       }
 
       // Signing in during the grace period suspends the pending deletion.
-      const login = await makeRequest('/api/v1/auth/dev-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: lifecycleEmail, username: 'test_lifecycle' }),
-      });
-      if (login.status !== 200) throw new Error(`Grace-period login failed with ${login.status}`);
-      const loginJson = (await login.json()) as any;
-      const wasScheduledFor = loginJson.data?.deletionWasScheduledFor;
-      if (!wasScheduledFor) {
+      // Firebase is the only sign-in path, so the shared post-login hook that
+      // every successful Google sign-in runs is exercised directly here rather
+      // than through a test-only HTTP route that no longer exists.
+      const lifecycleUserDoc = await UserModel.findById(lifecycleUserId);
+      if (!lifecycleUserDoc) throw new Error('Lifecycle user disappeared before the grace-period check');
+      const grace = await applyLoginDeletionGrace(lifecycleUserDoc);
+      if (!grace.deletionSuspended || !grace.deletionScheduledFor) {
         throw new Error('Login during the grace period did not report the scheduled deletion it cancelled');
       }
-      if (Math.abs(new Date(wasScheduledFor).getTime() - scheduled.deletionScheduledFor.getTime()) > 1000) {
+      if (Math.abs(grace.deletionScheduledFor.getTime() - scheduled.deletionScheduledFor.getTime()) > 1000) {
         throw new Error('Login reported a different scheduled deletion time than the one stored');
       }
       const suspended = await UserModel.findById(lifecycleUserId).select('deletionScheduledFor deletionSuspendedAt deletionEvents');
@@ -1336,32 +1334,47 @@ async function runSecurityTests() {
     }
   });
 
-  await assertTest('Excessive OTP requests trigger rate limiting (429)', async () => {
-    let got429 = false;
-    for (let i = 0; i < 6; i++) {
-      const res = await makeRequest('/api/v1/auth/otp/request', {
+  await assertTest('Prohibited password, OTP and developer login routes do not exist', async () => {
+    const attempts: Array<[string, Record<string, unknown>]> = [
+      ['/api/v1/auth/otp/request', { email: 'someone@example.com' }],
+      ['/api/v1/auth/otp/verify', { email: 'someone@example.com', otp: '123456' }],
+      ['/api/v1/auth/dev-login', { email: 'dev@example.com', username: 'devuser' }],
+    ];
+    for (const [path, body] of attempts) {
+      const res = await makeRequest(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: '+12025550199' }),
+        body: JSON.stringify(body),
+      });
+      if (res.status !== 404) throw new Error(`${path} should not be mounted, got ${res.status}`);
+    }
+  });
+
+  await assertTest('Google sign-in rejects an unverifiable Firebase token', async () => {
+    const res = await makeRequest('/api/v1/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'not-a-real-firebase-id-token-abcdef' }),
+    });
+    if (res.status !== 401) throw new Error(`Expected 401 for an unverifiable token, got ${res.status}`);
+    const json = (await res.json()) as any;
+    if (json.success !== false) throw new Error('Failed Google sign-in must not report success');
+  });
+
+  await assertTest('Repeated Google sign-in attempts are rate limited (429)', async () => {
+    let got429 = false;
+    for (let i = 0; i < 20; i++) {
+      const res = await makeRequest('/api/v1/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: `rate-limited-token-${i}-abcdefghij` }),
       });
       if (res.status === 429) {
         got429 = true;
         break;
       }
     }
-    if (!got429) throw new Error('Expected 429 after repeated OTP requests');
-  });
-
-  await assertTest('OTP request never exposes the verification code', async () => {
-    const res = await makeRequest('/api/v1/auth/otp/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: '+12025550200' }),
-    });
-    const json = (await res.json()) as any;
-    if (Object.prototype.hasOwnProperty.call(json, 'debugOtp')) {
-      throw new Error('OTP response exposes debugOtp');
-    }
+    if (!got429) throw new Error('Expected 429 after repeated authentication attempts');
   });
 
   await assertTest('JWT secrets are explicitly configured', async () => {
@@ -1444,6 +1457,45 @@ async function runSecurityTests() {
       if (!session3.token) throw new Error('Device 3 login failed after revoking device 1 slot');
     } finally {
       await UserModel.deleteOne({ _id: multiDeviceUser._id });
+    }
+  });
+
+  await assertTest('Account locked out by stale sessions can recover by retiring its least recently used device', async () => {
+    const strandedUser = await UserModel.create({
+      username: 'test_stranded_device',
+      displayName: 'Stranded Device User',
+      tier: 'free',
+      status: 'online',
+    });
+
+    try {
+      // Two sessions from installs the user no longer has, the older one already idle.
+      await AuthService.issueSessionTokens(strandedUser, 'Lost Phone (Android 12)', '10.0.0.1', 'device_lost');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await AuthService.issueSessionTokens(strandedUser, 'Old Tablet (Android 11)', '10.0.0.2', 'device_tablet');
+      const before = await AuthService.getActiveSessions(strandedUser._id.toString());
+      const idleSession = before.find((session) => session.deviceId === 'device_lost');
+      if (!idleSession) throw new Error('Stale session fixture was not created');
+
+      // The default path still refuses, so eviction can never happen implicitly.
+      let refused = false;
+      try {
+        await AuthService.issueSessionTokens(strandedUser, 'New Phone (Android 16)', '10.0.0.3', 'device_new');
+      } catch (err: any) {
+        refused = err.code === 'DEVICE_LIMIT_REACHED';
+      }
+      if (!refused) throw new Error('A full account was signed in without an explicit opt-in to replace a device');
+
+      // The recovery path retires the least recently used session and signs in.
+      const recovered = await AuthService.issueSessionTokens(strandedUser, 'New Phone (Android 16)', '10.0.0.3', 'device_new', true);
+      if (!recovered.token || !recovered.refreshToken) throw new Error('Recovery sign-in did not issue a session');
+      const after = await AuthService.getActiveSessions(strandedUser._id.toString());
+      if (after.length !== 2) throw new Error(`Expected 2 active sessions after recovery, found ${after.length}`);
+      if (after.some((session) => session.deviceId === 'device_lost')) throw new Error('Recovery did not retire the least recently used session');
+      if (!after.some((session) => session.deviceId === 'device_new')) throw new Error('Recovered device is missing from the active sessions');
+      if (!after.some((session) => session.deviceId === 'device_tablet')) throw new Error('Recovery evicted more than one device');
+    } finally {
+      await UserModel.deleteOne({ _id: strandedUser._id });
     }
   });
 

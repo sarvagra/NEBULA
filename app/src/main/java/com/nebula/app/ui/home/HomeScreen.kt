@@ -32,7 +32,17 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import com.nebula.app.ui.components.PABottomSheet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +94,11 @@ fun HomeScreen(
     val theme = Theme.current
     val context = LocalContext.current
 
+    // "New chat" used to be a button with an empty callback. It now opens a
+    // picker over the people you are connected to, and starting a conversation
+    // goes through the same path as messaging from a profile or a room.
+    var showNewChatSheet by remember { mutableStateOf(false) }
+
     // Quick Toast feedback
     LaunchedEffect(uiState.quickToastMessage) {
         uiState.quickToastMessage?.let { msg ->
@@ -93,7 +108,9 @@ fun HomeScreen(
     }
 
     // Modern Android Back Button Handling
-    if (uiState.fullScreenDestination != null) {
+    if (showNewChatSheet) {
+        BackHandler { showNewChatSheet = false }
+    } else if (uiState.fullScreenDestination != null) {
         BackHandler { viewModel.onNavigateBack() }
     } else if (uiState.activeModalSheet != null) {
         BackHandler { viewModel.onDismissModalSheet() }
@@ -271,6 +288,7 @@ fun HomeScreen(
                 onSendAttachment = { text, url, type, spoiler, mime -> viewModel.onSendDirectAttachment(text, url, type, spoiler, mime) },
                 onEditMessage = { id, text -> viewModel.onEditDirectMessage(id, text) },
                 onUnsendMessage = { id -> viewModel.onUnsendDirectMessage(id) },
+                onRetryMessage = { clientKey -> viewModel.onRetryDirectMessage(clientKey) },
                 onOpenProfile = { uiState.activeSocialConversation?.partnerUser?.let { viewModel.onOpenFriendProfile(it) } },
                 onInviteToRoom = {
                     val partner = uiState.activeSocialConversation?.partnerUser
@@ -440,7 +458,8 @@ fun HomeScreen(
                             ) {
                                 NebulaChatsScreen(
                                     conversations = uiState.socialConversations,
-                                    onSelectConversation = { viewModel.onSelectSocialConversation(it) }
+                                    onSelectConversation = { viewModel.onSelectSocialConversation(it) },
+                                    onStartNewChat = { showNewChatSheet = true }
                                 )
                             }
                         }
@@ -472,6 +491,9 @@ fun HomeScreen(
                                     },
                                     onAddSuggested = { user ->
                                         viewModel.onAddSuggestedFriend(user)
+                                    },
+                                    onWithdrawRequest = { user ->
+                                        viewModel.onCancelFriendRequest(user)
                                     }
                                 )
                             }
@@ -591,6 +613,133 @@ fun HomeScreen(
             onLogoutClick = { viewModel.onLogout() },
             onDismissRequest = { viewModel.onDismissSidebar() }
         )
+
+        // 3b. START A NEW CONVERSATION
+        PABottomSheet(
+            isVisible = showNewChatSheet,
+            onDismissRequest = { showNewChatSheet = false },
+            title = "New message"
+        ) {
+            var query by remember { mutableStateOf("") }
+            val matches = remember(query, uiState.friends) {
+                if (query.isBlank()) uiState.friends
+                else uiState.friends.filter {
+                    it.displayName.contains(query, ignoreCase = true) ||
+                        it.username.contains(query, ignoreCase = true)
+                }
+            }
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search connections") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = theme.colors.primaryAccent,
+                    unfocusedBorderColor = theme.colors.surfaceBorder,
+                    focusedTextColor = theme.colors.textPrimary,
+                    unfocusedTextColor = theme.colors.textPrimary
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            )
+
+            if (matches.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (uiState.friends.isEmpty()) {
+                            "No connections yet. Add someone from the Friends tab to start a conversation."
+                        } else {
+                            "Nobody matches \"$query\"."
+                        },
+                        style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary),
+                        textAlign = TextAlign.Center
+                    )
+                    if (uiState.friends.isEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Find people",
+                            style = theme.typography.bodyMedium.copy(
+                                color = theme.colors.primaryAccent,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    showNewChatSheet = false
+                                    viewModel.onTabSelected(NebulaTab.FRIENDS)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    matches.forEach { friend ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showNewChatSheet = false
+                                    viewModel.onMessageFriend(friend)
+                                }
+                                .padding(vertical = 10.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.colors.primaryAccent.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = friend.displayName.take(1).uppercase(),
+                                    style = theme.typography.bodyMedium.copy(
+                                        color = theme.colors.primaryAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                            Spacer(modifier = Modifier.size(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = friend.displayName,
+                                    style = theme.typography.bodyMedium.copy(
+                                        color = theme.colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = friend.username,
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.textTertiary,
+                                        fontSize = 12.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 4. MODAL SHEETS & DIALOGS
         when (val sheet = uiState.activeModalSheet) {

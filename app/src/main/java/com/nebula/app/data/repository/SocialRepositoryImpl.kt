@@ -2,6 +2,7 @@ package com.nebula.app.data.repository
 
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
+import com.nebula.app.domain.model.MessageSendState
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.domain.model.NebulaFriendRequest
 import com.nebula.app.domain.model.NebulaUser
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
+import com.nebula.app.data.local.PendingOutgoingMessage
 import com.nebula.app.data.local.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -88,10 +90,15 @@ class SocialRepositoryImpl(
                     }
                 } else target.messages
 
+                // Carry over anything still waiting to be persisted, so re-opening a
+                // thread never loses an unsent message.
+                val unsent = readTarget.messages.filter { it.sendState != MessageSendState.SENT }
+                val mergedMessages = messages + unsent.filter { local -> messages.none { it.clientKey != null && it.clientKey == local.clientKey } }
+
                 val updatedTarget = readTarget.copy(
                     title = freshPartner?.displayName ?: target.title,
                     partnerUser = freshPartner ?: target.partnerUser,
-                    messages = messages
+                    messages = mergedMessages
                 )
 
                 if (_activeConversation.value?.id == id) {
@@ -102,30 +109,47 @@ class SocialRepositoryImpl(
                 }
                 sessionManager?.saveCachedConversations(_conversations.value)
 
+                // Restore anything typed before the last process exit, then try to send it.
+                hydratePendingQueue()
+                flushUnsent(id)
+
                 apiClient.markConversationRead(id)
             }
         }
     }
 
     override suspend fun refreshActiveConversation() {
-        val current = _activeConversation.value ?: return
+        var current = _activeConversation.value ?: return
         val history = apiClient.getConversationMessages(current.id)
         if (history !is ApiResponse.Success) return
+        // The server just answered, so connectivity is back: retry anything still
+        // waiting instead of leaving it for a manual tap. It runs on the repository's
+        // own scope because this call arrives from a screen-scoped job that is cancelled
+        // whenever the thread screen is re-entered, which would abort the send mid-flight.
+        val conversationId = current.id
+        backgroundScope.launch { flushUnsent(conversationId) }
+        current = _activeConversation.value ?: return
         val fresh = buildList {
             for (index in 0 until history.data.length()) {
                 val item = history.data.optJSONObject(index) ?: continue
                 add(messageFromJson(item, current.id))
             }
         }
+        // Messages that never reached the server are not in the history yet. Keep them
+        // at the end so a background sync cannot silently discard an unsent message
+        // (and the user's text with it).
+        val unsent = current.messages.filter { it.sendState != MessageSendState.SENT }
+        val merged = fresh + unsent.filter { local -> fresh.none { it.clientKey != null && it.clientKey == local.clientKey } }
         // Only swap the list in when something actually changed, so the ticking
         // refresh does not fight the user's scroll or re-trigger recomposition.
-        val unchanged = fresh.size == current.messages.size &&
-            fresh.zip(current.messages).all { (a, b) ->
+        val unchanged = merged.size == current.messages.size &&
+            merged.zip(current.messages).all { (a, b) ->
                 a.id == b.id && a.readAt == b.readAt && a.editedAt == b.editedAt &&
-                    a.deletedAt == b.deletedAt && a.content == b.content && a.mediaUrl == b.mediaUrl
+                    a.deletedAt == b.deletedAt && a.content == b.content && a.mediaUrl == b.mediaUrl &&
+                    a.sendState == b.sendState
             }
         if (unchanged) return
-        val updated = current.copy(messages = fresh)
+        val updated = current.copy(messages = merged)
         _activeConversation.value = updated
         _conversations.value = _conversations.value.map { if (it.id == current.id) updated else it }
     }
@@ -134,24 +158,215 @@ class SocialRepositoryImpl(
         _activeConversation.value = null
     }
 
+    /** Applies a change to a conversation in both the inbox list and the open thread. */
+    private fun updateConversation(conversationId: String, transform: (NebulaConversation) -> NebulaConversation) {
+        _conversations.value = _conversations.value.map { if (it.id == conversationId) transform(it) else it }
+        if (_activeConversation.value?.id == conversationId) {
+            _activeConversation.value = _activeConversation.value?.let(transform)
+        }
+    }
+
+    /**
+     * Sets the delivery state of a locally tracked message. A non-null [replacement]
+     * swaps in the server's own record; otherwise the placeholder is updated in place,
+     * so a failed send never loses what the user typed.
+     */
+    private fun markLocalMessage(
+        conversationId: String,
+        clientKey: String,
+        state: MessageSendState,
+        replacement: ChatMessage? = null
+    ) {
+        updateConversation(conversationId) { conv ->
+            val messages = conv.messages.map { message ->
+                when {
+                    message.clientKey != clientKey -> message
+                    replacement != null -> replacement.copy(clientKey = clientKey, sendState = state)
+                    else -> message.copy(sendState = state)
+                }
+            }
+            val last = messages.lastOrNull()
+            conv.copy(
+                messages = messages,
+                lastMessageText = when {
+                    last == null -> conv.lastMessageText
+                    last.role == MessageRole.USER -> if (last.sendState == MessageSendState.FAILED) conv.lastMessageText else "you: ${last.content}"
+                    else -> last.content
+                },
+                lastMessageTime = last?.let { compactTimeLabel(it.timestamp) } ?: conv.lastMessageTime
+            )
+        }
+    }
+
+    private data class SendOutcome(val ok: Boolean, val permanentFailure: Boolean)
+
+    /** Keys the server rejected outright; auto-retry must not hammer them forever. */
+    private val permanentlyFailedKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** Convariant shortcut: only the message id and state matter to the caller. */
+    private fun SendOutcome.asBoolean() = ok
+
+    /** Mirrors the unsent messages to disk so they survive process death. */
+    private fun persistPendingQueue() {
+        val manager = sessionManager ?: return
+        val pending = _conversations.value.flatMap { conv ->
+            conv.messages.filter { it.sendState != MessageSendState.SENT && it.clientKey != null }.map { message ->
+                PendingOutgoingMessage(
+                    conversationId = conv.id,
+                    clientKey = message.clientKey!!,
+                    content = message.content,
+                    mediaUrl = message.mediaUrl,
+                    messageType = message.messageType,
+                    isSpoiler = message.isSpoiler,
+                    mediaMimeType = message.mediaMimeType,
+                    timestamp = message.timestamp
+                )
+            }
+        }
+        manager.savePendingMessages(pending)
+    }
+
+    /** Restores unsent messages saved before the last process exit. */
+    private fun hydratePendingQueue() {
+        val manager = sessionManager ?: return
+        val pending = manager.getPendingMessages()
+        if (pending.isEmpty()) return
+        for (item in pending) {
+            updateConversation(item.conversationId) { conv ->
+                if (conv.messages.any { it.clientKey == item.clientKey }) return@updateConversation conv
+                conv.copy(
+                    messages = conv.messages + ChatMessage(
+                        id = "pending_${item.clientKey}",
+                        role = MessageRole.USER,
+                        content = item.content,
+                        timestamp = item.timestamp,
+                        clientKey = item.clientKey,
+                        sendState = MessageSendState.FAILED,
+                        mediaUrl = item.mediaUrl,
+                        messageType = item.messageType,
+                        isSpoiler = item.isSpoiler,
+                        mediaMimeType = item.mediaMimeType
+                    )
+                )
+            }
+        }
+    }
+
+    private val retryMutex = kotlinx.coroutines.sync.Mutex()
+
+    private companion object {
+        /** An in-flight attempt older than this is presumed dead and retried. */
+        const val STALE_SENDING_MS = 20_000L
+    }
+
+    /**
+     * Retries unsent messages once the server has proven reachable again. A 4xx answer
+     * is a permanent rejection, so it is not retried in a loop.
+     */
+    private suspend fun flushUnsent(onlyConversationId: String? = null) {
+        if (!retryMutex.tryLock()) return
+        try {
+            val targets = _conversations.value.filter { onlyConversationId == null || it.id == onlyConversationId }
+            for (conv in targets) {
+                // A message left in SENDING by a cancelled or interrupted attempt is just
+                // as unsent as a FAILED one; without this it would stay that way forever.
+                val staleBefore = System.currentTimeMillis() - STALE_SENDING_MS
+                val unsent = conv.messages.filter {
+                    it.clientKey != null && it.clientKey !in permanentlyFailedKeys && (
+                        it.sendState == MessageSendState.FAILED ||
+                            (it.sendState == MessageSendState.SENDING && it.timestamp < staleBefore)
+                        )
+                }
+                for (message in unsent) {
+                    val key = message.clientKey ?: continue
+                    markLocalMessage(conv.id, key, MessageSendState.SENDING)
+                    val outcome = try {
+                        dispatchMessage(
+                            conv.id, message.content, message.mediaUrl, message.messageType,
+                            message.isSpoiler, message.mediaMimeType, key, insertPlaceholder = false
+                        )
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // Never convert cancellation into a failed send; the stale-SENDING
+                        // guard picks it up again on the next pass.
+                        throw e
+                    } catch (e: Exception) {
+                        markLocalMessage(conv.id, key, MessageSendState.FAILED)
+                        break
+                    }
+                    if (outcome.permanentFailure) permanentlyFailedKeys.add(key)
+                    if (!outcome.ok) break
+                }
+            }
+        } finally {
+            retryMutex.unlock()
+        }
+    }
+
+    private suspend fun dispatchMessage(
+        conversationId: String,
+        content: String,
+        mediaUrl: String?,
+        messageType: String,
+        isSpoiler: Boolean,
+        mediaMimeType: String?,
+        clientKey: String,
+        insertPlaceholder: Boolean
+    ): SendOutcome {
+        if (insertPlaceholder) {
+            val placeholder = ChatMessage(
+                id = "pending_$clientKey",
+                role = MessageRole.USER,
+                content = content.trim(),
+                clientKey = clientKey,
+                sendState = MessageSendState.SENDING,
+                mediaUrl = mediaUrl,
+                messageType = messageType,
+                isSpoiler = isSpoiler,
+                mediaMimeType = mediaMimeType
+            )
+            updateConversation(conversationId) { conv ->
+                conv.copy(messages = conv.messages.filterNot { it.clientKey == clientKey } + placeholder)
+            }
+        }
+        val response = apiClient.sendDirectMessage(
+            conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType, clientKey
+        )
+        if (response !is ApiResponse.Success) {
+            // Persistence failed: the bubble stays visible but marked unsent and retryable.
+            markLocalMessage(conversationId, clientKey, MessageSendState.FAILED)
+            persistPendingQueue()
+            val status = (response as? ApiResponse.Error)?.statusCode ?: 0
+            return SendOutcome(ok = false, permanentFailure = status in 400..499 && status != 408 && status != 429)
+        }
+        val saved = response.data.optJSONObject("data")?.let { messageFromJson(it, conversationId) }
+        markLocalMessage(conversationId, clientKey, MessageSendState.SENT, saved)
+        persistPendingQueue()
+        return SendOutcome(ok = true, permanentFailure = false)
+    }
+
     override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String, isSpoiler: Boolean, mediaMimeType: String?): Boolean {
         if (content.isBlank() && mediaUrl.isNullOrBlank()) return false
-        val response = apiClient.sendDirectMessage(conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType)
-        if (response !is ApiResponse.Success) return false
-        val currentConv = _conversations.value.firstOrNull { it.id == conversationId } ?: return false
-        val newMsg = response.data.optJSONObject("data")?.let { messageFromJson(it, conversationId) } ?: ChatMessage(id = "msg_${UUID.randomUUID().toString().take(6)}", role = MessageRole.USER, content = content.trim(), timeLabel = "Just now", mediaUrl = mediaUrl, messageType = messageType)
-        val updatedConv = currentConv.copy(
-            lastMessageText = "you: ${content.trim()}",
-            lastMessageTime = "Just now",
-            messages = currentConv.messages + newMsg
-        )
-        _conversations.value = _conversations.value.map {
-            if (it.id == conversationId) updatedConv else it
-        }
-        if (_activeConversation.value?.id == conversationId) {
-            _activeConversation.value = updatedConv
-        }
-        return true
+        return dispatchMessage(
+            conversationId, content, mediaUrl, messageType, isSpoiler, mediaMimeType,
+            clientKey = UUID.randomUUID().toString(),
+            insertPlaceholder = true
+        ).asBoolean()
+    }
+
+    override suspend fun retryMessage(clientKey: String): Boolean {
+        val conversation = _conversations.value.firstOrNull { conv -> conv.messages.any { it.clientKey == clientKey } }
+            ?: return false
+        val message = conversation.messages.firstOrNull { it.clientKey == clientKey } ?: return false
+        if (message.sendState == MessageSendState.SENT) return true
+        // An explicit tap always gets a fresh attempt, even after a permanent rejection.
+        permanentlyFailedKeys.remove(clientKey)
+        markLocalMessage(conversation.id, clientKey, MessageSendState.SENDING)
+        // Same key as the original attempt: the server dedupes if the first request
+        // actually landed but its response was lost.
+        return dispatchMessage(
+            conversation.id, message.content, message.mediaUrl, message.messageType,
+            message.isSpoiler, message.mediaMimeType, clientKey, insertPlaceholder = false
+        ).asBoolean()
     }
 
     override suspend fun editMessage(messageId: String, content: String): Boolean = updateMessageFromResponse(apiClient.editDirectMessage(messageId, content))
@@ -169,34 +384,72 @@ class SocialRepositoryImpl(
         return true
     }
 
+    /**
+     * Applies a relationship change to every list that can render this user, so a row
+     * flips between Add / Requested / Accept the moment the server confirms it instead
+     * of waiting for a list refetch that search results never get.
+     */
+    private fun applyRelationship(userId: String, pending: Boolean, isFriend: Boolean = false) {
+        fun NebulaUser.patched(): NebulaUser = if (id != userId) this else copy(
+            // Never demote a friend: only a confirmed acceptance upgrades the flag.
+            isFriend = this.isFriend || isFriend,
+            friendRequestPending = pending,
+            friendRequestReceived = false,
+            friendRequestId = if (isFriend || !pending) null else friendRequestId
+        )
+        _searchResults.value = _searchResults.value.map { it.patched() }
+        _suggestedPeople.value = _suggestedPeople.value.map { it.patched() }
+        _friends.value = _friends.value.map { it.patched() }
+    }
+
     override suspend fun acceptFriendRequest(requestId: String): Boolean {
         if (apiClient.acceptFriendRequest(requestId) !is ApiResponse.Success) return false
         val req = _friendRequests.value.firstOrNull { it.id == requestId }
         if (req != null) {
-            _friends.value = _friends.value + req.sender
+            _friends.value = _friends.value.filterNot { it.id == req.sender.id } + req.sender.copy(
+                isFriend = true,
+                friendRequestReceived = false,
+                friendRequestPending = false,
+                friendRequestId = null
+            )
             _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
             _suggestedPeople.value = _suggestedPeople.value.filter { it.id != req.sender.id }
+            applyRelationship(req.sender.id, pending = false, isFriend = true)
         }
         return true
     }
 
     override suspend fun declineFriendRequest(requestId: String): Boolean {
         if (apiClient.declineFriendRequest(requestId) !is ApiResponse.Success) return false
+        val declined = _friendRequests.value.firstOrNull { it.id == requestId }
         _friendRequests.value = _friendRequests.value.filter { it.id != requestId }
+        if (declined != null) {
+            _searchResults.value = _searchResults.value.map { candidate ->
+                if (candidate.id == declined.sender.id) {
+                    candidate.copy(friendRequestReceived = false, friendRequestId = null)
+                } else candidate
+            }
+        }
         return true
     }
 
     override suspend fun withdrawFriendRequest(userId: String): Boolean {
         if (apiClient.withdrawFriendRequest(userId) !is ApiResponse.Success) return false
-        _suggestedPeople.value = _suggestedPeople.value.map {
-            if (it.id == userId) it.copy(friendRequestPending = false) else it
-        }
+        applyRelationship(userId, pending = false)
         return true
     }
 
     override suspend fun addFriend(user: NebulaUser): Boolean {
-        if (apiClient.sendFriendRequest(user.id) !is ApiResponse.Success) return false
-        _suggestedPeople.value = _suggestedPeople.value.filter { it.id != user.id }
+        if (apiClient.sendFriendRequest(user.id) is ApiResponse.Success) {
+            // Optimistic but server-confirmed: the request is already persisted as pending.
+            applyRelationship(user.id, pending = true)
+            return true
+        }
+        // A double tap or a request sent from another device answers 409. That is not a
+        // failure — reconcile with the server so the row shows the real relationship.
+        val actual = loadPublicProfileById(user.id) ?: return false
+        if (!actual.friendRequestPending && !actual.isFriend && !actual.friendRequestReceived) return false
+        applyRelationship(user.id, pending = actual.friendRequestPending, isFriend = actual.isFriend)
         return true
     }
 
@@ -252,6 +505,7 @@ class SocialRepositoryImpl(
                 !requestSenderIds.contains(candidate.id)
             }
         }
+        hydratePendingQueue()
         sessionManager?.saveCachedFriends(_friends.value)
         sessionManager?.saveCachedConversations(_conversations.value)
     }

@@ -17,16 +17,28 @@ class RoomSocketClient(
     private val onChatMessage: (JSONObject) -> Unit,
     private val onParticipantsChanged: () -> Unit,
     private val onSocialChanged: () -> Unit,
-    private val onRoomRemoved: (roomId: String?, reason: String?) -> Unit
+    private val onRoomRemoved: (roomId: String?, reason: String?) -> Unit,
+    /**
+     * Fired when the socket comes back after a drop. Anything broadcast while it was
+     * down was never delivered, so the room has to backfill from its own cursor.
+     */
+    private val onReconnected: () -> Unit = {}
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
+    private var hasConnectedOnce = false
     @Volatile private var hostId: String? = null
     private var heartbeat: ScheduledExecutorService? = null
     private var basePositionMs = 0L
     private var baseTimestampMs = 0L
     private var playing = false
     @Volatile private var ended = false
+    /**
+     * Playback generation as granted by the server. Every command carries it back, so
+     * a command built before a newer one cannot rewind the room; every inbound event
+     * that is older than what we already applied is discarded.
+     */
+    @Volatile private var playbackVersion = 0
     private var onEndedState: (Long, Boolean) -> Unit = { _, _ -> }
 
     fun setOnEndedStateListener(listener: (Long, Boolean) -> Unit) { onEndedState = listener }
@@ -35,6 +47,8 @@ class RoomSocketClient(
         disconnect()
         this.roomId = roomId
         this.hostId = hostId
+        this.hasConnectedOnce = false
+        this.playbackVersion = 0
         val token = tokenProvider()?.takeIf { it.isNotBlank() } ?: return
         val options = IO.Options().apply {
             auth = mapOf("token" to token)
@@ -45,6 +59,7 @@ class RoomSocketClient(
             on(Socket.EVENT_CONNECT) {
                 emit("room:join", JSONObject().put("roomId", roomId))
                 emit("room:foreground", JSONObject().put("roomId", roomId))
+                if (hasConnectedOnce) onReconnected() else hasConnectedOnce = true
             }
             on("participant:joined") { onParticipantsChanged() }
             on("participant:left") { onParticipantsChanged() }
@@ -60,8 +75,23 @@ class RoomSocketClient(
                 onRoomRemoved(payload?.optString("roomId"), payload?.optString("reason"))
                 disconnect()
             }
+            on("media:ack") { args ->
+                (args.firstOrNull() as? JSONObject)?.let { adoptVersion(it) }
+            }
+            on("media:state") { args ->
+                val state = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(state)) return@on
+                ended = state.optBoolean("ended", ended)
+                applyState(
+                    state.optLong("positionMs", 0L),
+                    state.optBoolean("isPlaying", playing),
+                    state.optLong("timestamp", System.currentTimeMillis())
+                )
+                onEndedState(state.optLong("positionMs", 0L), ended)
+            }
             on("media:sync") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(state)) return@on
                 state.optJSONObject("mediaState")?.let { mediaState ->
                     mediaState.put(
                         "playbackPositionMs",
@@ -79,6 +109,7 @@ class RoomSocketClient(
             }
             on("media:ended") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(state)) return@on
                 ended = true
                 val position = state.optLong("positionMs", 0L)
                 applyState(position, false, state.optLong("timestamp", System.currentTimeMillis()))
@@ -86,6 +117,7 @@ class RoomSocketClient(
             }
             on("media:restart") { args ->
                 val state = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(state)) return@on
                 ended = false
                 applyState(0L, true, state.optLong("timestamp", System.currentTimeMillis()))
                 onEndedState(0L, false)
@@ -94,6 +126,7 @@ class RoomSocketClient(
             on("media:pause") { args -> if (!ended) handlePlayback(args, false) }
             on("media:seek") { args ->
                 val payload = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(payload)) return@on
                 applyState(
                     payload.optLong("positionMs", payload.optLong("position", 0L) * 1000L),
                     playing,
@@ -102,6 +135,7 @@ class RoomSocketClient(
             }
             on("media:switch") { args ->
                 val payload = args.firstOrNull() as? JSONObject ?: return@on
+                if (!adoptVersion(payload)) return@on
                 val mediaState = payload.optJSONObject("mediaState") ?: return@on
                 mediaState.put(
                     "playbackPositionMs",
@@ -144,7 +178,9 @@ class RoomSocketClient(
         baseTimestampMs = System.currentTimeMillis()
         socket?.emit(
             "media:seek",
-            JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
+            JSONObject().put("roomId", roomId)
+                .put("positionMs", basePositionMs)
+                .put("version", playbackVersion)
         )
     }
 
@@ -157,7 +193,9 @@ class RoomSocketClient(
         if (stateChanged) {
             socket?.emit(
                 if (isPlaying) "media:play" else "media:pause",
-                JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
+                JSONObject().put("roomId", roomId)
+                    .put("positionMs", basePositionMs)
+                    .put("version", playbackVersion)
             )
         }
     }
@@ -168,7 +206,12 @@ class RoomSocketClient(
         playing = false
         basePositionMs = positionMs.coerceAtLeast(0L)
         baseTimestampMs = System.currentTimeMillis()
-        socket?.emit("media:end", JSONObject().put("roomId", roomId).put("positionMs", basePositionMs))
+        socket?.emit(
+            "media:end",
+            JSONObject().put("roomId", roomId)
+                .put("positionMs", basePositionMs)
+                .put("version", playbackVersion)
+        )
     }
 
     fun restartVideo() {
@@ -177,7 +220,7 @@ class RoomSocketClient(
         playing = true
         basePositionMs = 0L
         baseTimestampMs = System.currentTimeMillis()
-        socket?.emit("media:restart", JSONObject().put("roomId", roomId))
+        socket?.emit("media:restart", JSONObject().put("roomId", roomId).put("version", playbackVersion))
     }
 
     fun currentPlaybackPositionMs(): Long = (basePositionMs + if (playing) {
@@ -191,6 +234,7 @@ class RoomSocketClient(
                 .put("title", title)
                 .put("mediaUrl", mediaUrl)
                 .put("durationSeconds", durationSeconds)
+                .put("version", playbackVersion)
         )
     }
 
@@ -226,12 +270,28 @@ class RoomSocketClient(
         playing = isPlaying
         socket?.emit(
             event,
-            JSONObject().put("roomId", roomId).put("positionMs", basePositionMs)
+            JSONObject().put("roomId", roomId)
+                .put("positionMs", basePositionMs)
+                .put("version", playbackVersion)
         )
+    }
+
+    /**
+     * Returns false when the event belongs to an older playback generation than the
+     * one already applied, which is how a reordered packet is kept from rewinding the
+     * room. Events without a version (older servers) are accepted unchanged.
+     */
+    private fun adoptVersion(payload: JSONObject): Boolean {
+        val incoming = payload.optInt("version", -1)
+        if (incoming < 0) return true
+        if (incoming < playbackVersion) return false
+        playbackVersion = incoming
+        return true
     }
 
     private fun handlePlayback(args: Array<Any>, isPlaying: Boolean) {
         val payload = args.firstOrNull() as? JSONObject ?: return
+        if (!adoptVersion(payload)) return
         applyState(
             payload.optLong("positionMs", payload.optLong("position", 0L) * 1000L),
             isPlaying,
@@ -268,6 +328,7 @@ class RoomSocketClient(
                     .put("positionMs", positionMs)
                     .put("isPlaying", playing)
                     .put("timestamp", now)
+                    .put("version", playbackVersion)
             )
         }, 0L, 250L, TimeUnit.MILLISECONDS)
     }

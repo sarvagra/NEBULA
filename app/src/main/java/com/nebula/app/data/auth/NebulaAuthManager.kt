@@ -18,7 +18,12 @@ import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
 sealed class GoogleAuthResult {
-    data class Success(val profile: UserProfile, val isNewSession: Boolean = true) : GoogleAuthResult()
+    data class Success(
+        val profile: UserProfile,
+        val isNewSession: Boolean = true,
+        /** True when signing in retired the least recently used of the two device sessions. */
+        val replacedOldestDevice: Boolean = false
+    ) : GoogleAuthResult()
     data class Error(val message: String, val isCancelled: Boolean = false) : GoogleAuthResult()
     data object Loading : GoogleAuthResult()
 }
@@ -122,7 +127,24 @@ class NebulaAuthManager(
             val firebaseIdToken = idTokenResult.token ?: googleIdToken
 
             // 6. Authoritative authentication against Nebula Backend
-            val backendResponse = apiClient.googleSignIn(firebaseIdToken)
+            var backendResponse = apiClient.googleSignIn(firebaseIdToken)
+            var replacedOldestDevice = false
+
+            // An account can already hold its two device sessions from installs the user no
+            // longer has. That used to lock them out of their own account permanently, since
+            // the only fix was to revoke a session from a signed-in device they had lost.
+            // The refusal is retried once with an explicit opt-in to retire the least recently
+            // used session; the caller is told so the outcome can be shown, not hidden.
+            if (backendResponse is ApiResponse.Error &&
+                backendResponse.statusCode == 403 &&
+                backendResponse.message.contains("Device limit", ignoreCase = true)
+            ) {
+                val retry = apiClient.googleSignIn(firebaseIdToken, replaceOldestDevice = true)
+                if (retry is ApiResponse.Success) {
+                    replacedOldestDevice = true
+                    backendResponse = retry
+                }
+            }
 
             val profile = when (backendResponse) {
                 is ApiResponse.Success -> {
@@ -133,7 +155,7 @@ class NebulaAuthManager(
                 }
             }
 
-            GoogleAuthResult.Success(profile)
+            GoogleAuthResult.Success(profile, replacedOldestDevice = replacedOldestDevice)
         } catch (e: GetCredentialCancellationException) {
             GoogleAuthResult.Error("Sign-in cancelled", isCancelled = true)
         } catch (e: GetCredentialException) {
@@ -160,55 +182,6 @@ class NebulaAuthManager(
             true
         } catch (_: Exception) {
             false
-        }
-    }
-
-    suspend fun requestOtp(target: String): ApiResponse<JSONObject> {
-        return apiClient.requestOtp(target)
-    }
-
-    suspend fun verifyOtp(target: String, otp: String): GoogleAuthResult {
-        return try {
-            val res = apiClient.verifyOtp(target, otp)
-            if (res is ApiResponse.Success) {
-                val data = res.data.optJSONObject("data")
-                val userObj = data?.optJSONObject("user")
-                val isNewUser = data?.optBoolean("isNewUser", false) ?: false
-                val backendOnboarding = userObj?.optBoolean("isOnboardingCompleted", false) ?: false
-                val profile = parseUserProfileFromBackendJson(userObj, target, "")
-                val finalProfile = if (backendOnboarding) {
-                    profile.copy(isOnboardingCompleted = true)
-                } else if (isNewUser) {
-                    profile.copy(isOnboardingCompleted = false)
-                } else {
-                    profile.copy(isOnboardingCompleted = true)
-                }
-                GoogleAuthResult.Success(finalProfile)
-            } else if (res is ApiResponse.Error) {
-                GoogleAuthResult.Error(res.message)
-            } else {
-                GoogleAuthResult.Error("Verification failed")
-            }
-        } catch (e: Exception) {
-            GoogleAuthResult.Error(e.localizedMessage ?: "Verification failed")
-        }
-    }
-
-    suspend fun signInWithEmailAccount(email: String, displayName: String = ""): GoogleAuthResult {
-        return try {
-            val res = apiClient.emailSignIn(email, displayName)
-            if (res is ApiResponse.Success) {
-                val data = res.data.optJSONObject("data")
-                val userObj = data?.optJSONObject("user")
-                val profile = parseUserProfileFromBackendJson(userObj, email, displayName)
-                GoogleAuthResult.Success(profile)
-            } else if (res is ApiResponse.Error) {
-                GoogleAuthResult.Error(res.message)
-            } else {
-                GoogleAuthResult.Error("Unknown authentication error")
-            }
-        } catch (e: Exception) {
-            GoogleAuthResult.Error(e.localizedMessage ?: "Sign-in failed")
         }
     }
 
@@ -283,24 +256,4 @@ class NebulaAuthManager(
         )
     }
 
-    private fun buildLocalProfileFromFirebase(firebaseUser: com.google.firebase.auth.FirebaseUser): UserProfile {
-        val email = firebaseUser.email ?: ""
-        val username = "@${email.substringBefore("@").ifBlank { "nebula_user" }}"
-        val initialLetter = (firebaseUser.displayName?.firstOrNull() ?: 'N').uppercaseChar().toString()
-
-        return UserProfile(
-            id = firebaseUser.uid,
-            displayName = firebaseUser.displayName ?: "Nebula Explorer",
-            email = email,
-            username = username,
-            avatarUri = firebaseUser.photoUrl?.toString(),
-            avatarFallbackLetter = initialLetter,
-            isLoggedIn = true,
-            isPremium = false,
-            subscriptionTier = NebulaSubscriptionTier.FREE,
-            roomsJoinedCount = 0,
-            roomsHostedCount = 0,
-            timeInSyncHours = 0.0
-        )
-    }
 }

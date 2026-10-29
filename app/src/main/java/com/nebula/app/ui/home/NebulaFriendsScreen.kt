@@ -85,6 +85,7 @@ fun NebulaFriendsScreen(
     onAcceptRequest: (String) -> Unit,
     onDeclineRequest: (String) -> Unit,
     onAddSuggested: (NebulaUser) -> Unit,
+    onWithdrawRequest: (NebulaUser) -> Unit = onAddSuggested,
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
@@ -584,7 +585,9 @@ fun NebulaFriendsScreen(
                                     onProfileClick = { onFriendClick(friend) },
                                     onAdd = { onAddSuggested(friend) },
                                     onAccept = { friend.friendRequestId?.let(onAcceptRequest) },
-                                    onWithdraw = { friend.friendRequestId?.let(onDeclineRequest) }
+                                    // Withdrawing an outgoing request is keyed by the user, not by
+                                    // a friendship id, which only exists for received requests.
+                                    onWithdraw = { onWithdrawRequest(friend) }
                                 )
                             } else {
                                 FriendListItem(
@@ -677,10 +680,21 @@ fun NebulaFriendsScreen(
                                     }
                                 }
 
+                                val suggestionLabel = when {
+                                    person.friendRequestReceived -> "Accept"
+                                    person.friendRequestPending -> "Requested"
+                                    else -> "Add"
+                                }
                                 Button(
-                                    onClick = { onAddSuggested(person) },
+                                    onClick = {
+                                        when {
+                                            person.friendRequestReceived -> person.friendRequestId?.let(onAcceptRequest)
+                                            person.friendRequestPending -> onWithdrawRequest(person)
+                                            else -> onAddSuggested(person)
+                                        }
+                                    },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = theme.colors.primaryAccent.copy(alpha = 0.15f),
+                                        containerColor = theme.colors.primaryAccent.copy(alpha = if (person.friendRequestPending) 0.08f else 0.15f),
                                         contentColor = theme.colors.primaryAccent
                                     ),
                                     shape = RoundedCornerShape(8.dp),
@@ -691,12 +705,12 @@ fun NebulaFriendsScreen(
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.PersonAdd,
+                                            imageVector = if (person.friendRequestPending) Icons.Default.Check else Icons.Default.PersonAdd,
                                             contentDescription = null,
                                             modifier = Modifier.size(13.dp)
                                         )
                                         Text(
-                                            text = "Add",
+                                            text = suggestionLabel,
                                             style = theme.typography.caption.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp

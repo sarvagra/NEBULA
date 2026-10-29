@@ -4,14 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,27 +20,13 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,45 +39,28 @@ import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaLogo
 
 /**
- * NebulaAuthScreen:
- * Mandatory entry gate for NEBULA.
- * NEBULA MUST NOT be usable without authentication.
- * Supports:
- * 1. Native Google Sign-In with Credential Manager (physical devices & GMS emulators)
- * 2. Gmail / Multi-Device Sign-In fallback (for emulators without Google Play Services or parallel testing)
- * 3. Dynamic Backend Server address configuration (for testing across physical phone and PC LAN)
+ * NebulaAuthScreen — the mandatory entry gate.
+ *
+ * Nebula is not usable without an authenticated identity, and the only identity
+ * provider is Firebase Authentication through Google Sign-In. There is
+ * deliberately no password, email-link, OTP or anonymous path here: adding one
+ * would create a second source of identity that the backend does not verify.
  */
 @Composable
 fun NebulaAuthScreen(
     onSignInWithGoogle: () -> Unit,
-    onSignInWithEmail: (email: String, displayName: String) -> Unit = { _, _ -> },
-    onRequestOtp: (email: String, onResult: (Boolean) -> Unit) -> Unit = { _, _ -> },
-    onVerifyOtp: (email: String, otp: String) -> Unit = { _, _ -> },
     isAuthLoading: Boolean,
     errorMessage: String? = null,
-    currentBackendUrl: String = com.nebula.app.data.backend.NebulaApiClient.baseUrl,
-    onUpdateBackendUrl: (String) -> Unit = {},
     onExitApp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
-    var showEmailDialog by remember { mutableStateOf(false) }
-    var emailInput by remember { mutableStateOf("") }
-    var otpStep by remember { mutableIntStateOf(1) } // 1: Email input, 2: OTP input
-    var otpInput by remember { mutableStateOf("") }
-    var isSendingOtp by remember { mutableStateOf(false) }
-    val isGmailAddress = emailInput.trim().lowercase().endsWith("@gmail.com")
 
-    var showServerDialog by remember { mutableStateOf(false) }
-    var serverInput by remember(currentBackendUrl) { mutableStateOf(currentBackendUrl) }
-
-    // Back button terminates the application rather than bypassing authentication
+    // Back terminates the application rather than bypassing authentication.
     BackHandler {
         onExitApp()
     }
 
-    // Whole-screen welcome background, built ONLY from the active theme tokens so that light,
-    // dark, lavender and red-hot-pink each get their own look (no hardcoded gray anywhere).
     val welcomeBackground = Brush.verticalGradient(
         colors = listOf(
             theme.colors.background,
@@ -109,8 +75,8 @@ fun NebulaAuthScreen(
             .background(welcomeBackground)
             .statusBarsPadding()
     ) {
-        // Ambient background glow (theme accent, fades out to fully transparent so the themed
-        // background below stays the visible surface in every theme)
+        // Ambient accent glow, fully transparent at the edge so the themed
+        // surface below stays visible in every theme.
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -134,12 +100,10 @@ fun NebulaAuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // App Emblem
             NebulaLogo(Modifier.size(80.dp))
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Brand Wordmark
             Text(
                 text = "NEBULA",
                 style = theme.typography.titleLarge.copy(
@@ -165,7 +129,6 @@ fun NebulaAuthScreen(
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // 1. Primary Google Sign-In Button (Standard Flow)
             Button(
                 onClick = onSignInWithGoogle,
                 enabled = !isAuthLoading,
@@ -185,9 +148,9 @@ fun NebulaAuthScreen(
                         color = theme.colors.primaryAccent,
                         strokeWidth = 2.dp
                     )
-                    Spacer(modifier = Modifier.padding(horizontal = 6.dp))
+                    Spacer(modifier = Modifier.size(12.dp))
                     Text(
-                        text = "Authenticating...",
+                        text = "Authenticating…",
                         style = theme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = theme.colors.textSecondary
@@ -227,63 +190,11 @@ fun NebulaAuthScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 2. Secondary Button: Sign In with Email & OTP
-            OutlinedButton(
-                onClick = {
-                    otpInput = ""
-                    otpStep = 1
-                    showEmailDialog = true
-                },
-                enabled = !isAuthLoading,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, theme.colors.surfaceBorder),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = theme.colors.textSecondary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = theme.colors.primaryAccent
-                    )
-                    Text(
-                        text = "Sign In with Email / OTP",
-                        style = theme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.5.sp,
-                            color = theme.colors.textSecondary
-                        )
-                    )
-                }
-            }
-
-            // Error Message Display / GMS Fallback Hint
             AnimatedVisibility(
                 visible = !errorMessage.isNullOrBlank(),
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                // Google sign-in can fail for two very different reasons: this
-                // build's signing key is not registered with the Google project
-                // (typical after a re-sign), or Play Services is genuinely absent.
-                // Both leave email/OTP as the working path, so say that plainly
-                // instead of blaming an emulator that may not exist.
-                val rawError = errorMessage ?: ""
-                val isGmsError = rawError.contains("Credential", ignoreCase = true) ||
-                        rawError.contains("Google Play", ignoreCase = true) ||
-                        rawError.contains("OAuth2.0", ignoreCase = true) ||
-                        rawError.contains("not registered", ignoreCase = true)
-
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -295,12 +206,7 @@ fun NebulaAuthScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (isGmsError) {
-                            "Google sign-in is unavailable for this build.\n" +
-                                "Use \"Sign In with Email / OTP\" below — it works right now."
-                        } else {
-                            rawError
-                        },
+                        text = errorMessage ?: "",
                         style = theme.typography.caption.copy(
                             color = theme.colors.errorColor,
                             fontSize = 12.sp,
@@ -309,36 +215,27 @@ fun NebulaAuthScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    if (isGmsError) {
+                    // Explain the failure without inventing a fallback login:
+                    // both causes are environmental, not alternatives to Google.
+                    if (isCredentialEnvironmentError(errorMessage)) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                showEmailDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = theme.colors.primaryAccent,
-                                contentColor = theme.colors.onPrimaryAccent
+                        Text(
+                            text = "Nebula signs in only with Google. Check that this " +
+                                "device has Google Play services and that this build's " +
+                                "signing key is registered for the Firebase project.",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontSize = 11.5.sp,
+                                textAlign = TextAlign.Center
                             ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text(
-                                text = "Sign In with Email / OTP",
-                                style = theme.typography.caption.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Privacy & Auth guarantee footer
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -350,7 +247,7 @@ fun NebulaAuthScreen(
                     modifier = Modifier.size(13.dp)
                 )
                 Text(
-                    text = "Encrypted in transit",
+                    text = "Google sign-in · encrypted in transit",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textTertiary,
                         fontSize = 11.5.sp
@@ -359,162 +256,13 @@ fun NebulaAuthScreen(
             }
         }
     }
+}
 
-    // Email / OTP Sign-in Dialog (Clean 2-Step Verification)
-    if (showEmailDialog) {
-        AlertDialog(
-            onDismissRequest = { showEmailDialog = false },
-            containerColor = theme.colors.surfaceElevated,
-            titleContentColor = theme.colors.textPrimary,
-            textContentColor = theme.colors.textSecondary,
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = null,
-                        tint = theme.colors.primaryAccent,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        text = if (otpStep == 1) "Sign In with Email" else "Verify 6-Digit Code",
-                        style = theme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (otpStep == 1) {
-                        Text(
-                            text = "Enter your email address. We will verify your account via OTP. If you are new, you will proceed to choose your username.",
-                            style = theme.typography.bodySmall.copy(
-                                color = theme.colors.textSecondary,
-                                lineHeight = 16.sp
-                            )
-                        )
-
-                        OutlinedTextField(
-                            value = emailInput,
-                            onValueChange = { emailInput = it },
-                            label = { Text("Email Address") },
-                            placeholder = { Text("you@example.com") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = theme.colors.primaryAccent,
-                                unfocusedBorderColor = theme.colors.surfaceBorder,
-                                focusedTextColor = theme.colors.textPrimary,
-                                unfocusedTextColor = theme.colors.textPrimary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (emailInput.isNotBlank() && !isGmailAddress) {
-                            Text(
-                                text = "Only @gmail.com addresses are supported.",
-                                color = theme.colors.errorColor,
-                                fontSize = 12.sp
-                            )
-                        }
-                    } else {
-                        val displayEmail = emailInput.trim().ifEmpty { "your email" }
-                        Text(
-                            text = "Enter the 6-digit verification code sent to:\n$displayEmail",
-                            style = theme.typography.bodySmall.copy(
-                                color = theme.colors.textSecondary,
-                                lineHeight = 16.sp
-                            )
-                        )
-
-                        OutlinedTextField(
-                            value = otpInput,
-                            onValueChange = { otpInput = it.filter { ch -> ch.isDigit() }.take(6) },
-                            label = { Text("6-Digit OTP") },
-                            placeholder = { Text("• • • • • •") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = theme.colors.primaryAccent,
-                                unfocusedBorderColor = theme.colors.surfaceBorder,
-                                focusedTextColor = theme.colors.textPrimary,
-                                unfocusedTextColor = theme.colors.textPrimary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        TextButton(
-                            onClick = { 
-                                otpStep = 1 
-                                otpInput = ""
-                            },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(text = "← Change Email", color = theme.colors.primaryAccent, fontSize = 12.sp)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val cleanEmail = emailInput.trim().lowercase()
-                        if (otpStep == 1) {
-                            isSendingOtp = true
-                            otpInput = ""
-                            onRequestOtp(cleanEmail) { sent ->
-                                isSendingOtp = false
-                                if (sent) {
-                                    otpInput = ""
-                                    otpStep = 2
-                                }
-                            }
-                        } else {
-                            val cleanOtp = otpInput.trim()
-                            if (cleanOtp.length == 6) {
-                                showEmailDialog = false
-                                onVerifyOtp(cleanEmail, cleanOtp)
-                            }
-                        }
-                    },
-                    enabled = if (otpStep == 1) {
-                        !isSendingOtp && emailInput.isNotBlank() && isGmailAddress
-                    } else {
-                        otpInput.trim().length == 6
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.primaryAccent,
-                        disabledContainerColor = theme.colors.surface,
-                        disabledContentColor = theme.colors.textTertiary
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .border(
-                            width = 1.dp,
-                            color = theme.colors.surfaceBorder,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                ) {
-                    Text(
-                        text = if (otpStep == 1) {
-                            if (isSendingOtp) "Sending..." else "Send Code"
-                        } else "Verify & Enter",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEmailDialog = false }) {
-                    Text(
-                        text = "Cancel",
-                        color = theme.colors.textSecondary,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        )
-    }
+/** Credential/Play-services problems deserve an explanation, not a fake login path. */
+internal fun isCredentialEnvironmentError(message: String?): Boolean {
+    val raw = message ?: return false
+    return raw.contains("Credential", ignoreCase = true) ||
+        raw.contains("Google Play", ignoreCase = true) ||
+        raw.contains("OAuth2.0", ignoreCase = true) ||
+        raw.contains("not registered", ignoreCase = true)
 }

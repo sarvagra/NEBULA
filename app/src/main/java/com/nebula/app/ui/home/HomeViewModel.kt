@@ -795,7 +795,15 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             if (!socialRepository.sendMessage(convId, trimmed)) {
-                showToast("Message could not be sent. Check your connection and try again.")
+                showToast("Message not sent. Tap it in the thread to retry.")
+            }
+        }
+    }
+
+    fun onRetryDirectMessage(clientKey: String) {
+        viewModelScope.launch {
+            if (!socialRepository.retryMessage(clientKey)) {
+                showToast("Still offline. The message will stay unsent until you retry.")
             }
         }
     }
@@ -1094,12 +1102,38 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Keeps an open profile route in step with a relationship change. The profile screen
+     * renders the route's user, so patching only the repository lists would leave the
+     * button on the old label until the screen is reopened.
+     */
+    private fun patchProfileRelationship(userId: String, pending: Boolean) {
+        fun NebulaUser.patched(): NebulaUser = if (id != userId) this else copy(
+            friendRequestPending = pending,
+            friendRequestReceived = false
+        )
+        _uiState.value.activeFriendProfile?.let { active ->
+            if (active.id == userId) {
+                _uiState.value = _uiState.value.copy(activeFriendProfile = active.patched())
+            }
+        }
+        val dest = _uiState.value.fullScreenDestination
+        if (dest is FullScreenDestination.PublicProfile && dest.user.id == userId) {
+            _uiState.value = _uiState.value.copy(
+                fullScreenDestination = FullScreenDestination.PublicProfile(dest.user.patched())
+            )
+        }
+    }
+
     fun onAddSuggestedFriend(user: NebulaUser) {
+        // Optimistic: the row flips at once, then rolls back if the server refuses.
+        patchProfileRelationship(user.id, pending = true)
         viewModelScope.launch {
             if (socialRepository.addFriend(user)) {
                 refreshAll()
                 showToast("Friend request sent to ${user.displayName.split(" ").first()}")
             } else {
+                patchProfileRelationship(user.id, pending = false)
                 showToast("Friend request could not be sent. Try again.")
             }
         }
@@ -1110,8 +1144,10 @@ class HomeViewModel(
     }
 
     fun onCancelFriendRequest(user: NebulaUser) {
+        patchProfileRelationship(user.id, pending = false)
         viewModelScope.launch {
             if (!socialRepository.withdrawFriendRequest(user.id)) {
+                patchProfileRelationship(user.id, pending = true)
                 showToast("Friend request could not be cancelled. Try again.")
             } else refreshAll()
         }
@@ -1459,7 +1495,13 @@ class HomeViewModel(
                         activeSubscriptionTier = finalProfile.subscriptionTier,
                         isAuthLoading = false,
                         authErrorMessage = null,
-                        quickToastMessage = "Connected as ${finalProfile.displayName}"
+                        quickToastMessage = if (result.replacedOldestDevice) {
+                            // The user needs to know a device was signed out, or the next
+                            // unexplained sign-out on that device looks like a bug.
+                            "Connected as ${finalProfile.displayName} · signed out your oldest device (2 allowed)"
+                        } else {
+                            "Connected as ${finalProfile.displayName}"
+                        }
                     )
                     refreshAll()
                 }
@@ -1475,97 +1517,6 @@ class HomeViewModel(
         }
     }
 
-    private var otpRequestInFlight = false
-
-    fun requestOtp(target: String, onResult: (Boolean) -> Unit) {
-        if (otpRequestInFlight) return
-        otpRequestInFlight = true
-        val manager = authManager
-        if (manager == null) {
-            otpRequestInFlight = false
-            onResult(false)
-            return
-        }
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isAuthLoading = true, authErrorMessage = null)
-                val res = manager.requestOtp(target)
-                _uiState.value = _uiState.value.copy(isAuthLoading = false)
-                if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
-                    val msg = res.data.optString("message", "Verification code sent to your email")
-                    _uiState.value = _uiState.value.copy(quickToastMessage = msg)
-                    onResult(true)
-                } else if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error) {
-                    _uiState.value = _uiState.value.copy(authErrorMessage = res.message, quickToastMessage = res.message)
-                    onResult(false)
-                }
-            } finally {
-                otpRequestInFlight = false
-            }
-        }
-    }
-
-    fun verifyOtp(target: String, otp: String) {
-        val manager = authManager ?: return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isAuthLoading = true, authErrorMessage = null)
-            when (val result = manager.verifyOtp(target, otp)) {
-                is GoogleAuthResult.Success -> {
-                    val profile = result.profile
-                    _showWelcomeBack.value = profile.isOnboardingCompleted
-                    profileRepository.setLoggedInUser(profile)
-                    sessionManager?.saveUserProfile(profile)
-                    _uiState.value = _uiState.value.copy(
-                        userProfile = profile,
-                        activeSubscriptionTier = profile.subscriptionTier,
-                        isAuthLoading = false,
-                        authErrorMessage = null,
-                        quickToastMessage = if (profile.isOnboardingCompleted) "Connected as ${profile.displayName}" else "Welcome to Nebula!"
-                    )
-                    refreshAll()
-                }
-                is GoogleAuthResult.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isAuthLoading = false,
-                        authErrorMessage = result.message,
-                        quickToastMessage = result.message
-                    )
-                }
-                GoogleAuthResult.Loading -> {}
-            }
-        }
-    }
-
-    fun signInWithEmail(email: String, displayName: String = "") {
-        val manager = authManager ?: return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isAuthLoading = true, authErrorMessage = null)
-            when (val result = manager.signInWithEmailAccount(email, displayName)) {
-                is GoogleAuthResult.Success -> {
-                    val finalProfile = result.profile
-                    _showWelcomeBack.value = finalProfile.isOnboardingCompleted
-                    profileRepository.setLoggedInUser(finalProfile)
-                    sessionManager?.saveUserProfile(finalProfile)
-                    _uiState.value = _uiState.value.copy(
-                        userProfile = finalProfile,
-                        activeSubscriptionTier = finalProfile.subscriptionTier,
-                        isAuthLoading = false,
-                        authErrorMessage = null,
-                        quickToastMessage = "Connected as ${finalProfile.displayName}"
-                    )
-                    refreshAll()
-                }
-                is GoogleAuthResult.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isAuthLoading = false,
-                        authErrorMessage = result.message,
-                        quickToastMessage = result.message
-                    )
-                }
-                GoogleAuthResult.Loading -> {}
-            }
-        }
-    }
 
     fun updateBackendUrl(newUrl: String) {
         com.nebula.app.data.backend.NebulaApiClient.baseUrl = newUrl
@@ -1577,10 +1528,6 @@ class HomeViewModel(
 
     fun clearAuthError() {
         _uiState.value = _uiState.value.copy(authErrorMessage = null)
-    }
-
-    fun developerSignIn() {
-        signInWithEmail("developer@nebula.local", "Nebula Explorer")
     }
 
     fun signOutGoogle() {

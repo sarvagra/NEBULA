@@ -167,84 +167,23 @@ object NebulaApiClient {
     // ==========================================
     // AUTHENTICATION
     // ==========================================
-    suspend fun googleSignIn(idToken: String): ApiResponse<JSONObject> {
+    /**
+     * [replaceOldestDevice] is only ever sent after the user has been told the account is
+     * already signed in on two devices, so the recovery path does not silently evict a
+     * session behind their back.
+     */
+    suspend fun googleSignIn(idToken: String, replaceOldestDevice: Boolean = false): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("idToken", idToken)
             sessionManager?.getDeviceId()?.let { put("deviceId", it) }
             sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
+            if (replaceOldestDevice) put("replaceOldestDevice", true)
         }
         val res = request("/auth/google", "POST", body)
         if (res is ApiResponse.Success) {
             val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
             tokens?.optString("token")?.let { authToken = it }
             tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
-        }
-        return res
-    }
-
-    suspend fun requestOtp(target: String): ApiResponse<JSONObject> {
-        val isEmail = target.contains("@")
-        val body = JSONObject().apply {
-            if (isEmail) put("email", target.trim().lowercase())
-            else put("phone", target.trim())
-        }
-        return request("/auth/otp/request", "POST", body)
-    }
-
-    suspend fun verifyOtp(target: String, otp: String): ApiResponse<JSONObject> {
-        val isEmail = target.contains("@")
-        val body = JSONObject().apply {
-            if (isEmail) put("email", target.trim().lowercase())
-            else put("phone", target.trim())
-            put("otp", otp.trim())
-            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
-            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
-        }
-        val res = request("/auth/otp/verify", "POST", body)
-        if (res is ApiResponse.Success) {
-            val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
-            tokens?.optString("token")?.let { authToken = it }
-            tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
-        }
-        return res
-    }
-
-    suspend fun developerSignIn(username: String = "nebula_explorer"): ApiResponse<JSONObject> {
-        val body = JSONObject().apply {
-            put("username", username.trim().replace("^@".toRegex(), ""))
-            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
-            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
-        }
-        val res = request("/auth/dev-login", "POST", body)
-        if (res is ApiResponse.Success) {
-            val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
-            val token = tokens?.optString("token")
-            if (!token.isNullOrBlank()) {
-                authToken = token
-                tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
-            }
-        }
-        return res
-    }
-
-    suspend fun emailSignIn(email: String, displayName: String = ""): ApiResponse<JSONObject> {
-        val cleanEmail = email.trim().lowercase()
-        val baseHandle = cleanEmail.substringBefore("@").replace("[^a-zA-Z0-9_]".toRegex(), "_")
-        val body = JSONObject().apply {
-            put("email", cleanEmail)
-            put("displayName", displayName.trim().ifEmpty { cleanEmail.substringBefore("@") })
-            put("username", baseHandle)
-            sessionManager?.getDeviceId()?.let { put("deviceId", it) }
-            sessionManager?.getDeviceInfo()?.let { put("deviceInfo", it) }
-        }
-        val res = request("/auth/dev-login", "POST", body)
-        if (res is ApiResponse.Success) {
-            val tokens = res.data.optJSONObject("data")?.optJSONObject("tokens")
-            val token = tokens?.optString("token")
-            if (!token.isNullOrBlank()) {
-                authToken = token
-                tokens?.optString("refreshToken")?.takeIf { it.isNotBlank() }?.let { sessionManager?.saveRefreshToken(it) }
-            }
         }
         return res
     }
@@ -356,8 +295,17 @@ object NebulaApiClient {
         return request("/rooms/$roomId", "GET")
     }
 
-    suspend fun getRoomMessages(roomId: String): ApiResponse<JSONArray> {
-        val res = request("/chat/room/$roomId?limit=50", "GET")
+    /**
+     * Room history. Passing [since] (an ISO-8601 cursor) returns only messages created at
+     * or after it, so a client whose realtime socket dropped can recover exactly what it
+     * missed instead of refetching the whole page and guessing at the boundary.
+     */
+    suspend fun getRoomMessages(roomId: String, since: String? = null): ApiResponse<JSONArray> {
+        val query = buildString {
+            append("/chat/room/$roomId?limit=50")
+            if (!since.isNullOrBlank()) append("&since=").append(java.net.URLEncoder.encode(since, "UTF-8"))
+        }
+        val res = request(query, "GET")
         return when (res) {
             is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
             is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
@@ -651,7 +599,7 @@ object NebulaApiClient {
         request("/friends/request/withdraw/$userId", "DELETE")
     suspend fun removeFriend(userId: String): ApiResponse<JSONObject> = request("/friends/$userId", "DELETE")
 
-    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null): ApiResponse<JSONObject> =
+    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null, idempotencyKey: String? = null): ApiResponse<JSONObject> =
         request(
             "/chat",
             "POST",
@@ -659,11 +607,16 @@ object NebulaApiClient {
                 mediaUrl?.let { put("mediaUrl", it) }
                 put("messageType", messageType)
                 mediaMimeType?.let { put("mediaMimeType", it) }
+                // The server dedupes on (sender, conversation, key), so a retried
+                // send cannot create a duplicate bubble on the other device.
+                idempotencyKey?.let { put("idempotencyKey", it) }
             }
         )
 
-    suspend fun getConversationMessages(conversationId: String): ApiResponse<JSONArray> {
-        val res = request("/chat/conversation/$conversationId", "GET")
+    suspend fun getConversationMessages(conversationId: String, since: String? = null): ApiResponse<JSONArray> {
+        val path = if (since.isNullOrBlank()) "/chat/conversation/$conversationId"
+        else "/chat/conversation/$conversationId?since=${java.net.URLEncoder.encode(since, "UTF-8")}"
+        val res = request(path, "GET")
         return when (res) {
             is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
             is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)

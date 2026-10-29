@@ -23,8 +23,6 @@ services:
         sync: false
       - key: MONGODB_DATABASE
         value: nebula
-      - key: OTP_PROVIDER
-        value: brevo
       - key: BREVO_API_KEY
         sync: false
       - key: RESEND_API_KEY

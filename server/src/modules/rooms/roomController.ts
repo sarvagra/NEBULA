@@ -100,11 +100,31 @@ export async function listRooms(req: Request, res: Response): Promise<void> {
       filter.privacy = 'public';
     }
 
+    // Discovery ranks by what makes a room worth walking into: how many people are
+    // already in it, how recently it was active, and whether something is playing.
+    // A strict createdAt sort buried busy rooms under brand-new empty ones.
     const rooms = await RoomModel.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(limit);
+      .sort({ updatedAt: -1 })
+      .limit(Math.min(limit * 3, 150));
 
-    const visibleRooms = rooms.filter((room) => !req.user || !room.kickedUserIds?.includes(req.user.id));
+    const now = Date.now();
+    const discoveryScore = (room: any): number => {
+      const participantWeight = (room.participants?.length ?? 0) * 3;
+      const idleHours = (now - new Date(room.updatedAt ?? room.createdAt).getTime()) / 3_600_000;
+      const recencyWeight = idleHours <= 1 ? 3 : idleHours <= 6 ? 2 : idleHours <= 24 ? 1 : 0;
+      const playbackWeight = room.mediaState?.isPlaying ? 1 : 0;
+      return participantWeight + recencyWeight + playbackWeight;
+    };
+    rooms.sort((a: any, b: any) => {
+      const delta = discoveryScore(b) - discoveryScore(a);
+      if (delta !== 0) return delta;
+      // Ties fall back to the most recently active room so the order stays stable.
+      return new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime();
+    });
+
+    const visibleRooms = rooms
+      .filter((room) => !req.user || !room.kickedUserIds?.includes(req.user.id))
+      .slice(0, limit);
     res.json({
       success: true,
       data: visibleRooms.map((r) => toPublicRoomDTO(r, req.user?.id)),

@@ -124,6 +124,9 @@ export function createApp(): express.Application {
       status: 'healthy',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
+      // Lets a running deploy be tied to the exact commit serving it, so "deployed"
+      // can be checked instead of inferred from a successful push.
+      revision: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown').slice(0, 7),
     });
   });
 

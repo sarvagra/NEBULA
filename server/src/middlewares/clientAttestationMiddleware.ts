@@ -2,7 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { config } from '../config/env';
 
-export const NEBULA_APP_CLIENT_SECRET = process.env.NEBULA_APP_CLIENT_SECRET || 'nebula_android_client_attestation_2026_x89a';
+// Single source of truth: the secret is configured in one place so the client
+// attestation check and the test harness can never drift apart.
+export const NEBULA_APP_CLIENT_SECRET = config.clientAttestation.secret;
 
 /**
  * Middleware that strictly verifies requests originate from the official Nebula Android app.

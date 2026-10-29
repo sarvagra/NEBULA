@@ -1,36 +1,74 @@
 import { io as ClientSocket, Socket } from 'socket.io-client';
 import http from 'http';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { config } from '../config/env';
 import { createApp } from '../app';
-import { initSocketServer } from '../realtime/socketServer';
+import { initSocketServer, sweepStalePresence } from '../realtime/socketServer';
+import { UserModel } from '../models/User';
 
 let apiBase = '';
 
-interface AuthResponse {
-  success: boolean;
-  data: {
-    user: { id: string; username: string; displayName: string };
-    tokens: { token: string };
+/**
+ * Every real client call carries the app-attestation headers, so the suite must
+ * sign its requests too. Without this the app shield rejects the login with 403
+ * APP_CLIENT_REQUIRED and the whole realtime audit aborts before it starts.
+ */
+function signedHeaders(method: string, path: string): Record<string, string> {
+  const now = Date.now();
+  const normalizedPath = path.replace(/^\/api\/v1/, '').split('?')[0] || '/';
+  const signature = crypto
+    .createHmac('sha256', config.clientAttestation.secret)
+    .update(`${now}:${method.toUpperCase()}:${normalizedPath}`)
+    .digest('hex');
+  return {
+    'X-Nebula-App-Signature': signature,
+    'X-Nebula-Timestamp': now.toString(),
+    'X-Nebula-Client': 'com.nebula.app',
   };
 }
 
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method || 'GET').toUpperCase();
+  const headers: Record<string, string> = {
+    ...signedHeaders(method, path),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  return fetch(`${apiBase}${path}`, { ...init, headers });
+}
+
+/**
+ * The backend has no developer login route: Firebase is the only identity
+ * provider. This suite runs in-process against an isolated in-memory database,
+ * so it provisions the accounts it needs and mints the same session JWT the
+ * auth middleware would have issued. No bypass is reachable over HTTP.
+ */
 async function loginUser(email: string, username: string, displayName: string): Promise<{ token: string; user: any }> {
-  const res = await fetch(`${apiBase}/api/v1/auth/dev-login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, username, displayName }),
-  });
-  const data = (await res.json()) as AuthResponse;
-  if (!data.success) {
-    throw new Error(`Failed to log in ${email}: ${JSON.stringify(data)}`);
-  }
-  return { token: data.data.tokens.token, user: data.data.user };
+  const user = (await UserModel.findOne({ username })) || (await UserModel.create({
+    email,
+    displayName,
+    username,
+    avatarLetter: displayName.charAt(0).toUpperCase() || 'N',
+    tier: 'free',
+    status: 'dynamic',
+    presenceStatus: 'online',
+    bio: '',
+    isOnboardingCompleted: true,
+  }));
+
+  const token = jwt.sign(
+    { id: user._id.toString(), username: user.username, displayName: user.displayName, tier: user.tier, role: user.role },
+    config.auth.jwtSecret,
+    { expiresIn: '1h' },
+  );
+
+  return { token, user: { id: user._id.toString(), username: user.username, displayName: user.displayName } };
 }
 
 async function createRoom(token: string, name: string, mediaTitle: string, mediaUrl: string): Promise<any> {
-  const res = await fetch(`${apiBase}/api/v1/rooms`, {
+  const res = await apiFetch(`/api/v1/rooms`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -53,7 +91,7 @@ async function createRoom(token: string, name: string, mediaTitle: string, media
 }
 
 async function joinRoom(token: string, roomId: string): Promise<void> {
-  const res = await fetch(`${apiBase}/api/v1/rooms/${roomId}/join`, {
+  const res = await apiFetch(`/api/v1/rooms/${roomId}/join`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -111,7 +149,7 @@ async function runMultiClientSyncTest() {
       'https://www.youtube.com/watch?v=9S5_E65AbTQ'
     );
     await joinRoom(clientB.token, room.id);
-    const secondRoomAttempt = await fetch(`${apiBase}/api/v1/rooms`, {
+    const secondRoomAttempt = await apiFetch(`/api/v1/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientB.token}` },
       body: JSON.stringify({ name: 'Must Be Rejected', privacy: 'public', activity: 'watch' }),
@@ -119,7 +157,7 @@ async function runMultiClientSyncTest() {
     if (secondRoomAttempt.status !== 409) throw new Error('A user was allowed to create a second active room');
     console.log('  ✅ PASS: A participant cannot create a second room while already in one');
     passedTests++;
-    const selfRequestRes = await fetch(`${apiBase}/api/v1/friends/request`, {
+    const selfRequestRes = await apiFetch(`/api/v1/friends/request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientB.token}` },
       body: JSON.stringify({ recipientId: clientB.user.id }),
     });
@@ -333,62 +371,62 @@ async function runMultiClientSyncTest() {
     passedTests++;
 
     // Room friendship request lifecycle: request, withdraw, incoming request, accept, and decline.
-    const friendRequestRes = await fetch(`${apiBase}/api/v1/friends/request`, {
+    const friendRequestRes = await apiFetch(`/api/v1/friends/request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({ recipientId: clientB.user.id }),
     });
     const friendRequest = await friendRequestRes.json() as any;
     if (friendRequestRes.status !== 201) throw new Error(`Friend request failed: ${JSON.stringify(friendRequest)}`);
-    const pendingRes = await fetch(`${apiBase}/api/v1/friends/requests`, { headers: { Authorization: `Bearer ${clientB.token}` } });
+    const pendingRes = await apiFetch(`/api/v1/friends/requests`, { headers: { Authorization: `Bearer ${clientB.token}` } });
     const pending = await pendingRes.json() as any;
     if (!pending.data?.some((request: any) => request.id === friendRequest.data.id)) throw new Error('Incoming friend request did not appear for the recipient');
-    const withdrawRes = await fetch(`${apiBase}/api/v1/friends/request/withdraw/${clientB.user.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clientA.token}` } });
+    const withdrawRes = await apiFetch(`/api/v1/friends/request/withdraw/${clientB.user.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clientA.token}` } });
     if (!withdrawRes.ok) throw new Error('Requester could not withdraw friend request');
-    const withdrawnRes = await fetch(`${apiBase}/api/v1/friends/requests`, { headers: { Authorization: `Bearer ${clientB.token}` } });
+    const withdrawnRes = await apiFetch(`/api/v1/friends/requests`, { headers: { Authorization: `Bearer ${clientB.token}` } });
     if ((await withdrawnRes.json() as any).data?.some((request: any) => request.id === friendRequest.data.id)) throw new Error('Withdrawn request remained visible to recipient');
     console.log('  ✅ PASS: Friend request appears for recipient and disappears after sender withdraws');
     passedTests++;
 
-    const reverseRequestRes = await fetch(`${apiBase}/api/v1/friends/request`, {
+    const reverseRequestRes = await apiFetch(`/api/v1/friends/request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientB.token}` },
       body: JSON.stringify({ recipientId: clientA.user.id }),
     });
     const reverseRequest = await reverseRequestRes.json() as any;
     if (reverseRequestRes.status !== 201) throw new Error(`Reverse friend request failed: ${JSON.stringify(reverseRequest)}`);
-    const acceptRes = await fetch(`${apiBase}/api/v1/friends/request/${reverseRequest.data.id}/accept`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
+    const acceptRes = await apiFetch(`/api/v1/friends/request/${reverseRequest.data.id}/accept`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
     if (!acceptRes.ok) throw new Error('Recipient could not accept incoming friend request');
-    const friendsRes = await fetch(`${apiBase}/api/v1/friends`, { headers: { Authorization: `Bearer ${clientB.token}` } });
+    const friendsRes = await apiFetch(`/api/v1/friends`, { headers: { Authorization: `Bearer ${clientB.token}` } });
     if (!(await friendsRes.json() as any).data?.some((friend: any) => friend.id === clientA.user.id)) throw new Error('Accepted friendship did not appear on requester side');
     console.log('  ✅ PASS: Recipient accepts a request and the accepted friendship appears for both');
     passedTests++;
 
     const clientC = await loginUser('decline_sync_c@nebula.io', 'decline_sync_c', 'Decline Sync Gamma');
-    const declineRequestRes = await fetch(`${apiBase}/api/v1/friends/request`, {
+    const declineRequestRes = await apiFetch(`/api/v1/friends/request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientC.token}` },
       body: JSON.stringify({ recipientId: clientA.user.id }),
     });
     const declineRequest = await declineRequestRes.json() as any;
-    const declineRes = await fetch(`${apiBase}/api/v1/friends/request/${declineRequest.data.id}/decline`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
+    const declineRes = await apiFetch(`/api/v1/friends/request/${declineRequest.data.id}/decline`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
     if (!declineRes.ok) throw new Error('Recipient could not decline incoming friend request');
     console.log('  ✅ PASS: Recipient can decline an incoming request');
     passedTests++;
 
-    const requestCRes = await fetch(`${apiBase}/api/v1/friends/request`, {
+    const requestCRes = await apiFetch(`/api/v1/friends/request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({ recipientId: clientC.user.id }),
     });
     const requestC = await requestCRes.json() as any;
-    const acceptCRes = await fetch(`${apiBase}/api/v1/friends/request/${requestC.data.id}/accept`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+    const acceptCRes = await apiFetch(`/api/v1/friends/request/${requestC.data.id}/accept`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
     if (!acceptCRes.ok) throw new Error('Could not accept invitation test friendship');
-    const inviteCRes = await fetch(`${apiBase}/api/v1/rooms/${room.id}/invite`, {
+    const inviteCRes = await apiFetch(`/api/v1/rooms/${room.id}/invite`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({ userId: clientC.user.id }),
     });
     if (inviteCRes.status !== 201) throw new Error(`Could not invite an existing friend: ${await inviteCRes.text()}`);
     await joinRoom(clientC.token, room.id);
-    const invitedRoom = await (await fetch(`${apiBase}/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
+    const invitedRoom = await (await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
     if (!invitedRoom.data?.participants.some((p: any) => p.userId === clientC.user.id)) throw new Error('Invited friend could not join room');
-    await fetch(`${apiBase}/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+    await apiFetch(`/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
     console.log('  ✅ PASS: A room member can invite an existing friend, who then joins and appears in participants');
     passedTests++;
 
@@ -399,15 +437,15 @@ async function runMultiClientSyncTest() {
     clientSocketC.emit('room:join', { roomId: roomC.id });
     await new Promise((resolve) => setTimeout(resolve, 250));
 
-    const moderationRes = await fetch(`${apiBase}/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
+    const moderationRes = await apiFetch(`/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({ isMuted: true, isCameraOff: true }),
     });
     if (!moderationRes.ok) throw new Error(`Host could not mute participant: ${await moderationRes.text()}`);
-    const moderatedRoom = await (await fetch(`${apiBase}/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
+    const moderatedRoom = await (await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
     const moderatedParticipant = moderatedRoom.data.participants.find((p: any) => p.userId === clientB.user.id);
     if (!moderatedParticipant?.isMuted || !moderatedParticipant?.isCameraOff) throw new Error('Mute/camera-off state was not persisted');
-    const unmuteRes = await fetch(`${apiBase}/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
+    const unmuteRes = await apiFetch(`/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({ isMuted: false, isCameraOff: false }),
     });
@@ -422,7 +460,7 @@ async function runMultiClientSyncTest() {
     clientSocketB = socketB;
     clientSocketB.emit('room:join', { roomId: room.id });
     await new Promise((resolve) => setTimeout(resolve, 500));
-    const reconnectedRoomResponse = await fetch(`${apiBase}/api/v1/rooms/${room.id}`, {
+    const reconnectedRoomResponse = await apiFetch(`/api/v1/rooms/${room.id}`, {
       headers: { Authorization: `Bearer ${clientA.token}` },
     });
     const reconnectedRoom = (await reconnectedRoomResponse.json()) as any;
@@ -435,7 +473,7 @@ async function runMultiClientSyncTest() {
     // Backgrounding removes the participant at the configured strict 60-second grace.
     clientSocketB.emit('room:background', { roomId: room.id });
     await new Promise((resolve) => setTimeout(resolve, 60_500));
-    const inactiveRoom = await (await fetch(`${apiBase}/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
+    const inactiveRoom = await (await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
     if (inactiveRoom.data?.participants.some((p: any) => p.userId === clientB.user.id)) {
       throw new Error('Backgrounded participant remained in room after the 60-second grace period');
     }
@@ -467,13 +505,13 @@ async function runMultiClientSyncTest() {
     await joinRoom(clientB.token, room.id);
     clientSocketB.emit('room:join', { roomId: room.id });
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const kickRes = await fetch(`${apiBase}/api/v1/rooms/${room.id}/participants/${clientB.user.id}`, {
+    const kickRes = await apiFetch(`/api/v1/rooms/${room.id}/participants/${clientB.user.id}`, {
       method: 'DELETE', headers: { Authorization: `Bearer ${clientA.token}` },
     });
     if (!kickRes.ok) throw new Error(`Host could not kick participant: ${await kickRes.text()}`);
-    const kickedGet = await fetch(`${apiBase}/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientB.token}` } });
+    const kickedGet = await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientB.token}` } });
     if (kickedGet.status !== 404) throw new Error('Kicked user can still view the room instead of receiving not-found');
-    const kickedList = await (await fetch(`${apiBase}/api/v1/rooms?search=Sync%20Verification%20Room&limit=50`, { headers: { Authorization: `Bearer ${clientB.token}` } })).json() as any;
+    const kickedList = await (await apiFetch(`/api/v1/rooms?search=Sync%20Verification%20Room&limit=50`, { headers: { Authorization: `Bearer ${clientB.token}` } })).json() as any;
     if (kickedList.data?.some((candidate: any) => candidate.id === room.id)) throw new Error('Kicked room remains visible in the kicked user room list');
     let blockedRejoin = false;
     try { await joinRoom(clientB.token, room.id); } catch { blockedRejoin = true; }
@@ -526,16 +564,16 @@ async function runMultiClientSyncTest() {
     passedTests++;
 
     // Once the kicker leaves and the remaining host changes, the old kick no longer applies.
-    await fetch(`${apiBase}/api/v1/rooms/${roomC.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
+    await apiFetch(`/api/v1/rooms/${roomC.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
     clientSocketB.disconnect();
-    await fetch(`${apiBase}/api/v1/rooms/${roomC.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+    await apiFetch(`/api/v1/rooms/${roomC.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
     clientSocketC.disconnect();
     await joinRoom(clientC.token, room.id);
     socketC = await connectSocket(clientC.token);
     const reconnectedSocketC = socketC;
     reconnectedSocketC.emit('room:join', { roomId: room.id });
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const hostLeave = await fetch(`${apiBase}/api/v1/rooms/${room.id}/leave`, {
+    const hostLeave = await apiFetch(`/api/v1/rooms/${room.id}/leave`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
       body: JSON.stringify({}),
     });
@@ -544,9 +582,9 @@ async function runMultiClientSyncTest() {
     console.log('  ✅ PASS: Kicked user can join after the host who kicked them leaves');
     passedTests++;
 
-    await fetch(`${apiBase}/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
-    await fetch(`${apiBase}/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
-    const dissolvedRoom = await fetch(`${apiBase}/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientC.token}` } });
+    await apiFetch(`/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
+    await apiFetch(`/api/v1/rooms/${room.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+    const dissolvedRoom = await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientC.token}` } });
     if (dissolvedRoom.status !== 404) throw new Error('Room was not dissolved after its last participant left');
     console.log('  ✅ PASS: Room dissolves after its last participant leaves');
     passedTests++;
@@ -566,12 +604,190 @@ async function runMultiClientSyncTest() {
     });
     lastMemberSocket.emit('room:leave', { roomId: socketOnlyRoom.id });
     if (await dissolvedEvent !== 'dissolved') throw new Error('Last member received the wrong room removal reason');
-    const socketDissolvedRoom = await fetch(`${apiBase}/api/v1/rooms/${socketOnlyRoom.id}`, {
+    const socketDissolvedRoom = await apiFetch(`/api/v1/rooms/${socketOnlyRoom.id}`, {
       headers: { Authorization: `Bearer ${clientA.token}` },
     });
     if (socketDissolvedRoom.status !== 404) throw new Error('Socket leave left a zero-member room in the database');
     console.log('  ✅ PASS: Final socket leave dissolves the room and broadcasts removal');
     passedTests++;
+
+    // ---------------------------------------------------------------------
+    // Playback ordering: a command built on an older playback generation must
+    // never be able to move the room backwards.
+    // ---------------------------------------------------------------------
+    const versionRoom = await createRoom(clientA.token, 'Playback Ordering Room', 'Version test', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+    await joinRoom(clientB.token, versionRoom.id);
+    socketA = await connectSocket(clientA.token);
+    socketB = await connectSocket(clientB.token);
+    const versionSocketA = socketA;
+    const versionSocketB = socketB;
+    versionSocketA.emit('room:join', { roomId: versionRoom.id });
+    versionSocketB.emit('room:join', { roomId: versionRoom.id });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const seekBroadcast = new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Seek was never broadcast to the room member')), 3000);
+      versionSocketB.once('media:seek', (payload: any) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+    });
+    versionSocketA.emit('media:seek', { roomId: versionRoom.id, positionMs: 30_000, version: 0 });
+    const acceptedSeek = await seekBroadcast;
+    if (typeof acceptedSeek.version !== 'number' || acceptedSeek.version < 1) {
+      throw new Error(`Accepted seek did not carry an incremented playback version: ${JSON.stringify(acceptedSeek)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    let rewoundByStaleCommand = false;
+    const onLateSeek = (payload: any) => { if (payload.positionMs === 5_000) rewoundByStaleCommand = true; };
+    versionSocketB.on('media:seek', onLateSeek);
+    const correction = new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Stale playback command was neither applied nor corrected')), 3000);
+      versionSocketA.once('media:state', (payload: any) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+    });
+    versionSocketA.emit('media:seek', { roomId: versionRoom.id, positionMs: 5_000, version: acceptedSeek.version - 1 });
+    const correctionPayload = await correction;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    versionSocketB.off('media:seek', onLateSeek);
+    if (rewoundByStaleCommand) throw new Error('A command built on a stale playback version rewound the room');
+    if (!correctionPayload.rejected || correctionPayload.positionMs < 30_000) {
+      throw new Error(`Stale command rejection did not carry the authoritative position: ${JSON.stringify(correctionPayload)}`);
+    }
+    console.log('  ✅ PASS: A playback command from an older generation is refused and the sender is corrected');
+    passedTests++;
+
+    // Out-of-order playhead samples carrying the *same* version are dropped by clock.
+    const firstSample = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('First host sample never reached the room')), 3000);
+      versionSocketB.once('media:sync', (payload: any) => {
+        clearTimeout(timeout);
+        if (payload.positionMs === 40_000) resolve();
+        else reject(new Error(`Unexpected first sample: ${JSON.stringify(payload)}`));
+      });
+    });
+    const sampleClock = Date.now();
+    versionSocketA.emit('media:sync', { roomId: versionRoom.id, positionMs: 40_000, isPlaying: true, timestamp: sampleClock });
+    await firstSample;
+    versionSocketA.emit('media:sync', { roomId: versionRoom.id, positionMs: 10_000, isPlaying: true, timestamp: sampleClock - 1_000 });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const lateJoinSnapshot = new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Late joiner received no playback snapshot')), 3000);
+      versionSocketB.once('media:sync', (payload: any) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+    });
+    versionSocketB.emit('room:join', { roomId: versionRoom.id });
+    const snapshot = await lateJoinSnapshot;
+    if (snapshot.positionMs < 40_000) {
+      throw new Error(`A late-arriving older sample rewound the authoritative playhead to ${snapshot.positionMs}`);
+    }
+    console.log('  ✅ PASS: An out-of-order host sample cannot rewind the room playhead');
+    passedTests++;
+
+    // ---------------------------------------------------------------------
+    // Missed-message recovery: a client that lost its socket asks for the gap only.
+    // ---------------------------------------------------------------------
+    const cursorMessage = new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Backfill fixture message was not accepted')), 3000);
+      versionSocketA.once('chat:message', (payload: any) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+    });
+    versionSocketB.emit('chat:message', { roomId: versionRoom.id, text: 'before-the-drop' });
+    const cursorAnchor = await cursorMessage;
+    const cursor = cursorAnchor.createdAt;
+    if (!cursor) throw new Error('Message DTO carried no createdAt cursor');
+
+    versionSocketB.disconnect();
+    const missedFirst = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Missed message 1 was not stored')), 3000);
+      versionSocketA.on('chat:message', (payload: any) => { if (payload.text === 'missed-while-offline-1') { clearTimeout(timeout); resolve(); } });
+    });
+    versionSocketA.emit('chat:message', { roomId: versionRoom.id, text: 'missed-while-offline-1' });
+    await missedFirst;
+    const missedSecond = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Missed message 2 was not stored')), 3000);
+      versionSocketA.on('chat:message', (payload: any) => { if (payload.text === 'missed-while-offline-2') { clearTimeout(timeout); resolve(); } });
+    });
+    versionSocketA.emit('chat:message', { roomId: versionRoom.id, text: 'missed-while-offline-2' });
+    await missedSecond;
+
+    const backfillRes = await apiFetch(`/api/v1/chat/room/${versionRoom.id}?since=${encodeURIComponent(cursor)}`, {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    const backfill = await backfillRes.json() as any;
+    if (!backfillRes.ok) throw new Error(`Backfill request failed: ${JSON.stringify(backfill)}`);
+    const recoveredTexts = (backfill.data || []).map((message: any) => message.text);
+    if (!recoveredTexts.includes('missed-while-offline-1') || !recoveredTexts.includes('missed-while-offline-2')) {
+      throw new Error(`Backfill did not return the messages sent during the gap: ${JSON.stringify(recoveredTexts)}`);
+    }
+    if (!recoveredTexts.includes('before-the-drop')) {
+      throw new Error('Backfill cursor lost the message the client already held');
+    }
+    const emptyBackfill = await (await apiFetch(`/api/v1/chat/room/${versionRoom.id}?since=${encodeURIComponent(new Date().toISOString())}`, {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    })).json() as any;
+    if ((emptyBackfill.data || []).length !== 0) throw new Error('A cursor in the future still returned history');
+    const invalidCursor = await apiFetch(`/api/v1/chat/room/${versionRoom.id}?since=not-a-date`, {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    if (invalidCursor.status !== 400) throw new Error(`An unparseable cursor returned ${invalidCursor.status} instead of 400`);
+    console.log('  ✅ PASS: Room chat backfill returns exactly the missed window and rejects a bad cursor');
+    passedTests++;
+
+    socketB = await connectSocket(clientB.token);
+    const recoveredSocketB = socketB;
+    recoveredSocketB.emit('room:join', { roomId: versionRoom.id });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // ---------------------------------------------------------------------
+    // Presence TTL: a process that dies without disconnecting stops advertising itself.
+    // ---------------------------------------------------------------------
+    recoveredSocketB.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await UserModel.updateOne({ _id: clientB.user.id }, { $set: { presenceStatus: 'online', lastActiveAt: new Date(Date.now() - 10 * 60_000) } });
+    const reclaimed = await sweepStalePresence();
+    const reclaimedUser = await UserModel.findById(clientB.user.id).select('presenceStatus');
+    if (!reclaimed.includes(clientB.user.id) || reclaimedUser?.presenceStatus !== 'offline') {
+      throw new Error('Presence sweep did not reclaim a user whose heartbeat stopped');
+    }
+    await UserModel.updateOne({ _id: clientA.user.id }, { $set: { presenceStatus: 'online', lastActiveAt: new Date(Date.now() - 10 * 60_000) } });
+    if ((await sweepStalePresence()).includes(clientA.user.id)) {
+      throw new Error('Presence sweep reclaimed a user that still holds an open socket');
+    }
+    const stillOnline = await UserModel.findById(clientA.user.id).select('presenceStatus');
+    if (stillOnline?.presenceStatus === 'offline') throw new Error('Socket-connected user was wrongly marked offline');
+    console.log('  ✅ PASS: Presence sweep reclaims abandoned sessions but never a live socket');
+    passedTests++;
+
+    await apiFetch(`/api/v1/rooms/${versionRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
+    await apiFetch(`/api/v1/rooms/${versionRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
+
+    // ---------------------------------------------------------------------
+    // Discovery ranking: a busier room outranks a brand-new empty one.
+    // ---------------------------------------------------------------------
+    const quietRoom = await createRoom(clientC.token, 'Quiet Ranking Room', 'Quiet', '');
+    const busyRoom = await createRoom(clientA.token, 'Busy Ranking Room', 'Busy', '');
+    await joinRoom(clientB.token, busyRoom.id);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const ranked = await (await apiFetch('/api/v1/rooms?limit=50', { headers: { Authorization: `Bearer ${clientB.token}` } })).json() as any;
+    const rankedIds = (ranked.data || []).map((candidate: any) => candidate.id);
+    const busyIndex = rankedIds.indexOf(busyRoom.id);
+    const quietIndex = rankedIds.indexOf(quietRoom.id);
+    if (busyIndex === -1 || quietIndex === -1) throw new Error('Discovery list dropped a room that is open to the requester');
+    if (busyIndex > quietIndex) throw new Error('Discovery ranked a one-member room above a two-member room');
+    console.log('  ✅ PASS: Room discovery ranks a busier room above a brand-new empty one');
+    passedTests++;
+
+    await apiFetch(`/api/v1/rooms/${busyRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
+    await apiFetch(`/api/v1/rooms/${busyRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
+    await apiFetch(`/api/v1/rooms/${quietRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
 
     // Cleanup sockets
     socketA.disconnect();
@@ -587,6 +803,10 @@ async function runMultiClientSyncTest() {
     socketA?.disconnect();
     socketB?.disconnect();
     socketC?.disconnect();
+    // Disconnect handlers persist presence and membership asynchronously. Let
+    // those writes finish before the database goes away, otherwise teardown
+    // logs a misleading MongoNotConnectedError after a fully passing run.
+    await new Promise((resolve) => setTimeout(resolve, 750));
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
     await mongoose.disconnect();
     await testDatabase.stop();

@@ -89,6 +89,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
+import com.nebula.app.domain.model.MessageSendState
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaAvatarImage
@@ -110,6 +111,7 @@ fun NebulaChatDetailScreen(
     onSendAttachment: (text: String, mediaUrl: String, messageType: String, isSpoiler: Boolean, mimeType: String) -> Unit,
     onEditMessage: (messageId: String, text: String) -> Unit,
     onUnsendMessage: (messageId: String) -> Unit,
+    onRetryMessage: (clientKey: String) -> Unit = {},
     onOpenProfile: () -> Unit,
     onInviteToRoom: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -356,7 +358,8 @@ fun NebulaChatDetailScreen(
                             showsReceipt = message.id == lastOwnMessageId,
                             dragOffset = dragOffsetAnimatable.value,
                             onEdit = { editingMessage = message },
-                            onUnsend = { onUnsendMessage(message.id) }
+                            onUnsend = { onUnsendMessage(message.id) },
+                            onRetry = { message.clientKey?.let(onRetryMessage) }
                         )
                     }
                 }
@@ -929,7 +932,8 @@ private fun ModernChatBubble(
     showsReceipt: Boolean,
     dragOffset: Float,
     onEdit: () -> Unit,
-    onUnsend: () -> Unit
+    onUnsend: () -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     var showActions by remember(message.id) { mutableStateOf(false) }
@@ -1034,6 +1038,9 @@ private fun ModernChatBubble(
                 )
         ) {
             val isMedia = message.deletedAt == null && (message.mediaUrl != null || message.messageType == "media")
+            // The Surface slot stacks its children in a Box, so the delivery marker has
+            // to live in a Column or it would be painted on top of the message text.
+            Column {
             if (isMedia) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     // Border-less media surface. The height follows the picture's
@@ -1209,6 +1216,27 @@ private fun ModernChatBubble(
                         lineHeight = 19.sp
                     )
                 )
+            }
+
+            // Delivery state for messages this device sent. Only a server-confirmed
+            // message is shown without a marker, so a lost connection can never look
+            // like a delivered message.
+            if (isMe && message.deletedAt == null && message.sendState != MessageSendState.SENT) {
+                val failed = message.sendState == MessageSendState.FAILED
+                Text(
+                    text = if (failed) "Not sent · Tap to retry" else "Sending…",
+                    modifier = Modifier.padding(top = 4.dp).let {
+                        if (failed) it.clickable { onRetry() } else it
+                    },
+                    style = theme.typography.caption.copy(
+                        // Both markers sit on the accent bubble, so they stay white;
+                        // failure is distinguished by weight and wording, not hue.
+                        color = Color.White.copy(alpha = if (failed) 1f else 0.65f),
+                        fontSize = 11.sp,
+                        fontWeight = if (failed) FontWeight.Bold else FontWeight.Normal
+                    )
+                )
+            }
             }
         }
 

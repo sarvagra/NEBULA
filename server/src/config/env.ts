@@ -58,10 +58,10 @@ export const config = {
     database: requireExternal('MONGODB_DATABASE'),
   },
   auth: {
+    // Google is the only identity provider. The web client ID is used to check
+    // the audience of Google-issued tokens; Firebase ID tokens are verified
+    // separately with the Admin SDK.
     googleClientId: process.env.GOOGLE_CLIENT_ID || '',
-    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    otpProvider: requireExternal('OTP_PROVIDER'),
-    otpApiKey: process.env.OTP_API_KEY || '',
     jwtSecret: requireSecret('JWT_SECRET'),
     jwtRefreshSecret: requireSecret('JWT_REFRESH_SECRET'),
     jwtExpiresIn: '7d',
@@ -73,20 +73,18 @@ export const config = {
     privateKey: (process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '').replace(/^"|"$/g, '').trim(),
     webApiKey: process.env.FIREBASE_WEB_API_KEY?.trim() || '',
   },
-  captcha: {
-    siteKey: process.env.CAPTCHA_SITE_KEY || '',
-    secretKey: process.env.CAPTCHA_SECRET_KEY || '',
-  },
-  playIntegrity: {
-    cloudProjectNumber: process.env.PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER || '',
-  },
   appCheck: {
     enforcement: (process.env.APP_CHECK_ENFORCEMENT || 'warn') as 'enforce' | 'warn' | 'off',
   },
   clientAttestation: {
     enforcement: (process.env.APP_ATTESTATION_ENFORCEMENT || 'enforce') as 'enforce' | 'warn' | 'off',
+    // Shared with the shipped Android client, so treat this as a client
+    // identifier rather than a real secret. Play Integrity (App Check) is the
+    // control that actually resists a determined attacker.
     secret: process.env.NEBULA_APP_CLIENT_SECRET || 'nebula_android_client_attestation_2026_x89a',
   },
+  // Google Play billing is not part of the current product scope; the module
+  // refuses to operate in production without a service account.
   billing: {
     packageName: process.env.PLAY_PACKAGE_NAME || 'com.nebula.app',
     serviceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
@@ -96,12 +94,6 @@ export const config = {
   media: {
     youtubeApiKey: process.env.YOUTUBE_API_KEY || '',
   },
-  ads: {
-    appId: process.env.ADMOB_APP_ID || '',
-    bannerId: process.env.ADMOB_BANNER_ID || '',
-    interstitialId: process.env.ADMOB_INTERSTITIAL_ID || '',
-    rewardedId: process.env.ADMOB_REWARDED_ID || '',
-  },
   storage: {
     provider: requireRemoteProvider('STORAGE_PROVIDER'),
     bucket: process.env.STORAGE_BUCKET || '',
@@ -110,16 +102,6 @@ export const config = {
     endpoint: process.env.STORAGE_ENDPOINT || '',
     region: process.env.STORAGE_REGION || 'auto',
     publicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL || '',
-  },
-  monitoring: {
-    sentryDsn: process.env.SENTRY_DSN || '',
-  },
-  ai: {
-    // Deliberately empty per specification
-    provider: process.env.AI_PROVIDER || '',
-    apiKey: process.env.AI_API_KEY || '',
-    model: process.env.AI_MODEL || '',
-    embeddingModel: process.env.AI_EMBEDDING_MODEL || '',
   },
   email: {
     brevoApiKey: process.env.BREVO_API_KEY || '',

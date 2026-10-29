@@ -8,6 +8,9 @@ import { FirebaseService } from './firebaseService';
 
 const googleClient = new OAuth2Client(config.auth.googleClientId);
 
+/** Concurrent signed-in devices allowed per account. */
+export const MAX_ACTIVE_DEVICES = 2;
+
 export interface AuthTokens {
   token: string;
   refreshToken: string;
@@ -28,7 +31,14 @@ export class AuthService {
     user: IUser,
     deviceInfo?: string,
     ipAddress?: string,
-    deviceId?: string
+    deviceId?: string,
+    /**
+     * Signing in on a device the user physically holds must not be impossible just
+     * because two sessions from installs they no longer have are still open. When the
+     * caller explicitly asks for it, the least recently used session is retired to make
+     * room instead of locking the account out of its own recovery path.
+     */
+    replaceOldestDevice = false
   ): Promise<AuthTokens> {
     const userId = user._id.toString();
 
@@ -44,13 +54,26 @@ export class AuthService {
       ? activeSessions.find((s) => s.deviceId === deviceId)
       : activeSessions.find((s) => s.deviceInfo === deviceInfo);
 
-    if (!existingSameDeviceSession && activeSessions.length >= 2) {
-      const error: any = new Error(
-        'Device limit reached. Your account is already logged into 2 devices. Please log out from another device in Settings > Account before signing in on a new device.'
-      );
-      error.statusCode = 403;
-      error.code = 'DEVICE_LIMIT_REACHED';
-      throw error;
+    if (!existingSameDeviceSession && activeSessions.length >= MAX_ACTIVE_DEVICES) {
+      if (!replaceOldestDevice) {
+        const error: any = new Error(
+          'Device limit reached. Your account is already logged into 2 devices. Retry with replaceOldestDevice to sign out the least recently used device, or log out from another device in Settings > Account.'
+        );
+        error.statusCode = 403;
+        error.code = 'DEVICE_LIMIT_REACHED';
+        throw error;
+      }
+      // Oldest activity first; the session holding the device for the longest wins
+      // the eviction. Never evict more than needed.
+      const evictable = [...activeSessions]
+        .sort((a, b) => new Date(a.lastActiveAt ?? a.createdAt).getTime() - new Date(b.lastActiveAt ?? b.createdAt).getTime())
+        .slice(0, activeSessions.length - (MAX_ACTIVE_DEVICES - 1));
+      for (const stale of evictable) {
+        await RefreshTokenModel.updateOne(
+          { _id: stale._id },
+          { revoked: true, revokedAt: new Date() }
+        );
+      }
     }
 
     // If re-authenticating from the same device, retire the previous token for this device
