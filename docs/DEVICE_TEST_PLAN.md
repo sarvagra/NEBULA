@@ -248,9 +248,21 @@ Backend: **local server from this working tree** on `127.0.0.1:5001` via
 
 Observation worth recording: the first sign-in attempt during this run appeared to
 fail with `Device limit reached` because the app was still pointed at the deployed
-instance, which does not yet accept `replaceOldestDevice`. Against the working-tree
-server the same flow succeeded. **The fix is inert in production until the backend
-is redeployed.**
+instance, which did not yet accept `replaceOldestDevice`. Against the working-tree
+server the same flow succeeded.
+
+### 4e.1 Production re-run after deploy (same day)
+
+The backend was then deployed (`main` = `ccaf7e5`, confirmed by
+`GET /health → revision: ccaf7e5`, not by the push alone) and the same case was
+repeated against production with the app on its default URL and a fourth new
+device identity (`android_live_CCAF7E5`).
+
+| Case | Result | Evidence / observation |
+|---|---|---|
+| AUTH-10 in production | **PASS** | Sign-in reached `Welcome back, Sarvagra Singh` with two sessions already active — no device-limit surface |
+| AUTH-10 single eviction in production | **PASS** | Active sessions after: `android_probe_3010301` + `android_live_CCAF7E5`; `android_e8…` (created 2026-10-29T19:37Z, the least recently used) revoked at 19:51:33Z. Exactly one session retired |
+| AUTH-05 after production sign-in | **PASS** | `Continue` → Home as `@sarvagra_s`; empty crash buffer |
 
 ## 5. Evidence convention
 
