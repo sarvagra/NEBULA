@@ -285,6 +285,23 @@ device identity (`android_live_CCAF7E5`).
 | AUTH-10 single eviction in production | **PASS** | Active sessions after: `android_probe_3010301` + `android_live_CCAF7E5`; `android_e8…` (created 2026-10-29T19:37Z, the least recently used) revoked at 19:51:33Z. Exactly one session retired |
 | AUTH-05 after production sign-in | **PASS** | `Continue` → Home as `@sarvagra_s`; empty crash buffer |
 
+## 4f. Harness run — 2026-10-30 (playback drift and host hand-off)
+
+`npm run test:resilience` boots the real app and socket server against an
+in-memory database, plays a scripted host playhead, and measures what a client
+would actually see. Measurements, not just pass/fail:
+
+| Case | Result | Observation |
+|---|---|---|
+| SYNC-01 Late join | **PASS** | Drift **199 ms** against a 650 ms dead-band; the joiner received the current media title, not the DB default |
+| SYNC-05 Reconnect | **PASS** | Socket dropped while the room played; after reconnect the snapshot drifted **2 ms** |
+| ROOM-06 Non-host control | **PASS** | A listener that reconnected still could not move the playhead |
+| ROOM-05 Host hand-off | **PASS** | Host socket dropped with no leave: ownership transferred to the remaining member, persisted on the room, and the remaining member was not dropped |
+| ROOM-05 New host controls | **PASS** | The promoted member paused playback successfully with no reconnect |
+
+Grace was shortened to 1.5 s for the harness via `NEBULA_INACTIVITY_GRACE_MS`;
+production keeps 60 s.
+
 ## 5. Evidence convention
 
 Store screenshots/UI dumps under `qa_evidence/<date>/` with the case ID in the

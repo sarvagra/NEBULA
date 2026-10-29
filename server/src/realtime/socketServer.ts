@@ -187,7 +187,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
   mediaVersionByRoom.clear();
   liveSampleClockByRoom.clear();
   const inactivityTimers = new Map<string, NodeJS.Timeout>();
-  const inactivityGraceMs = 60_000;
+  // Overridable so a test can observe host hand-off without waiting a full minute;
+  // production keeps the 60-second grace unless the environment says otherwise.
+  const configuredGrace = Number(process.env.NEBULA_INACTIVITY_GRACE_MS);
+  const inactivityGraceMs = Number.isFinite(configuredGrace) && configuredGrace > 0 ? configuredGrace : 60_000;
   const mediaCheckpointAt = new Map<string, number>();
   const timerKey = (roomId: string, userId: string) => `${roomId}:${userId}`;
   const cancelInactivityRemoval = (roomId: string, userId: string) => {

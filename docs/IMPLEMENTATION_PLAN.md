@@ -70,7 +70,7 @@ suite green; app launches to the auth gate.
 | 4.2 | Room discovery ranking (recency + participants) and filter chips — **Done:** discovery ranks by participants, activity recency and whether media is playing, instead of newest-first; the candidate window is bounded (≤150) and ties fall back to most recently active. Suite-asserted (busier room outranks a newer empty one) | — |
 | 4.3 | Room queue model (add/vote/skip) matching reference behaviour | 4.1 |
 | 4.4 | Shareable invite codes and resolved deep links | — | Partially done — rooms now carry a non-guessable 8-character code (ambiguous characters excluded) exposed in the room DTO, `GET /rooms/invite/:code` resolves it for a viewer who may see the room, and a refused private room answers byte-identically to an unknown code. Suite-asserted. **Remaining:** the Android share sheet and the `nebula://room/<code>` intent handler |
-| 4.5 | Host-disconnect / host-transfer UX and room lifecycle edge cases | 4.1 |
+| 4.5 | Host-disconnect / host-transfer UX and room lifecycle edge cases — **Engine done:** the inactivity grace is now configurable (`NEBULA_INACTIVITY_GRACE_MS`), and the resilience harness proves that when the host's socket disappears the room and its remaining member survive, ownership transfers and persists, and the promoted member can control playback without reconnecting. **Remaining:** the in-app affordance that tells a user the host dropped | 4.1 |
 | 4.6 | Moderation surface for reports inside rooms | 2.4 |
 
 ## Phase 5 — Playback synchronisation
@@ -79,7 +79,7 @@ suite green; app launches to the auth gate.
 |---|---|---|
 | 5.1 | Version playback state server-side; reject stale/out-of-order client commands — **Done:** every accepted host command increments a room version that rides on every playback event; a command built on an older version is refused with an authoritative `media:state` correction, and an out-of-order host sample cannot rewind the playhead (4 new suite assertions) | — |
 | 5.2 | Non-YouTube player path (direct HLS/MP4) so validated links are actually playable | 5.1 |
-| 5.3 | Reconnect/late-join drift measurement harness (two clients, scripted seeks) | 5.1 |
+| 5.3 | Reconnect/late-join drift measurement harness (two clients, scripted seeks) — **Done:** `npm run test:resilience` drives a host playhead and measures the error a late joiner and a reconnecting viewer land with. Measured on 2026-10-30: late-join **199 ms**, reconnect **2 ms**, budget 650 ms. Also asserts a listener cannot move the room, before or after reconnecting | 5.1 |
 | 5.4 | Buffering/error states and host hand-off of stalled media | 5.2 |
 
 ## Phase 6 — Social integration and notifications

@@ -11,7 +11,8 @@
     "test:security": "NEBULA_TEST_GLOBAL_LIMIT_MAX=2000 ts-node-dev --transpile-only src/tests/securityTests.ts",
     "test:db": "ts-node-dev --transpile-only src/tests/connectivityTest.ts",
     "test:firebase": "ts-node-dev --transpile-only src/tests/firebaseAuthFlowTest.ts",
-    "test:sync": "ts-node-dev --transpile-only src/tests/multiClientSyncTest.ts"
+    "test:sync": "ts-node-dev --transpile-only src/tests/multiClientSyncTest.ts",
+    "test:resilience": "NEBULA_INACTIVITY_GRACE_MS=1500 ts-node-dev --transpile-only src/tests/playbackResilienceTest.ts"
   },
   "keywords": [
     "nebula",
