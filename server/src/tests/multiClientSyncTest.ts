@@ -833,7 +833,79 @@ async function runMultiClientSyncTest() {
     passedTests++;
 
     await apiFetch(`/api/v1/rooms/${privateRoom.data.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
-    await apiFetch(`/api/v1/rooms/${shareableRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
+
+    // ---------------------------------------------------------------------
+    // Room queue: members add and vote, a strict majority skips, the host can
+    // force the next item, and non-members are refused.
+    // ---------------------------------------------------------------------
+    // Reuses the shareable room rather than creating another: room creation is rate
+    // limited per user, and a suite that trips its own limiter proves nothing.
+    const queueRoom = shareableRoom;
+    await joinRoom(clientB.token, queueRoom.id);
+    const firstItemRes = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientB.token}` },
+      body: JSON.stringify({ title: 'Queued One', mediaUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }),
+    });
+    const firstItem = await firstItemRes.json() as any;
+    if (firstItemRes.status !== 201) throw new Error(`Could not queue an item: ${JSON.stringify(firstItem)}`);
+    const secondItemRes = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
+      body: JSON.stringify({ title: 'Queued Two', mediaUrl: 'https://www.youtube.com/watch?v=hTWKbfoikeg' }),
+    });
+    const secondItem = await secondItemRes.json() as any;
+    if (secondItemRes.status !== 201) throw new Error(`Could not queue a second item: ${JSON.stringify(secondItem)}`);
+
+    const outsiderAdd = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientC.token}` },
+      body: JSON.stringify({ title: 'Outsider', mediaUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }),
+    });
+    if (outsiderAdd.status !== 403) throw new Error(`A non-member queued an item with status ${outsiderAdd.status}`);
+
+    const firstVote = await (await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue/${firstItem.data.id}/skip-vote`, {
+      method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` },
+    })).json() as any;
+    if (firstVote.data?.skipped !== false || firstVote.data?.skipVotesRequired !== 2) {
+      throw new Error(`One of two members skipped the item alone: ${JSON.stringify(firstVote.data)}`);
+    }
+    const secondVote = await (await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue/${firstItem.data.id}/skip-vote`, {
+      method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` },
+    })).json() as any;
+    if (secondVote.data?.skipped !== true) {
+      throw new Error(`A strict majority did not skip the item: ${JSON.stringify(secondVote.data)}`);
+    }
+    // A vote removes the item from the queue; it must not change what is playing.
+    const afterSkip = await (await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue`, {
+      headers: { Authorization: `Bearer ${clientA.token}` },
+    })).json() as any;
+    const remainingTitles = (afterSkip.data || []).map((entry: any) => entry.title);
+    if (remainingTitles.includes('Queued One')) throw new Error('The skipped item stayed in the queue');
+    if (!remainingTitles.includes('Queued Two')) throw new Error('Skipping removed more than the voted item');
+
+    const advance = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue/advance`, {
+      method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` },
+    });
+    if (!advance.ok) throw new Error(`Host could not advance the queue: ${await advance.text()}`);
+    const afterAdvance = await (await apiFetch(`/api/v1/rooms/${queueRoom.id}`, {
+      headers: { Authorization: `Bearer ${clientA.token}` },
+    })).json() as any;
+    if (afterAdvance.data?.mediaState?.title !== 'Queued Two') {
+      throw new Error(`Advancing did not start the next item: ${JSON.stringify(afterAdvance.data?.mediaState?.title)}`);
+    }
+    const emptyAdvance = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue/advance`, {
+      method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` },
+    });
+    if (emptyAdvance.status !== 404) throw new Error(`Advancing an empty queue returned ${emptyAdvance.status}`);
+    const viewerAdvance = await apiFetch(`/api/v1/rooms/${queueRoom.id}/queue/advance`, {
+      method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    if (viewerAdvance.status !== 403) throw new Error(`A non-host advanced the queue with status ${viewerAdvance.status}`);
+    console.log('  ✅ PASS: Queue add, strict-majority skip, host-only advance, and membership checks all hold');
+    passedTests++;
+
+    await apiFetch(`/api/v1/rooms/${queueRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
 
     // Cleanup sockets
     socketA.disconnect();

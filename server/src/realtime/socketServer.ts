@@ -128,6 +128,11 @@ export function notifyUserSocialChanged(userIds: string[]): void {
   }
 }
 
+/** Tells everyone in the room that the queue changed, wherever the change came from. */
+export function notifyRoomQueueChanged(roomId: string): void {
+  roomIo?.to(`room:${roomId}`).emit('queue:updated', { roomId });
+}
+
 export function notifyRoomHostChanged(roomId: string, newHostId: string): void {
   liveHostByRoom.set(roomId, newHostId);
   roomIo?.to(`room:${roomId}`).emit('room:host_changed', { newHostId });

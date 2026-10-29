@@ -8,9 +8,10 @@ import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
 import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { NotificationModel } from '../../models/Notification';
-import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated } from '../../realtime/socketServer';
+import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated, notifyRoomQueueChanged } from '../../realtime/socketServer';
 import { entitlementsForTier } from '../../utils/entitlements';
 import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
+import { RoomQueueItemModel } from '../../models/RoomQueueItem';
 
 async function claimActiveRoom(userId: string, roomId: string): Promise<boolean> {
   const otherMembership = await RoomModel.findOne({
@@ -845,5 +846,210 @@ export async function moderateRoomParticipant(req: Request, res: Response): Prom
     res.json({ success: true, data: updatedParticipant });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to update participant moderation' });
+  }
+}
+
+// ==========================================
+// ROOM QUEUE
+// ==========================================
+
+/**
+ * Votes needed to skip an item. A strict majority, so a room of two still needs
+ * both people and one annoyed member cannot eject what everyone else is watching.
+ */
+function skipVotesRequired(participantCount: number): number {
+  return Math.floor(participantCount / 2) + 1;
+}
+
+/** Loads the room and returns null (after answering) when the caller is not in it. */
+async function roomForMember(req: Request, res: Response) {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: 'Authentication required' });
+    return null;
+  }
+  const room = await RoomModel.findById(req.params.id);
+  if (!room || room.participants.length === 0) {
+    res.status(404).json({ success: false, error: 'Room not found' });
+    return null;
+  }
+  if (!room.participants.some((participant) => participant.userId === req.user!.id)) {
+    res.status(403).json({ success: false, error: 'You are not a member of this room' });
+    return null;
+  }
+  return room;
+}
+
+function queueItemDTO(item: any, participantCount: number) {
+  return {
+    id: item._id.toString(),
+    roomId: item.roomId,
+    title: item.title,
+    subtitle: item.subtitle,
+    mediaUrl: item.mediaUrl,
+    durationSeconds: item.durationSeconds,
+    addedByUserId: item.addedByUserId,
+    addedByName: item.addedByName,
+    skipVoteCount: item.skipVoterIds.length,
+    skipVotesRequired: skipVotesRequired(participantCount),
+    skipVoterIds: item.skipVoterIds,
+    createdAt: item.createdAt,
+  };
+}
+
+export async function listRoomQueue(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const items = await RoomQueueItemModel.find({ roomId: room._id.toString() }).sort({ createdAt: 1 }).limit(50);
+    res.json({
+      success: true,
+      data: items.map((item) => queueItemDTO(item, room.participants.length)),
+      meta: { skipVotesRequired: skipVotesRequired(room.participants.length) },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to load the room queue' });
+  }
+}
+
+export async function addRoomQueueItem(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const { title, subtitle, mediaUrl, durationSeconds } = req.body || {};
+    if (!mediaUrl || typeof mediaUrl !== 'string') {
+      res.status(400).json({ success: false, error: 'A media link is required' });
+      return;
+    }
+    const verification = await tryVerifyPlayableLink(String(mediaUrl));
+    if (!verification.ok) {
+      res.status(422).json({ success: false, code: verification.code, error: verification.error });
+      return;
+    }
+    const pending = await RoomQueueItemModel.countDocuments({ roomId: room._id.toString() });
+    if (pending >= 20) {
+      res.status(409).json({ success: false, error: 'This room queue is full (20 items)' });
+      return;
+    }
+    const item = await RoomQueueItemModel.create({
+      roomId: room._id.toString(),
+      title: String(title || 'Queued video').slice(0, 150),
+      subtitle: String(subtitle || '').slice(0, 150),
+      mediaUrl: verification.link.sourceUrl,
+      durationSeconds: Math.max(0, Number(durationSeconds) || 0),
+      addedByUserId: req.user!.id,
+      addedByName: req.user!.displayName || 'Nebula User',
+    });
+    notifyRoomQueueChanged(room._id.toString());
+    res.status(201).json({ success: true, data: queueItemDTO(item, room.participants.length) });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to add to the room queue' });
+  }
+}
+
+/**
+ * Applies a queued item as the room's current media. Used by both the host's
+ * manual advance and by a successful vote-to-skip, so the two cannot diverge.
+ */
+async function playQueueItem(room: any, item: any): Promise<void> {
+  room.mediaState.title = item.title;
+  room.mediaState.subtitle = item.subtitle;
+  room.mediaState.mediaUrl = item.mediaUrl;
+  room.mediaState.durationSeconds = item.durationSeconds;
+  room.mediaState.playbackPosition = 0;
+  room.mediaState.isPlaying = true;
+  await room.save();
+  await RoomQueueItemModel.deleteOne({ _id: item._id });
+  notifyRoomMediaSwitch(room._id.toString(), {
+    title: item.title,
+    subtitle: item.subtitle,
+    mediaUrl: item.mediaUrl,
+    durationSeconds: item.durationSeconds,
+    playbackPosition: 0,
+    isPlaying: true,
+  });
+  notifyRoomQueueChanged(room._id.toString());
+}
+
+export async function voteSkipQueueItem(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const item = await RoomQueueItemModel.findOne({ _id: req.params.itemId, roomId: room._id.toString() });
+    if (!item) {
+      res.status(404).json({ success: false, error: 'That item is no longer queued' });
+      return;
+    }
+    const userId = req.user!.id;
+    // Voting again withdraws the vote: a mis-tap must not be permanent.
+    const withdrawn = item.skipVoterIds.includes(userId);
+    item.skipVoterIds = withdrawn
+      ? item.skipVoterIds.filter((voter) => voter !== userId)
+      : [...item.skipVoterIds, userId];
+    await item.save();
+
+    const required = skipVotesRequired(room.participants.length);
+    // The queue holds items that are *not* playing yet, so a successful vote drops the
+    // unwanted item. Moving playback forward is the host's call; conflating the two
+    // made a vote silently change what everyone was already watching.
+    const skipped = !withdrawn && item.skipVoterIds.length >= required;
+    if (skipped) {
+      await RoomQueueItemModel.deleteOne({ _id: item._id });
+    }
+    notifyRoomQueueChanged(room._id.toString());
+
+    res.json({
+      success: true,
+      data: {
+        id: item._id.toString(),
+        skipped,
+        voteWithdrawn: withdrawn,
+        skipVoteCount: item.skipVoterIds.length,
+        skipVotesRequired: required,
+      },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to record the skip vote' });
+  }
+}
+
+export async function advanceRoomQueue(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    if (room.hostId !== req.user!.id) {
+      res.status(403).json({ success: false, error: 'Only the host can advance the queue' });
+      return;
+    }
+    const next = await RoomQueueItemModel.findOne({ roomId: room._id.toString() }).sort({ createdAt: 1 });
+    if (!next) {
+      res.status(404).json({ success: false, error: 'The queue is empty' });
+      return;
+    }
+    await playQueueItem(room, next);
+    res.json({ success: true, data: { playing: next.title, mediaUrl: next.mediaUrl } });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to advance the room queue' });
+  }
+}
+
+export async function removeRoomQueueItem(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const item = await RoomQueueItemModel.findOne({ _id: req.params.itemId, roomId: room._id.toString() });
+    if (!item) {
+      res.status(404).json({ success: false, error: 'That item is no longer queued' });
+      return;
+    }
+    const mayRemove = room.hostId === req.user!.id || item.addedByUserId === req.user!.id;
+    if (!mayRemove) {
+      res.status(403).json({ success: false, error: 'Only the host or the person who queued it can remove this' });
+      return;
+    }
+    await RoomQueueItemModel.deleteOne({ _id: item._id });
+    notifyRoomQueueChanged(room._id.toString());
+    res.json({ success: true, message: 'Removed from the queue' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to remove the queued item' });
   }
 }
