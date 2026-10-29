@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config/env';
 
@@ -59,6 +59,53 @@ export function resolveStoredObjectUrl(value?: string): string | undefined {
   } catch {
     return value;
   }
+}
+
+/**
+ * Recovers the storage key from a stored asset URL. Uploads are referenced by URL,
+ * so account deletion has to reverse that to know which objects to remove.
+ */
+export function objectKeyFromAssetUrl(url?: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname.startsWith('/storage/')) {
+      const encoded = parsed.pathname.slice('/storage/'.length).split('/')[0];
+      return encoded ? Buffer.from(encoded, 'base64url').toString('utf8') : null;
+    }
+    if (config.storage.publicBaseUrl && url.startsWith(config.storage.publicBaseUrl.replace(/\/$/, ''))) {
+      const relative = parsed.pathname.replace(/^\//, '');
+      return relative ? decodeURIComponent(relative) : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort object removal. A storage outage must never leave a deleted account
+ * half-purged in the database, so failures are reported and left for retry.
+ */
+export async function deleteObjects(keys: string[]): Promise<{ deleted: number; failed: string[] }> {
+  const unique = [...new Set(keys.filter(Boolean))];
+  if (unique.length === 0) return { deleted: 0, failed: [] };
+  if (!config.storage.bucket) return { deleted: 0, failed: unique };
+  let deleted = 0;
+  const failed: string[] = [];
+  for (let index = 0; index < unique.length; index += 1000) {
+    const batch = unique.slice(index, index + 1000);
+    try {
+      await client.send(new DeleteObjectsCommand({
+        Bucket: config.storage.bucket,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      }));
+      deleted += batch.length;
+    } catch {
+      failed.push(...batch);
+    }
+  }
+  return { deleted, failed };
 }
 
 export async function getPrivateObjectRedirect(key: string): Promise<string> {

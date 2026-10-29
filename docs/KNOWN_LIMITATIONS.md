@@ -43,6 +43,7 @@ evidence.
 | Item | Detail |
 |---|---|
 | Client attestation HMAC | The shared value also ships inside the APK, so it is **not** a security boundary against a determined attacker. It is now configured from a single source and treated as an app identifier; Play Integrity (App Check) is the meaningful control. |
+| Account deletion and object storage | The database cascade is complete and suite-asserted. Object deletion is best-effort: a storage outage does not block the database purge (so the account is genuinely gone), and the objects that could not be removed are reported for retry. Assets stored under a URL that is not a Nebula storage URL (for example a legacy provider host) cannot have their key derived and are skipped. |
 | Exposed credentials | The development credentials were shared in plain text on 2026-10-29 and must be treated as compromised. See `docs/SECRETS_ROTATION.md` for the ordered rotation list; rotation has not been performed yet. |
 | Keystore passwords in git history | `gradle.properties` previously contained release keystore passwords. They are removed from the working tree by this change but remain in git history; the keystore and those values must be rotated before a public release. |
 | Hardcoded privileged identities | A previous build granted `admin`/`premium_plus` to two literal email addresses. Removed in Phase 1; any such grants must be made through an audited admin path instead. |

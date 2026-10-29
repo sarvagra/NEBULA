@@ -8,6 +8,16 @@ import {
   peekOtpRequest,
 } from '../auth/authController';
 import { sendOtpEmail } from '../../services/emailService';
+import { MessageModel } from '../../models/Message';
+import { FriendshipModel } from '../../models/Friendship';
+import { NotificationModel } from '../../models/Notification';
+import { RefreshTokenModel } from '../../models/RefreshToken';
+import { ProfileAssetModel } from '../../models/ProfileAsset';
+import { MediaHistoryModel } from '../../models/MediaHistory';
+import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
+import { RoomModel } from '../../models/Room';
+import { PollModel } from '../../models/Poll';
+import { deleteObjects, objectKeyFromAssetUrl } from '../../services/objectStorage';
 
 /** Grace period between the OTP-verified request and irreversible deletion. */
 export const DELETION_GRACE_DAYS = 30;
@@ -188,6 +198,55 @@ export async function suspendDeletionOnLogin(userId: string): Promise<{ suspende
 }
 
 /**
+ * Removes every trace of a user, not just the profile document. Deleting only the
+ * `users` row left their messages, friendships, notifications, sessions, uploaded
+ * assets and room membership behind, which is the opposite of what "delete my
+ * account" promises.
+ */
+export async function purgeUserData(
+  userId: string,
+  options: { deleteStorage?: boolean } = {}
+): Promise<{ objectsScheduled: number }> {
+  const [assets, messages, friendships, notifications, sessions, mediaHistory, analytics, rooms] = await Promise.all([
+    ProfileAssetModel.find({ userId }).select('url'),
+    MessageModel.deleteMany({ $or: [{ senderId: userId }, { conversationId: userId }] }),
+    FriendshipModel.deleteMany({ $or: [{ requesterId: userId }, { recipientId: userId }] }),
+    NotificationModel.deleteMany({ userId }),
+    RefreshTokenModel.deleteMany({ userId }),
+    MediaHistoryModel.deleteMany({ userId }),
+    AnalyticsEventModel.deleteMany({ userId }),
+    RoomModel.find({ $or: [{ hostId: userId }, { 'participants.userId': userId }] }).select('participants hostId'),
+  ]);
+  void messages; void friendships; void notifications; void sessions; void mediaHistory;
+
+  // Rooms outlive a participant, so remove the membership instead of deleting the
+  // room out from under everyone else. A room that only this user was in goes away,
+  // and a room they hosted passes ownership on.
+  for (const room of rooms) {
+    room.participants = room.participants.filter((participant: any) => participant.userId !== userId);
+    if (room.participants.length === 0) {
+      await RoomModel.deleteOne({ _id: room._id });
+      await PollModel.deleteMany({ roomId: room._id.toString() });
+      continue;
+    }
+    if (room.hostId === userId) {
+      room.hostId = room.participants[0].userId;
+      room.kickedUserIds = [];
+      room.participants.forEach((participant: any) => { participant.isHost = participant.userId === room.hostId; });
+    }
+    await room.save();
+  }
+
+  const keys = assets.map((asset) => objectKeyFromAssetUrl(asset.url)).filter(Boolean) as string[];
+  if (options.deleteStorage !== false && keys.length > 0) {
+    await deleteObjects(keys);
+  }
+  await ProfileAssetModel.deleteMany({ userId });
+  void analytics;
+  return { objectsScheduled: keys.length };
+}
+
+/**
  * Purges accounts whose 30-day grace period elapsed without a login.
  * Every candidate is re-checked immediately before deletion.
  */
@@ -206,6 +265,7 @@ export async function purgeDueAccountDeletions(now: Date = new Date()): Promise<
       deletionSuspendedAt: { $exists: false },
     }).select('_id');
     if (!fresh) continue;
+    await purgeUserData(fresh._id.toString());
     await UserModel.deleteOne({ _id: fresh._id });
     purged++;
   }

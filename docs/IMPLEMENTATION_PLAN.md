@@ -98,7 +98,7 @@ suite green; app launches to the auth gate.
 | 7.1 | Rotate the release keystore and all secrets exposed in git history |
 | 7.2 | Dependency audit (`npm audit`, Gradle dependency check) — **Done:** `npm audit` reports 5 advisories (3 moderate, 2 high). The zod advisory (memory exhaustion on oversized constrained collections) is bounded by the 100 KB `express.json` limit on every non-upload route; the uuid advisories are transitive inside the server-only Firebase Admin client. No dependency was force-upgraded (zod 4 is a breaking change) — the upgrade is tracked below |
 | 7.3 | Android instrumentation tests for auth gate, DM send, room join |
-| 7.4 | Data-deletion verification end-to-end including object storage |
+| 7.4 | Data-deletion verification end-to-end including object storage — **Done:** the purge deleted the profile document and nothing else, leaving messages, friendships, notifications, sessions, uploaded assets and room membership behind. `purgeUserData` now removes all of those, hands room ownership to a remaining member (or deletes a room only the user was in), and schedules deletion of the user's stored objects. Suite-asserted; storage deletion is best-effort and reported |
 | 7.5 | Cost/quota review of Render, MongoDB Atlas, S3, FCM |
 | 7.6 | Signed release build + Play Console internal track |
 

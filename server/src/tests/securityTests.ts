@@ -12,7 +12,8 @@ import { NotificationModel } from '../models/Notification';
 import { MessageModel } from '../models/Message';
 import { ProfileAssetModel } from '../models/ProfileAsset';
 import { issueOtp, consumeOtp, clearOtp, applyLoginDeletionGrace } from '../modules/auth/authController';
-import { purgeDueAccountDeletions } from '../modules/users/accountLifecycleController';
+import { purgeDueAccountDeletions, purgeUserData } from '../modules/users/accountLifecycleController';
+import { RefreshTokenModel } from '../models/RefreshToken';
 import { runReengagementSweep } from '../services/reengagementService';
 import { AuthService } from '../services/authService';
 import { sendAutomatedNotificationEmail } from '../services/emailService';
@@ -1271,6 +1272,74 @@ async function runSecurityTests() {
     } finally {
       clearOtp(lifecycleEmail, 'account_deletion');
       await UserModel.deleteMany({ _id: { $in: [lifecycleUserId, '507f1f77bcf86cd799439077'] } });
+    }
+  });
+
+  await assertTest('Account purge removes related data, memberships, and storage keys instead of only the profile', async () => {
+    const doomedId = new mongoose.Types.ObjectId().toString();
+    const partnerId = new mongoose.Types.ObjectId().toString();
+    const assetKey = `users/${doomedId}/avatar-1.jpg`;
+
+    try {
+      await UserModel.create({ _id: doomedId, username: 'purge_doomed', displayName: 'Purge Doomed', tier: 'free' });
+      await UserModel.create({ _id: partnerId, username: 'purge_partner', displayName: 'Purge Partner', tier: 'free' });
+
+      await MessageModel.create({
+        senderId: doomedId, conversationId: partnerId, senderName: 'Purge Doomed', text: 'delete me',
+      });
+      await MessageModel.create({
+        senderId: partnerId, conversationId: doomedId, senderName: 'Purge Partner', text: 'and me',
+      });
+      await FriendshipModel.create({ requesterId: doomedId, recipientId: partnerId, status: 'accepted' });
+      await NotificationModel.create({ userId: doomedId, type: 'system', title: 'Notice', body: 'hi' });
+      await RefreshTokenModel.create({
+        userId: doomedId, tokenHash: 'hash_purge', deviceId: 'device_purge', deviceInfo: 'Test',
+        ipAddress: '127.0.0.1', expiresAt: new Date(Date.now() + 86_400_000),
+      });
+      await ProfileAssetModel.create({
+        userId: doomedId, assetType: 'avatar', name: 'avatar.jpg', mimeType: 'image/jpeg',
+        sizeBytes: 10, url: `http://localhost:5001/storage/${Buffer.from(assetKey, 'utf8').toString('base64url')}?token=x`,
+      });
+      const room = await RoomModel.create({
+        name: 'Purge Room', hostId: doomedId, privacy: 'public',
+        participants: [
+          { userId: doomedId, displayName: 'Purge Doomed', avatarLetter: 'P', isHost: true },
+          { userId: partnerId, displayName: 'Purge Partner', avatarLetter: 'P', isHost: false },
+        ],
+      });
+      const soloRoom = await RoomModel.create({
+        name: 'Solo Purge Room', hostId: doomedId, privacy: 'public',
+        participants: [{ userId: doomedId, displayName: 'Purge Doomed', avatarLetter: 'P', isHost: true }],
+      });
+
+      const summary = await purgeUserData(doomedId, { deleteStorage: false });
+      if (summary.objectsScheduled !== 1) {
+        throw new Error(`Purge reported ${summary.objectsScheduled} storage objects instead of 1`);
+      }
+      if (await MessageModel.countDocuments({ $or: [{ senderId: doomedId }, { conversationId: doomedId }] })) {
+        throw new Error('Messages survived the account purge');
+      }
+      if (await FriendshipModel.countDocuments({ $or: [{ requesterId: doomedId }, { recipientId: doomedId }] })) {
+        throw new Error('Friendships survived the account purge');
+      }
+      if (await NotificationModel.countDocuments({ userId: doomedId })) throw new Error('Notifications survived the account purge');
+      if (await RefreshTokenModel.countDocuments({ userId: doomedId })) throw new Error('Sessions survived the account purge');
+      if (await ProfileAssetModel.countDocuments({ userId: doomedId })) throw new Error('Profile assets survived the account purge');
+
+      const sharedRoom = await RoomModel.findById(room._id);
+      if (!sharedRoom) throw new Error('A shared room was deleted when one participant was purged');
+      if (sharedRoom.participants.some((p: any) => p.userId === doomedId)) {
+        throw new Error('Purged user is still listed as a room participant');
+      }
+      if (sharedRoom.hostId !== partnerId) throw new Error('Room ownership was not handed to the remaining member');
+      if (await RoomModel.findById(soloRoom._id)) throw new Error('A room only the purged user was in survived');
+    } finally {
+      await Promise.all([
+        UserModel.deleteMany({ _id: { $in: [doomedId, partnerId] } }),
+        MessageModel.deleteMany({ $or: [{ senderId: doomedId }, { conversationId: doomedId }] }),
+        FriendshipModel.deleteMany({ $or: [{ requesterId: doomedId }, { recipientId: doomedId }] }),
+        RoomModel.deleteMany({ $or: [{ hostId: doomedId }, { 'participants.userId': doomedId }] }),
+      ]);
     }
   });
 
