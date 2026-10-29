@@ -11,6 +11,7 @@ import {
   updateRoomSettings,
   transferHost,
   inviteRoomParticipant,
+  getRoomByInviteCode,
 } from './roomController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody, validateObjectIdParam } from '../../middlewares/validation';
@@ -20,6 +21,8 @@ import { roomCreateRateLimiter, roomJoinRateLimiter } from '../../middlewares/ra
 export const roomRouter = Router();
 
 roomRouter.get('/', optionalAuthMiddleware, listRooms);
+// Resolve a shared code before the id route, so a code is never parsed as an id.
+roomRouter.get('/invite/:code', authMiddleware, getRoomByInviteCode);
 roomRouter.get('/:id', validateObjectIdParam('id'), optionalAuthMiddleware, getRoom);
 roomRouter.post('/', authMiddleware, roomCreateRateLimiter, validateBody(CreateRoomSchema), createRoom);
 roomRouter.post('/:id/join', validateObjectIdParam('id'), authMiddleware, roomJoinRateLimiter, joinRoom);

@@ -18,8 +18,29 @@ a substitute.
 | Test accounts | Two authenticated Google profiles previously used on the Realme; not reachable in this environment |
 
 Consequence: authentication is executable on the physical Realme (which has
-Google Play services) and was verified there. Push and two-account cases still
-need a second signed-in device/profile.
+Google Play services) and was verified there.
+
+### 1a. Second account on the same handset (added 2026-10-30)
+
+The Realme has a second Android user, `999` (`MultiApp`), which has Google Play
+services and can therefore run a second signed-in Nebula account on the same
+physical device. It is installed and used like this:
+
+```
+adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/nebula.apk
+adb shell pm install --user 999 -r -g /data/local/tmp/nebula.apk
+adb shell am start --user 999 -n com.nebula.app/.MainActivity
+```
+
+Signed in there: `sarvagyas32568@gmail.com` (`@39292`), against the deployed
+backend. This unblocks cross-account cases (friend request visibility, DM
+delivery, invite, room join) without a second physical device.
+
+Limitation: only one Android user is foreground at a time, so both accounts
+cannot hold the screen simultaneously. Cross-account cases can therefore assert
+delivery and persistence, but not live two-way realtime rendering (a message
+arriving on screen while the sender is also visible). Room playback sync across
+clients remains verified at the protocol level only.
 
 ## 2. Preconditions
 

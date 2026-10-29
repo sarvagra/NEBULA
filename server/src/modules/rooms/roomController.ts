@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { RoomModel } from '../../models/Room';
 import { notifyUser } from '../notifications/notificationController';
@@ -147,6 +148,12 @@ export async function getRoom(req: Request, res: Response): Promise<void> {
       res.status(404).json({ success: false, error: 'Room has no active members' });
       return;
     }
+    // Rooms created before shareable codes existed get one the first time the host
+    // opens them, so any live room can be shared instead of only newly created ones.
+    if (!room.inviteCode && req.user?.id === room.hostId) {
+      room.inviteCode = generateInviteCode();
+      await room.save();
+    }
     if (req.user && room.kickedUserIds?.includes(req.user.id)) {
       res.status(404).json({ success: false, error: 'Room not found' });
       return;
@@ -192,6 +199,70 @@ export async function getRoom(req: Request, res: Response): Promise<void> {
     res.json({ success: true, data: toPublicRoomDTO(room, req.user?.id) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve room' });
+  }
+}
+
+/**
+ * Short shareable code. Base32 without the characters that get misread when a
+ * person types a code out loud (0/O, 1/I/L), and long enough that guessing a live
+ * room is impractical (32^8 keyspace).
+ */
+const INVITE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+function generateInviteCode(): string {
+  const bytes = crypto.randomBytes(8);
+  let code = '';
+  for (let i = 0; i < 8; i += 1) code += INVITE_ALPHABET[bytes[i] % INVITE_ALPHABET.length];
+  return code;
+}
+
+/**
+ * Resolves a shared code to a room the requester is actually allowed to see.
+ * A private room that the caller cannot join answers exactly like a code that does
+ * not exist, so the endpoint cannot be used to probe for hidden rooms.
+ */
+export async function getRoomByInviteCode(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const code = String(req.params.code || '').trim().toUpperCase();
+    if (!/^[2-9A-HJ-NP-Z]{8}$/.test(code)) {
+      res.status(404).json({ success: false, error: 'Room not found' });
+      return;
+    }
+    const room = await RoomModel.findOne({ inviteCode: code }).catch(() => null);
+    if (!room || room.participants.length === 0) {
+      res.status(404).json({ success: false, error: 'Room not found' });
+      return;
+    }
+    if (room.kickedUserIds?.includes(req.user.id)) {
+      res.status(404).json({ success: false, error: 'Room not found' });
+      return;
+    }
+
+    const isHost = room.hostId === req.user.id;
+    const isMember = room.participants.some((participant) => participant.userId === req.user!.id);
+    const isInvited = room.invitedUserIds?.includes(req.user.id);
+    let allowed = isHost || isMember || isInvited || room.privacy === 'public';
+    if (!allowed && room.privacy === 'friends') {
+      const friendship = await FriendshipModel.findOne({
+        status: 'accepted',
+        $or: [
+          { requesterId: req.user.id, recipientId: room.hostId },
+          { requesterId: room.hostId, recipientId: req.user.id },
+        ],
+      }).select('_id');
+      allowed = Boolean(friendship);
+    }
+    if (!allowed) {
+      res.status(404).json({ success: false, error: 'Room not found' });
+      return;
+    }
+
+    res.json({ success: true, data: toPublicRoomDTO(room, req.user.id) });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to resolve invite code' });
   }
 }
 
@@ -265,6 +336,7 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
         },
       ],
       maxParticipants,
+      inviteCode: generateInviteCode(),
       });
     } catch (error) {
       await releaseActiveRoom(req.user.id, roomId);

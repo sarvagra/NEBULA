@@ -41,6 +41,8 @@ export interface IRoom extends Document {
   participants: IRoomParticipant[];
   invitedUserIds: string[];
   kickedUserIds: string[];
+  /** Short, non-guessable code used to share a room without exposing its database id. */
+  inviteCode?: string;
   maxParticipants: number;
   isMicAllowed: boolean;
   isVideoAllowed: boolean;
@@ -86,6 +88,7 @@ const RoomSchema = new Schema<IRoom>(
       },
     ],
     invitedUserIds: { type: [String], default: [] },
+    inviteCode: { type: String, unique: true, sparse: true, index: true },
     // A host kick blocks re-entry until the room changes host or is removed.
     kickedUserIds: { type: [String], default: [] },
     maxParticipants: { type: Number, default: 25 },

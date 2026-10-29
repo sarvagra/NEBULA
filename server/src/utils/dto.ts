@@ -131,6 +131,8 @@ export function toPublicRoomDTO(room: IRoom, currentUserId?: string) {
 
   return {
     id: room._id.toString(),
+    // Sharing a room should not require disclosing its database id.
+    inviteCode: room.inviteCode ?? null,
     name: room.name,
     hostId: room.hostId,
     hostName: room.participants.find((participant) => participant.userId === room.hostId)?.displayName || 'Host unavailable',

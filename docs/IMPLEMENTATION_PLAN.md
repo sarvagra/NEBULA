@@ -69,7 +69,7 @@ suite green; app launches to the auth gate.
 | 4.1 | Split `NebulaRoomScreen` (2,297 LOC) into player, chat, participants, controls | — |
 | 4.2 | Room discovery ranking (recency + participants) and filter chips — **Done:** discovery ranks by participants, activity recency and whether media is playing, instead of newest-first; the candidate window is bounded (≤150) and ties fall back to most recently active. Suite-asserted (busier room outranks a newer empty one) | — |
 | 4.3 | Room queue model (add/vote/skip) matching reference behaviour | 4.1 |
-| 4.4 | Shareable invite codes and resolved deep links | — |
+| 4.4 | Shareable invite codes and resolved deep links | — | Partially done — rooms now carry a non-guessable 8-character code (ambiguous characters excluded) exposed in the room DTO, `GET /rooms/invite/:code` resolves it for a viewer who may see the room, and a refused private room answers byte-identically to an unknown code. Suite-asserted. **Remaining:** the Android share sheet and the `nebula://room/<code>` intent handler |
 | 4.5 | Host-disconnect / host-transfer UX and room lifecycle edge cases | 4.1 |
 | 4.6 | Moderation surface for reports inside rooms | 2.4 |
 

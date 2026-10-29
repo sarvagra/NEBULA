@@ -92,7 +92,7 @@ on-device verification.
 | E4 | Nearby rooms (geolocation) | `MapFragment`, `enable_location_permission_nearby` | ❌ | Deliberately not implemented (location permission not requested) |
 | E5 | Search / filter rooms | `search_menu_title`, `trending` | ✅ | Search, category and tag filters plus discovery ranking (participants, activity recency, playback state). Busier-room-outranks-empty assertion in the suite |
 | E6 | Create room (name, privacy, media, tags, limit) | `create_rave`, `pick_privacy_prompt` | ✅ | `CreateRoomSheet`, `CreateRoomSchema`, tier participant caps |
-| E7 | Share/invite links | `copy_toast_msg`, `rave.watch/…` deep link | 🟠 | Invite by user + copy room code; no universal/app link |
+| E7 | Share/invite links | `copy_toast_msg`, `rave.watch/…` deep link | 🟠 | Rooms carry a shareable 8-character code (`GET /rooms/invite/:code`, refused rooms indistinguishable from unknown codes; suite-asserted) plus invite-by-user. The Android share sheet and `nebula://room/<code>` handler are not built yet |
 | E8 | Host (leader) role + transfer | `give_leadership`, `transfer_leadership_title` | ✅ | `POST /rooms/:id/transfer-host` |
 | E9 | Kick participant | `Are you sure you want to kick %s?` | ✅ | `DELETE /rooms/:id/participants/:id`, server-enforced |
 | E10 | Mute / moderation states | `voice_mute`, `user_kicked` | 🟠 | `moderateRoomParticipant` + kick; mute affects voice only conceptually |

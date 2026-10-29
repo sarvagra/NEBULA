@@ -785,9 +785,55 @@ async function runMultiClientSyncTest() {
     console.log('  ✅ PASS: Room discovery ranks a busier room above a brand-new empty one');
     passedTests++;
 
+    // Everyone must be roomless before the next set of rooms is created: an account
+    // holds only one active room at a time.
     await apiFetch(`/api/v1/rooms/${busyRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientB.token}` } });
     await apiFetch(`/api/v1/rooms/${busyRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
     await apiFetch(`/api/v1/rooms/${quietRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+
+    // ---------------------------------------------------------------------
+    // Shareable invite codes: a public room resolves from its code, and a private
+    // room answers exactly like a made-up code so the endpoint cannot probe.
+    // ---------------------------------------------------------------------
+    const shareableRoom = await createRoom(clientA.token, 'Shareable Code Room', 'Code', '');
+    if (!/^[2-9A-HJ-NP-Z]{8}$/.test(shareableRoom.inviteCode || '')) {
+      throw new Error(`Room create response carried no shareable code: ${JSON.stringify(shareableRoom.inviteCode)}`);
+    }
+    const codeResolve = await apiFetch(`/api/v1/rooms/invite/${shareableRoom.inviteCode}`, {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    const resolved = await codeResolve.json() as any;
+    if (!codeResolve.ok || resolved.data?.id !== shareableRoom.id) {
+      throw new Error(`A public room did not resolve from its code: ${JSON.stringify(resolved)}`);
+    }
+    const privateRoomRes = await apiFetch('/api/v1/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientC.token}` },
+      body: JSON.stringify({ name: 'Code Probe Private Room', privacy: 'invite_only' }),
+    });
+    const privateRoom = await privateRoomRes.json() as any;
+    if (privateRoomRes.status !== 201) throw new Error(`Could not create the private room fixture: ${JSON.stringify(privateRoom)}`);
+    const privateCode = privateRoom.data?.inviteCode;
+    if (!privateCode) throw new Error('Private room create response carried no code');
+    const hostResolve = await apiFetch(`/api/v1/rooms/invite/${privateCode}`, {
+      headers: { Authorization: `Bearer ${clientC.token}` },
+    });
+    if (!hostResolve.ok) throw new Error('The host could not resolve their own room code');
+    const strangerResolve = await apiFetch(`/api/v1/rooms/invite/${privateCode}`, {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    const unknownResolve = await apiFetch('/api/v1/rooms/invite/22222222', {
+      headers: { Authorization: `Bearer ${clientB.token}` },
+    });
+    if (strangerResolve.status !== 404) throw new Error(`A private room code leaked to a stranger with status ${strangerResolve.status}`);
+    const strangerBody = await strangerResolve.text();
+    const unknownBody = await unknownResolve.text();
+    if (strangerBody !== unknownBody) throw new Error('A refused private code was distinguishable from an unknown code');
+    console.log('  ✅ PASS: Invite codes resolve for allowed viewers and leak nothing for refused ones');
+    passedTests++;
+
+    await apiFetch(`/api/v1/rooms/${privateRoom.data.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientC.token}` } });
+    await apiFetch(`/api/v1/rooms/${shareableRoom.id}/leave`, { method: 'POST', headers: { Authorization: `Bearer ${clientA.token}` } });
 
     // Cleanup sockets
     socketA.disconnect();
