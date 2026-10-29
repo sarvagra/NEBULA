@@ -737,6 +737,14 @@ class HomeViewModel(
                 startConversationSync()
             }
             "room_invite", "room_activity" -> onJoinRoom(id)
+            // A shared link carries the room's code, not its database id.
+            "room_invite_code" -> viewModelScope.launch {
+                val resolved = com.nebula.app.data.backend.NebulaApiClient.resolveRoomInvite(id)
+                val roomId = (resolved as? com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success)
+                    ?.data?.optJSONObject("data")?.optString("id")
+                    ?.takeIf { it.isNotBlank() }
+                if (roomId != null) onJoinRoom(roomId) else showToast("That invite link is no longer valid.")
+            }
             "friend_request" -> onTabSelected(NebulaTab.FRIENDS)
         }
     }

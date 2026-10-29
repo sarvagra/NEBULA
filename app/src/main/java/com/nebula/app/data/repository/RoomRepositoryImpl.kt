@@ -469,6 +469,7 @@ class RoomRepositoryImpl(
     private fun parseRoomFromJson(json: JSONObject): NebulaRoom {
         val id = json.optString("id").ifBlank { json.optString("_id", "room_${UUID.randomUUID().toString().take(6)}") }
         val name = json.optString("name", "Ambient Room")
+        val inviteCode = json.optString("inviteCode").takeIf { it.isNotBlank() && it != "null" }
         val hostId = json.optString("hostId", "")
         val privacyStr = json.optString("privacy", "public")
         val privacy = when (privacyStr) {
@@ -559,6 +560,7 @@ class RoomRepositoryImpl(
 
         return NebulaRoom(
             id = id,
+            inviteCode = inviteCode,
             name = name,
             hostId = hostId,
             hostName = hostName.ifBlank { participantList.firstOrNull { it.user.id == hostId }?.user?.displayName ?: "Host unavailable" },

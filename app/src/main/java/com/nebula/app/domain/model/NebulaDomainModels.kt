@@ -298,6 +298,8 @@ data class RoomPoll(
  */
 data class NebulaRoom(
     val id: String,
+    /** Shareable server code, so a room can be invited into without exposing its id. */
+    val inviteCode: String? = null,
     val name: String,
     val hostId: String,
     val hostName: String,

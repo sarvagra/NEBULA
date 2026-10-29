@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -446,6 +447,31 @@ fun NebulaRoomScreen(
                         contentDescription = "Invite friends to room",
                         tint = theme.colors.primaryAccent,
                         modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Sharing goes through the platform sheet so the link can be sent
+                // wherever the user already talks to people, not only inside Nebula.
+                IconButton(
+                    onClick = {
+                        val code = room.inviteCode
+                        if (code.isNullOrBlank()) return@IconButton
+                        val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(
+                                android.content.Intent.EXTRA_TEXT,
+                                "Join my Nebula watch party: https://nebula.app/room/$code"
+                            )
+                        }
+                        context.startActivity(android.content.Intent.createChooser(share, "Share room"))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share room link",
+                        tint = theme.colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 

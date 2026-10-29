@@ -300,6 +300,10 @@ object NebulaApiClient {
      * or after it, so a client whose realtime socket dropped can recover exactly what it
      * missed instead of refetching the whole page and guessing at the boundary.
      */
+    /** Turns a shared room code into the room it points at. */
+    suspend fun resolveRoomInvite(code: String): ApiResponse<JSONObject> =
+        request("/rooms/invite/${java.net.URLEncoder.encode(code.trim().uppercase(), "UTF-8")}", "GET")
+
     suspend fun getRoomMessages(roomId: String, since: String? = null): ApiResponse<JSONArray> {
         val query = buildString {
             append("/chat/room/$roomId?limit=50")

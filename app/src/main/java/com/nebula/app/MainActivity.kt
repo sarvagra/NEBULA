@@ -183,6 +183,15 @@ class MainActivity : ComponentActivity() {
     private fun notificationDestinationFrom(intent: android.content.Intent?): Pair<String, String>? {
         if (intent == null) return null
         fun payloadValue(key: String) = intent.getStringExtra("nebula_$key") ?: intent.getStringExtra(key)
+        // A shared room link is a navigation too: nebula://room/<code> or
+        // https://nebula.app/room/<code>. The code is resolved server-side so a link
+        // never has to carry (or reveal) the room's database id.
+        val linkCode = intent.data?.let { uri ->
+            val looksLikeRoom = uri.host == "room" || uri.pathSegments.firstOrNull() == "room"
+            if (looksLikeRoom) (if (uri.host == "room") uri.lastPathSegment else uri.pathSegments.getOrNull(1))
+                ?.trim()?.uppercase()?.takeIf { it.length == 8 } else null
+        }
+        if (linkCode != null) return "room_invite_code" to linkCode
         val type = payloadValue("type") ?: return null
         val id = when (type) {
             "dm" -> payloadValue("conversationId")
