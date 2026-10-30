@@ -775,6 +775,16 @@ class HomeViewModel(
 
         // STEP 2: Asynchronously select, sync read status, and start live polling
         viewModelScope.launch {
+            // Opening the thread is what clears its notifications: one row per sender
+            // disappears from the inbox the moment the conversation is on screen.
+            _uiState.value.notifications
+                .filter { it.type == NotificationType.DIRECT_MESSAGE && it.actorId == id }
+                .forEach { notif ->
+                    com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)
+                    _uiState.value = _uiState.value.copy(
+                        notifications = _uiState.value.notifications.filterNot { it.id == notif.id }
+                    )
+                }
             socialRepository.selectConversation(id)
             val updated = socialRepository.activeConversation.value
                 ?: socialRepository.conversations.value.firstOrNull { it.id == id }
@@ -929,6 +939,23 @@ class HomeViewModel(
         val conversationId = _uiState.value.activeSocialConversation?.id ?: return
         viewModelScope.launch {
             if (!socialRepository.sendMessage(conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType)) showToast("Attachment could not be sent.")
+        }
+    }
+
+    fun onSendDirectAttachments(text: String, mediaUrls: List<String>, messageType: String, isSpoiler: Boolean, mediaMimeType: String) {
+        val conversationId = _uiState.value.activeSocialConversation?.id ?: return
+        if (mediaUrls.isEmpty()) return
+        viewModelScope.launch {
+            val sent = socialRepository.sendMessage(
+                conversationId = conversationId,
+                content = text,
+                mediaUrl = mediaUrls.first(),
+                messageType = messageType,
+                isSpoiler = isSpoiler,
+                mediaMimeType = mediaMimeType,
+                mediaUrls = mediaUrls
+            )
+            if (!sent) showToast("Photos could not be sent.")
         }
     }
 
@@ -1500,14 +1527,20 @@ class HomeViewModel(
             if (_uiState.value.activeModalSheet != ActiveModalSheet.Notifications) return@launch
             // Anything the user has had on screen counts as seen, whether or not
             // it was already read. Actions on friend requests stay put.
-            val seen = _uiState.value.notifications.filter {
-                it.type != NotificationType.FRIEND_REQUEST
-            }
+            val seen = _uiState.value.notifications.filter { !it.isRead }
             for (notif in seen) {
                 val marked = com.nebula.app.data.backend.NebulaApiClient.markNotificationRead(notif.id)
                 if (marked is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
                     _uiState.value = _uiState.value.copy(
-                        notifications = _uiState.value.notifications.filterNot { it.id == notif.id }
+                        notifications = if (notif.type == NotificationType.FRIEND_REQUEST) {
+                            // A seen request moves to the archived section instead of
+                            // vanishing: it is still actionable from the friends page.
+                            _uiState.value.notifications.map {
+                                if (it.id == notif.id) it.copy(isRead = true) else it
+                            }
+                        } else {
+                            _uiState.value.notifications.filterNot { it.id == notif.id }
+                        }
                     )
                 }
             }

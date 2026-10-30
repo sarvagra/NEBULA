@@ -294,6 +294,7 @@ fun HomeScreen(
                 onBack = { viewModel.onCloseSocialConversation() },
                 onSendMessage = { viewModel.onSendDirectMessage(it) },
                 onSendAttachment = { text, url, type, spoiler, mime -> viewModel.onSendDirectAttachment(text, url, type, spoiler, mime) },
+                onSendAttachments = { text, urls, type, spoiler, mime -> viewModel.onSendDirectAttachments(text, urls, type, spoiler, mime) },
                 onEditMessage = { id, text -> viewModel.onEditDirectMessage(id, text) },
                 onUnsendMessage = { id -> viewModel.onUnsendDirectMessage(id) },
                 onRetryMessage = { clientKey -> viewModel.onRetryDirectMessage(clientKey) },

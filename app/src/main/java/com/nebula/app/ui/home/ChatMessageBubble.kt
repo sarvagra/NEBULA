@@ -95,6 +95,7 @@ import com.nebula.app.domain.model.MessageSendState
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaAvatarImage
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 
@@ -182,6 +183,7 @@ internal fun ModernChatBubble(
 ) {
     val density = LocalDensity.current
     var showActions by remember(message.id) { mutableStateOf(false) }
+    var showPile by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
     // A room card also carries a mediaUrl, but it is a link to a watch party rather
@@ -353,7 +355,40 @@ internal fun ModernChatBubble(
                     ) {
                         val mediaUrl = message.mediaUrl.orEmpty()
                         val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
-                        if (isVideo && mediaUrl.isNotBlank()) {
+                        val pile = message.mediaUrls
+                        if (pile.size > 1) {
+                            // A pile is one bubble, not five: the photos sit in a small
+                            // grid and open together in the viewer, which swipes between
+                            // them and keeps a thumbnail strip underneath.
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true }
+                                    .padding(3.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                pile.chunked(2).forEach { rowUrls ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().weight(1f),
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        rowUrls.forEach { url ->
+                                            AsyncImage(
+                                                model = url,
+                                                contentDescription = "Shared photo",
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .fillMaxHeight()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                            )
+                                        }
+                                        if (rowUrls.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        } else if (isVideo && mediaUrl.isNotBlank()) {
                             AndroidView(
                                 factory = { context ->
                                     android.widget.VideoView(context).apply {
@@ -553,6 +588,12 @@ internal fun ModernChatBubble(
             }
         }
 
+                if (showPile) {
+                    com.nebula.app.ui.components.NebulaImageViewer(
+                        images = message.mediaUrls,
+                        onDismiss = { showPile = false }
+                    )
+                }
                 if (showActions) {
                     MessageActionSheet(
                         message = message,

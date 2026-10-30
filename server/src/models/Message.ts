@@ -11,6 +11,7 @@ export interface IMessage extends Document {
   senderAvatarUrl?: string;
   text: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   isSpoiler: boolean;
   mediaMimeType?: string;
   messageType: MessageType;
@@ -41,6 +42,8 @@ const MessageSchema = new Schema<IMessage>(
     senderAvatarUrl: { type: String },
     text: { type: String, default: '' },
     mediaUrl: { type: String },
+    // One message may carry a pile of photos; mediaUrl stays the first for older clients.
+    mediaUrls: [{ type: String }],
     isSpoiler: { type: Boolean, default: false },
     mediaMimeType: { type: String },
     // 'room_card' is a shared watch-party invite: mediaUrl holds nebula://room/<code>.

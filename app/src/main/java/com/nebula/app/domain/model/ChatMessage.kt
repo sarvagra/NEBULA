@@ -53,6 +53,8 @@ data class ChatMessage(
     val senderAvatarUrl: String? = null,
     val senderAvatarLetter: String = "U",
     val mediaUrl: String? = null,
+    /** When one bubble carries a pile of photos, this holds all of them. */
+    val mediaUrls: List<String> = emptyList(),
     val messageType: String = "text",
     val editedAt: Long? = null,
     val editHistory: List<String> = emptyList(),

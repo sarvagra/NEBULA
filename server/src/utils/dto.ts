@@ -190,6 +190,7 @@ export function toMessageDTO(message: IMessage) {
     senderAvatarUrl: message.senderAvatarUrl,
     text: message.text,
     mediaUrl: resolveStoredObjectUrl(message.mediaUrl),
+    mediaUrls: (message.mediaUrls || []).map((url: string) => resolveStoredObjectUrl(url)),
     isSpoiler: message.isSpoiler,
     mediaMimeType: message.mediaMimeType,
     messageType: message.messageType,

@@ -642,12 +642,15 @@ object NebulaApiClient {
         request("/friends/request/withdraw/$userId", "DELETE")
     suspend fun removeFriend(userId: String): ApiResponse<JSONObject> = request("/friends/$userId", "DELETE")
 
-    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null, idempotencyKey: String? = null): ApiResponse<JSONObject> =
+    suspend fun sendDirectMessage(conversationId: String, text: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null, idempotencyKey: String? = null, mediaUrls: List<String> = emptyList()): ApiResponse<JSONObject> =
         request(
             "/chat",
             "POST",
             JSONObject().put("conversationId", conversationId).put("text", text).put("isSpoiler", isSpoiler).apply {
                 mediaUrl?.let { put("mediaUrl", it) }
+                if (mediaUrls.isNotEmpty()) {
+                    put("mediaUrls", org.json.JSONArray(mediaUrls))
+                }
                 put("messageType", messageType)
                 mediaMimeType?.let { put("mediaMimeType", it) }
                 // The server dedupes on (sender, conversation, key), so a retried

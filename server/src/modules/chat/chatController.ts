@@ -278,6 +278,15 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     const { roomId, conversationId, messageType, isSpoiler, mediaMimeType, idempotencyKey } = req.body;
     // text/mediaUrl are reassigned for room cards below, so they cannot be const.
     let { text, mediaUrl } = req.body;
+    // A direct message may carry up to five photos as one bubble. Each entry must be
+    // an http(s) upload URL; the first doubles as mediaUrl for older clients.
+    const mediaUrls: string[] = Array.isArray(req.body.mediaUrls)
+      ? req.body.mediaUrls
+          .filter((url: any) => typeof url === 'string' && /^https?:\/\//i.test(url.trim()))
+          .map((url: string) => url.trim().slice(0, 1000))
+          .slice(0, 5)
+      : [];
+    if (mediaUrls.length > 0 && !mediaUrl) mediaUrl = mediaUrls[0];
 
     // A shared room card is an invitation link, not a file. It is validated against
     // rooms that actually exist whatever the destination is — a card is normally sent
@@ -454,6 +463,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       senderAvatarUrl: (await UserModel.findById(req.user.id).select('avatarUrl'))?.avatarUrl,
       text: text?.trim() || '',
       mediaUrl,
+      mediaUrls,
       isSpoiler: Boolean(isSpoiler),
       mediaMimeType,
       messageType: messageType || 'text',

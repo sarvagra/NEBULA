@@ -209,6 +209,25 @@ fun NotificationsSheet(
                     }
                 }
             } else {
+                // One row per sender for direct messages: the earliest unread one plus
+                // "and N more", so one chatty friend cannot fill the whole inbox.
+                val dmGroups = notifications
+                    .filter { it.type == com.nebula.app.domain.model.NotificationType.DIRECT_MESSAGE }
+                    .groupBy { it.actorId ?: it.title }
+                val collapsedDmIds = dmGroups.values.mapNotNull { group ->
+                    group.sortedByDescending { it.createdAtMs }.firstOrNull()?.id
+                }.toSet()
+                val active = notifications.filter { notif ->
+                    when (notif.type) {
+                        com.nebula.app.domain.model.NotificationType.DIRECT_MESSAGE -> notif.id in collapsedDmIds
+                        else -> true
+                    }
+                }
+                val archivedRequests = active.filter {
+                    it.type == com.nebula.app.domain.model.NotificationType.FRIEND_REQUEST && it.isRead
+                }
+                val visible = active.filterNot { it in archivedRequests }
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -216,13 +235,43 @@ fun NotificationsSheet(
                     contentPadding = PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(notifications, key = { it.id }) { notif ->
+                    items(visible, key = { it.id }) { notif ->
+                        val extraFromSameSender = if (
+                            notif.type == com.nebula.app.domain.model.NotificationType.DIRECT_MESSAGE
+                        ) {
+                            (dmGroups[notif.actorId ?: notif.title]?.size ?: 1) - 1
+                        } else 0
                         NotificationCard(
                             notif = notif,
+                            extraMessagesFromSender = extraFromSameSender,
                             onAccept = { onAcceptNotification(notif) },
                             onDismiss = { onDismissNotification(notif.id) },
                             onOpenUserProfile = onOpenUserProfile
                         )
+                    }
+
+                    if (archivedRequests.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "ARCHIVED REQUESTS",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textTertiary,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.1.sp,
+                                    fontSize = 10.5.sp
+                                ),
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                        }
+                        items(archivedRequests, key = { "archived_${it.id}" }) { notif ->
+                            NotificationCard(
+                                notif = notif,
+                                extraMessagesFromSender = 0,
+                                onAccept = { onAcceptNotification(notif) },
+                                onDismiss = { onDismissNotification(notif.id) },
+                                onOpenUserProfile = onOpenUserProfile
+                            )
+                        }
                     }
                 }
             }
@@ -234,6 +283,7 @@ fun NotificationsSheet(
 @Composable
 private fun NotificationCard(
     notif: NebulaNotification,
+    extraMessagesFromSender: Int = 0,
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
     onOpenUserProfile: ((String) -> Unit)?,
@@ -259,22 +309,7 @@ private fun NotificationCard(
             .clip(RoundedCornerShape(14.dp))
             .background(theme.colors.errorColor.copy(alpha = 0.2f))
     ) {
-        // Red background indicator for swipe dismiss
-        Row(
-            modifier = Modifier
-                .matchParentSize()
-                .padding(end = 20.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Delete",
-                tint = theme.colors.errorColor,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
+        // Swiping all the way is the delete action; no scissor icon is needed.
         // Foreground Card
         Row(
             modifier = Modifier
@@ -347,7 +382,11 @@ private fun NotificationCard(
                 )
                 if (notif.subtitle.isNotBlank()) {
                     Text(
-                        text = notif.subtitle,
+                        text = if (extraMessagesFromSender > 0) {
+                            "${notif.subtitle} · and $extraMessagesFromSender more"
+                        } else {
+                            notif.subtitle
+                        },
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
                             fontSize = 12.sp,
@@ -411,23 +450,6 @@ private fun NotificationCard(
                     }
                 }
 
-                // Explicit dismiss "X" button
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            swipeableState.animateTo(1)
-                            onDismiss()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Dismiss",
-                        tint = theme.colors.textTertiary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
             }
         }
     }

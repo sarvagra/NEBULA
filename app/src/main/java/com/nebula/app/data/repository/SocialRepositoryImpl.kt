@@ -445,7 +445,8 @@ class SocialRepositoryImpl(
         isSpoiler: Boolean,
         mediaMimeType: String?,
         clientKey: String,
-        insertPlaceholder: Boolean
+        insertPlaceholder: Boolean,
+        mediaUrls: List<String> = emptyList()
     ): SendOutcome {
         if (insertPlaceholder) {
             val placeholder = ChatMessage(
@@ -455,6 +456,7 @@ class SocialRepositoryImpl(
                 clientKey = clientKey,
                 sendState = MessageSendState.SENDING,
                 mediaUrl = mediaUrl,
+                mediaUrls = mediaUrls,
                 messageType = messageType,
                 isSpoiler = isSpoiler,
                 mediaMimeType = mediaMimeType
@@ -472,7 +474,7 @@ class SocialRepositoryImpl(
             return SendOutcome(ok = false, permanentFailure = false)
         }
         val response = apiClient.sendDirectMessage(
-            conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType, clientKey
+            conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType, clientKey, mediaUrls
         )
         if (response !is ApiResponse.Success) {
             // Persistence failed: the bubble stays visible but marked unsent and retryable.
@@ -487,12 +489,13 @@ class SocialRepositoryImpl(
         return SendOutcome(ok = true, permanentFailure = false)
     }
 
-    override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String, isSpoiler: Boolean, mediaMimeType: String?): Boolean {
-        if (content.isBlank() && mediaUrl.isNullOrBlank()) return false
+    override suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String?, messageType: String, isSpoiler: Boolean, mediaMimeType: String?, mediaUrls: List<String>): Boolean {
+        if (content.isBlank() && mediaUrl.isNullOrBlank() && mediaUrls.isEmpty()) return false
         return dispatchMessage(
             conversationId, content, mediaUrl, messageType, isSpoiler, mediaMimeType,
             clientKey = UUID.randomUUID().toString(),
-            insertPlaceholder = true
+            insertPlaceholder = true,
+            mediaUrls = mediaUrls
         ).asBoolean()
     }
 
@@ -803,6 +806,9 @@ class SocialRepositoryImpl(
             id = item.optString("id"),
             role = if (item.optString("senderId") == partnerId) MessageRole.ASSISTANT else MessageRole.USER,
             content = item.optString("text"), timeLabel = "",
+            mediaUrls = item.optJSONArray("mediaUrls")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+            } ?: emptyList(),
             timestamp = item.optString("createdAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrDefault(System.currentTimeMillis()) } ?: System.currentTimeMillis(),
             senderId = item.optString("senderId"), senderName = item.optString("senderName"),
             senderAvatarUrl = item.optString("senderAvatarUrl").ifBlank { null },

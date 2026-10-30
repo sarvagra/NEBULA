@@ -92,6 +92,8 @@ fun NebulaPublicProfileScreen(
     }
 
     val effectiveFriendCount: Int? = if (isCurrentUser) viewerFriendsCount ?: user.friendsCount else user.friendsCount
+    // Removing a friend is not undoable in one tap, so it asks first.
+    var confirmRemoveFriend by remember(user.id) { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -138,10 +140,7 @@ fun NebulaPublicProfileScreen(
                                     isRequestPending = isRequestPending,
                                     onToggle = {
                                         when {
-                                            isFriendState -> {
-                                                isFriendState = false
-                                                onRemoveFriend(user)
-                                            }
+                                            isFriendState -> confirmRemoveFriend = true
                                             isRequestReceived -> {
                                                 isRequestReceived = false
                                                 isFriendState = true
@@ -359,6 +358,36 @@ fun NebulaPublicProfileScreen(
                     Text("Cancel", color = theme.colors.textSecondary)
                 }
             }
+        )
+    }
+
+    if (confirmRemoveFriend) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmRemoveFriend = false },
+            title = { Text("Remove ${user.displayName} from friends?") },
+            text = { Text("You will stop sharing rooms and messages until you add each other again.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmRemoveFriend = false
+                        isFriendState = false
+                        onRemoveFriend(user)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.colors.errorColor,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Remove", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveFriend = false }) {
+                    Text("Keep friend", color = theme.colors.textSecondary)
+                }
+            },
+            containerColor = theme.colors.surfaceElevated
         )
     }
 }

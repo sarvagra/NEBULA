@@ -85,7 +85,8 @@ fun NebulaImmersiveBanner(
     showBlurBand: Boolean = true
 ) {
     val theme = Theme.current
-    val bottomShape = RoundedCornerShape(bottomStart = cornerRadius, bottomEnd = cornerRadius)
+    // Sharp bottom edge: a rounded banner read as a card, not a header.
+    val bottomShape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp)
 
     Box(modifier = modifier.fillMaxWidth().height(height)) {
         NebulaBannerView(
@@ -99,7 +100,9 @@ fun NebulaImmersiveBanner(
         // third of the banner. The copy is drawn at the banner's full height and
         // then cropped by its container, so it stays pixel-aligned with the sharp
         // artwork underneath instead of being scaled into a different framing.
-        if (showBlurBand && isStaticImage(bannerUrl)) {
+        // The frosted band only works over a dark background; in light themes it
+        // washed the banner out, so it is skipped there.
+        if (showBlurBand && theme.colors.isDark && isStaticImage(bannerUrl)) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -280,6 +283,25 @@ fun NebulaProfileHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
+                if (isFriendCountPublic && friendsCount != null) {
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = compactCount(friendsCount),
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
                 if (tierLabel != null) {
                     Spacer(modifier = Modifier.size(8.dp))
                     Box(
@@ -325,14 +347,7 @@ fun NebulaProfileHeader(
 
             // Social counters stay visible on every profile — including the
             // owner's — because they are the reason people open this screen.
-            val friendsLabel = when {
-                !isFriendCountPublic -> "Friends private"
-                friendsCount == null -> "Friends private"
-                friendsCount == 1 -> "1 friend"
-                else -> "$friendsCount friends"
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CounterChip(text = friendsLabel)
                 val rooms = user.roomsHostedCount + user.roomsJoinedCount
                 if (rooms > 0) {
                     Spacer(modifier = Modifier.size(8.dp))
@@ -412,5 +427,19 @@ private fun CounterChip(text: String) {
             ),
             maxLines = 1
         )
+    }
+}
+
+
+/** 999 -> "999", 1200 -> "1.2K", 3_400_000 -> "3.4M". */
+internal fun compactCount(value: Int): String = when {
+    value < 1000 -> value.toString()
+    value < 1_000_000 -> {
+        val thousands = value / 1000.0
+        if (thousands >= 100) "${thousands.toInt()}K" else String.format(java.util.Locale.US, "%.1fK", thousands)
+    }
+    else -> {
+        val millions = value / 1_000_000.0
+        if (millions >= 100) "${millions.toInt()}M" else String.format(java.util.Locale.US, "%.1fM", millions)
     }
 }

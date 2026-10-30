@@ -25,7 +25,7 @@ interface ISocialRepository {
      */
     suspend fun refreshActiveConversation()
     suspend fun closeConversation()
-    suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null): Boolean
+    suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null, mediaUrls: List<String> = emptyList()): Boolean
     /** Re-sends a message that failed to persist, reusing its idempotency key. */
     suspend fun retryMessage(clientKey: String): Boolean
     /**

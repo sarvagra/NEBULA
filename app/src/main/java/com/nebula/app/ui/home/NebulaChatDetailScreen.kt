@@ -109,6 +109,8 @@ fun NebulaChatDetailScreen(
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onSendAttachment: (text: String, mediaUrl: String, messageType: String, isSpoiler: Boolean, mimeType: String) -> Unit,
+    /** Sends a pile of two to five photos as one bubble. */
+    onSendAttachments: (text: String, mediaUrls: List<String>, messageType: String, isSpoiler: Boolean, mimeType: String) -> Unit = { _, _, _, _, _ -> },
     onEditMessage: (messageId: String, text: String) -> Unit,
     onUnsendMessage: (messageId: String) -> Unit,
     onRetryMessage: (clientKey: String) -> Unit = {},
@@ -129,7 +131,8 @@ fun NebulaChatDetailScreen(
     // A picked photo/video on its way to being a message. Keyed by conversation so an
     // unsent draft can never follow the user into a different thread and be sent to the
     // wrong person.
-    var draft by remember(conversation.id) { mutableStateOf<PendingAttachment?>(null) }
+    // Up to five photos stage together and go out as one bubble.
+    var drafts by remember(conversation.id) { mutableStateOf<List<PendingAttachment>>(emptyList()) }
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
     val composerFocus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -400,13 +403,17 @@ fun NebulaChatDetailScreen(
         val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
         var attachmentIsSpoiler by remember(conversation.id) { mutableStateOf(false) }
 
+        fun updateDraft(target: PendingAttachment, transform: (PendingAttachment) -> PendingAttachment) {
+            drafts = drafts.map { if (it.localUri == target.localUri) transform(it) else it }
+        }
+
         fun uploadDraft(target: PendingAttachment) {
             coroutineScope.launch {
                 if (!isOnline) {
-                    draft = target.copy(state = AttachmentUploadState.OFFLINE, progress = 0)
+                    updateDraft(target) { it.copy(state = AttachmentUploadState.OFFLINE, progress = 0) }
                     return@launch
                 }
-                draft = target.copy(state = AttachmentUploadState.UPLOADING, progress = 0, error = null)
+                updateDraft(target) { it.copy(state = AttachmentUploadState.UPLOADING, progress = 0, error = null) }
                 val bytes = withContext(Dispatchers.IO) {
                     runCatching {
                         context.contentResolver.openInputStream(android.net.Uri.parse(target.localUri))
@@ -414,7 +421,7 @@ fun NebulaChatDetailScreen(
                     }.getOrNull() ?: ByteArray(0)
                 }
                 if (bytes.isEmpty()) {
-                    draft = target.copy(state = AttachmentUploadState.FAILED, error = "That file could not be read")
+                    updateDraft(target) { it.copy(state = AttachmentUploadState.FAILED, error = "That file could not be read") }
                     return@launch
                 }
                 val dataUrl = "data:${target.mimeType};base64," +
@@ -430,35 +437,35 @@ fun NebulaChatDetailScreen(
                         mimeType = target.mimeType,
                         mediaType = mediaType,
                         sizeBytes = bytes.size.toLong(),
-                        onProgress = { percent -> draft = draft?.copy(progress = percent) ?: target }
+                        onProgress = { percent -> updateDraft(target) { it.copy(progress = percent) } }
                     )
                 } catch (e: Exception) {
-                    draft = target.copy(state = AttachmentUploadState.FAILED, error = "Upload interrupted")
+                    updateDraft(target) { it.copy(state = AttachmentUploadState.FAILED, error = "Upload interrupted") }
                     return@launch
                 }
                 when (response) {
                     is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
                         val remote = response.data.optJSONObject("data")?.optString("mediaUrl").orEmpty()
                             .ifBlank { response.data.optString("mediaUrl") }
-                        draft = if (remote.isBlank()) {
-                            target.copy(state = AttachmentUploadState.FAILED, error = "The server returned no file")
-                        } else {
-                            target.copy(
-                                state = AttachmentUploadState.READY,
-                                remoteUrl = remote,
-                                progress = 100
-                            )
+                        updateDraft(target) {
+                            if (remote.isBlank()) {
+                                it.copy(state = AttachmentUploadState.FAILED, error = "The server returned no file")
+                            } else {
+                                it.copy(state = AttachmentUploadState.READY, remoteUrl = remote, progress = 100)
+                            }
                         }
                     }
                     is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error ->
-                        draft = target.copy(
-                            state = AttachmentUploadState.FAILED,
-                            error = if (response.statusCode in 400..499) {
-                                response.message
-                            } else {
-                                "Upload failed. Check your connection."
-                            }
-                        )
+                        updateDraft(target) {
+                            it.copy(
+                                state = AttachmentUploadState.FAILED,
+                                error = if (response.statusCode in 400..499) {
+                                    response.message
+                                } else {
+                                    "Upload failed. Check your connection."
+                                }
+                            )
+                        }
                 }
             }
         }
@@ -486,6 +493,10 @@ fun NebulaChatDetailScreen(
                     return@launch
                 }
                 showAttachments = false
+                if (drafts.size >= 5) {
+                    android.widget.Toast.makeText(context, "Five photos at a time", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 // The local file shows immediately; the upload runs behind it.
                 val target = PendingAttachment(
                     localUri = uri.toString(),
@@ -493,7 +504,7 @@ fun NebulaChatDetailScreen(
                     isVideo = isVideo,
                     state = if (isOnline) AttachmentUploadState.UPLOADING else AttachmentUploadState.OFFLINE
                 )
-                draft = target
+                drafts = drafts + target
                 if (isOnline) uploadDraft(target)
             }
         }
@@ -573,31 +584,30 @@ fun NebulaChatDetailScreen(
         // so the user does not have to remember to press Retry.
         androidx.compose.runtime.LaunchedEffect(isOnline) {
             if (!isOnline) return@LaunchedEffect
-            draft?.takeIf { it.state == AttachmentUploadState.OFFLINE }?.let { uploadDraft(it) }
+            drafts.filter { it.state == AttachmentUploadState.OFFLINE }.forEach { uploadDraft(it) }
         }
 
-        // The picked photo with its own upload state, so a slow or failed upload is
-        // visible and retryable instead of disappearing into a toast.
-        draft?.let { current ->
-            AttachmentDraftCard(
-                draft = current,
-                isSpoiler = attachmentIsSpoiler,
-                isOnline = isOnline,
-                onToggleSpoiler = { attachmentIsSpoiler = it },
-                onSend = {
-                    current.remoteUrl?.takeIf { it.isNotBlank() }?.let { remote ->
-                        onSendAttachment("", remote, current.messageType, attachmentIsSpoiler, current.mimeType)
-                        draft = null
-                        attachmentIsSpoiler = false
-                    }
-                },
-                onRetry = { uploadDraft(current) },
-                onDiscard = {
-                    draft = null
+        // The pending pile, with its own upload state per photo.
+        AttachmentPile(
+            drafts = drafts,
+            isSpoiler = attachmentIsSpoiler,
+            isOnline = isOnline,
+            onToggleSpoiler = { attachmentIsSpoiler = it },
+            onSend = {
+                val ready = drafts.mapNotNull { it.remoteUrl?.takeIf { url -> url.isNotBlank() } }
+                if (ready.isNotEmpty() && ready.size == drafts.size) {
+                    onSendAttachments("", ready, drafts.first().messageType, attachmentIsSpoiler, drafts.first().mimeType)
+                    drafts = emptyList()
                     attachmentIsSpoiler = false
                 }
-            )
-        }
+            },
+            onRetry = { uploadDraft(it) },
+            onRemove = { drafts = drafts.filterNot { other -> other.localUri == it.localUri } },
+            onDiscard = {
+                drafts = emptyList()
+                attachmentIsSpoiler = false
+            }
+        )
 
         // Edit mode banner: shows what is being changed and offers a way out.
         androidx.compose.animation.AnimatedVisibility(visible = editingMessage != null) {
