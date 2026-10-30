@@ -2,6 +2,7 @@ package com.nebula.app.domain.repository
 
 import com.nebula.app.domain.model.NebulaRoom
 import com.nebula.app.domain.model.RoomActivityType
+import com.nebula.app.domain.model.RoomQueueItem
 import com.nebula.app.domain.model.RoomPrivacy
 import com.nebula.app.domain.model.SharedMediaItem
 import kotlinx.coroutines.flow.StateFlow
@@ -10,6 +11,9 @@ interface IRoomRepository {
     val rooms: StateFlow<List<NebulaRoom>>
     val activeRoom: StateFlow<NebulaRoom?>
     val lastReaction: StateFlow<String?>
+
+    /** Items the room has agreed to watch later, oldest first. */
+    val queue: StateFlow<List<RoomQueueItem>>
 
     suspend fun createRoom(
         name: String,
@@ -41,4 +45,17 @@ interface IRoomRepository {
     suspend fun votePoll(optionId: String): Boolean
     suspend fun switchPlayMode(playMode: com.nebula.app.domain.model.PlayMode)
     suspend fun updateMedia(title: String, mediaUrl: String, durationSeconds: Long = 0): NebulaRoom?
+
+    // Room queue. Every mutation returns whether the server accepted it so the UI can
+    // report the real outcome instead of assuming a local edit stuck.
+    suspend fun refreshQueue()
+    suspend fun addToQueue(
+        title: String,
+        mediaUrl: String,
+        subtitle: String = "",
+        durationSeconds: Long = 0L
+    ): Boolean
+    suspend fun voteSkipQueueItem(itemId: String): Boolean
+    suspend fun advanceQueue(): Boolean
+    suspend fun removeQueueItem(itemId: String): Boolean
 }

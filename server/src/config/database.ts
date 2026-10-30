@@ -11,6 +11,13 @@ export async function connectDatabase(): Promise<boolean> {
     await mongoose.connect(mongoUri, {
       dbName: config.mongodb.database,
       serverSelectionTimeoutMS: 5000,
+      // Sized for a few hundred concurrent room participants on one instance.
+      // The default pool of 100 is left slightly headroom-reduced so bursty
+      // chat/room reads queue instead of tripping Atlas connection limits.
+      maxPoolSize: 60,
+      minPoolSize: 2,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
     });
 
     console.log(`[Database] MongoDB connected successfully (database: ${mongoose.connection.name}).`);

@@ -397,6 +397,44 @@ object NebulaApiClient {
     }
 
     // ==========================================
+    // ROOM QUEUE
+    // ==========================================
+
+    suspend fun getRoomQueue(roomId: String): ApiResponse<JSONArray> {
+        val res = request("/rooms/$roomId/queue", "GET")
+        return when (res) {
+            is ApiResponse.Success -> ApiResponse.Success(res.data.optJSONArray("data") ?: JSONArray())
+            is ApiResponse.Error -> ApiResponse.Error(res.message, res.statusCode)
+        }
+    }
+
+    suspend fun addRoomQueueItem(
+        roomId: String,
+        title: String,
+        mediaUrl: String,
+        subtitle: String = "",
+        durationSeconds: Long = 0L
+    ): ApiResponse<JSONObject> = request(
+        "/rooms/$roomId/queue",
+        "POST",
+        JSONObject().apply {
+            put("title", title)
+            put("subtitle", subtitle)
+            put("mediaUrl", mediaUrl)
+            put("durationSeconds", durationSeconds)
+        }
+    )
+
+    suspend fun voteSkipQueueItem(roomId: String, itemId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/queue/$itemId/skip-vote", "POST", JSONObject())
+
+    suspend fun advanceRoomQueue(roomId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/queue/advance", "POST", JSONObject())
+
+    suspend fun removeRoomQueueItem(roomId: String, itemId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/queue/$itemId", "DELETE")
+
+    // ==========================================
     // PROFILE & USERS
     // ==========================================
     suspend fun updateProfile(
@@ -432,8 +470,9 @@ object NebulaApiClient {
                 })
             }
             customStatus?.let { put("customStatus", it) }
-            // Coerce bannerIndex to 0..4 for compatibility with live backend Zod schema
-            put("bannerIndex", bannerIndex.coerceIn(0, 4))
+            // The palette ships 25 gradients/shapes. Clamping to 0..4 (an old
+            // backend limit) silently saved every later choice as Deep Indigo.
+            put("bannerIndex", bannerIndex.coerceIn(0, 30))
             put("interests", JSONArray(interests))
             if (avatarUrl != null) {
                 put("avatarUrl", avatarUrl)

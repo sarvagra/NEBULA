@@ -129,7 +129,25 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.socket.io.client)
 
+    // Direct media playback (HLS/MP4) for rooms that do not host on YouTube.
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.ui)
+
+    // Instrumentation: Compose UI rules plus the AndroidX JUnit/Espresso runners.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
     debugImplementation(libs.androidx.ui.tooling)
+
+    // Pure JVM specs for the logic that decides behaviour (media routing, invite
+    // parsing, drift correction) so they run without a device.
+    testImplementation("junit:junit:4.13.2")
 }
 
 tasks.register("cleanStaleDuplicates") {

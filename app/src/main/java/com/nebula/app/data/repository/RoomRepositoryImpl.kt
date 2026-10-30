@@ -12,6 +12,7 @@ import com.nebula.app.domain.model.RoomActivityType
 import com.nebula.app.domain.model.RoomChatMessage
 import com.nebula.app.domain.model.RoomParticipant
 import com.nebula.app.domain.model.RoomPrivacy
+import com.nebula.app.domain.model.RoomQueueItem
 import com.nebula.app.domain.model.SharedMediaItem
 import com.nebula.app.domain.repository.IRoomRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +36,7 @@ class RoomRepositoryImpl(
     fun disconnectRealtime() {
         socketClient.disconnect()
         _activeRoom.value = null
+        _queue.value = emptyList()
     }
 
     // Instant local-first initial state from cache
@@ -46,6 +48,9 @@ class RoomRepositoryImpl(
 
     private val _lastReaction = MutableStateFlow<String?>(null)
     override val lastReaction: StateFlow<String?> = _lastReaction.asStateFlow()
+
+    private val _queue = MutableStateFlow<List<RoomQueueItem>>(emptyList())
+    override val queue: StateFlow<List<RoomQueueItem>> = _queue.asStateFlow()
 
     private val realtimeScope = CoroutineScope(Dispatchers.IO)
     private val socketClient = RoomSocketClient(
@@ -75,8 +80,10 @@ class RoomRepositoryImpl(
             realtimeScope.launch {
                 syncActiveRoom()
                 backfillMissedChat()
+                refreshQueue()
             }
-        }
+        },
+        onQueueChanged = { realtimeScope.launch { refreshQueue() } }
     )
 
     /** Newest room-chat timestamp already shown, used as the reconnect backfill cursor. */
@@ -97,6 +104,13 @@ class RoomRepositoryImpl(
     init { socketClient.setOnEndedStateListener { positionMs, ended -> applyRealtimeEndedState(positionMs, ended) } }
 
     fun setAppForegrounded(foregrounded: Boolean) = socketClient.setAppForegrounded(foregrounded)
+
+    /**
+     * True while an authenticated realtime socket is open. The socket already keeps
+     * presence fresh server-side, so the HTTP presence pulse can skip its write
+     * whenever this is true — which at scale is almost always.
+     */
+    fun isRealtimeConnected(): Boolean = socketClient.isConnected()
 
     /**
      * Refreshes the active room list from the authoritative Nebula backend server.
@@ -222,6 +236,7 @@ class RoomRepositoryImpl(
             _rooms.value = _rooms.value.map { if (it.id == room.id) roomWithPoll else it }
             socketClient.connect(room.id, room.hostId)
             loadRoomMessages(room.id)
+            refreshQueue()
             return roomWithPoll
         }
 
@@ -237,6 +252,7 @@ class RoomRepositoryImpl(
         if (res.data.optBoolean("dissolved", false)) _rooms.value = _rooms.value.filter { it.id != current.id }
         else refreshRooms()
         _activeRoom.value = null
+        _queue.value = emptyList()
     }
 
     override suspend fun updateRoomSettings(
@@ -367,6 +383,91 @@ class RoomRepositoryImpl(
         return updated
     }
 
+    // ==========================================
+    // ROOM QUEUE
+    // ==========================================
+
+    override suspend fun refreshQueue() {
+        val room = _activeRoom.value ?: run {
+            _queue.value = emptyList()
+            return
+        }
+        val res = apiClient.getRoomQueue(room.id)
+        if (res !is ApiResponse.Success) return
+        val items = mutableListOf<RoomQueueItem>()
+        for (i in 0 until res.data.length()) {
+            res.data.optJSONObject(i)?.let { items.add(parseQueueItem(it)) }
+        }
+        // A queue is only meaningful for the room it was read from. Losing that
+        // association would let a stale list appear inside a different room.
+        if (_activeRoom.value?.id == room.id) _queue.value = items
+    }
+
+    override suspend fun addToQueue(
+        title: String,
+        mediaUrl: String,
+        subtitle: String,
+        durationSeconds: Long
+    ): Boolean {
+        val room = _activeRoom.value ?: return false
+        val res = apiClient.addRoomQueueItem(
+            roomId = room.id,
+            title = title,
+            mediaUrl = mediaUrl,
+            subtitle = subtitle,
+            durationSeconds = durationSeconds
+        )
+        // The socket echo refreshes too, but patching immediately keeps the sheet
+        // from sitting empty until the round trip finishes.
+        if (res is ApiResponse.Success) {
+            res.data.optJSONObject("data")?.let { item ->
+                _queue.value = _queue.value + parseQueueItem(item)
+            }
+        }
+        return res is ApiResponse.Success
+    }
+
+    override suspend fun voteSkipQueueItem(itemId: String): Boolean {
+        val room = _activeRoom.value ?: return false
+        return apiClient.voteSkipQueueItem(room.id, itemId) is ApiResponse.Success
+    }
+
+    override suspend fun advanceQueue(): Boolean {
+        val room = _activeRoom.value ?: return false
+        return apiClient.advanceRoomQueue(room.id) is ApiResponse.Success
+    }
+
+    override suspend fun removeQueueItem(itemId: String): Boolean {
+        val room = _activeRoom.value ?: return false
+        val res = apiClient.removeRoomQueueItem(room.id, itemId)
+        if (res is ApiResponse.Success) {
+            _queue.value = _queue.value.filterNot { it.id == itemId }
+        }
+        return res is ApiResponse.Success
+    }
+
+    private fun parseQueueItem(json: JSONObject): RoomQueueItem {
+        val voters = mutableListOf<String>()
+        json.optJSONArray("skipVoterIds")?.let { array ->
+            for (i in 0 until array.length()) {
+                array.optString(i).takeIf { it.isNotBlank() }?.let { voters.add(it) }
+            }
+        }
+        return RoomQueueItem(
+            id = json.optString("id"),
+            roomId = json.optString("roomId"),
+            title = json.optString("title", "Queued video"),
+            subtitle = json.optString("subtitle", ""),
+            mediaUrl = json.optString("mediaUrl", ""),
+            durationSeconds = json.optLong("durationSeconds", 0L),
+            addedByUserId = json.optString("addedByUserId", ""),
+            addedByName = json.optString("addedByName", "Nebula User"),
+            skipVoteCount = json.optInt("skipVoteCount", 0),
+            skipVotesRequired = json.optInt("skipVotesRequired", 1).coerceAtLeast(1),
+            skipVoterIds = voters
+        )
+    }
+
     private fun applyRealtimeMediaState(positionMs: Long, isPlaying: Boolean) {
         val current = _activeRoom.value ?: return
         val safePositionMs = positionMs.coerceAtLeast(0L)
@@ -415,6 +516,12 @@ class RoomRepositoryImpl(
 
     private fun applyRealtimeChatMessage(json: JSONObject) {
         val current = _activeRoom.value ?: return
+        // Every authenticated socket also receives the user's direct messages, so a
+        // payload carrying a conversationId is a DM and must never be written into the
+        // room's chat feed.
+        if (json.optString("conversationId").isNotBlank()) return
+        val payloadRoomId = json.optString("roomId")
+        if (payloadRoomId.isNotBlank() && payloadRoomId != current.id) return
         val messageId = json.optString("id").ifBlank { json.optString("_id") }
         if (messageId.isBlank() || current.recentMessages.any { it.id == messageId }) return
         val createdAt = json.optString("createdAt")

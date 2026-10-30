@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.nebula.app.BuildConfig
 import com.nebula.app.domain.model.ChatMessage
 import com.nebula.app.domain.model.MessageRole
+import com.nebula.app.domain.model.MessageSendState
 import com.nebula.app.domain.model.NebulaConversation
 import com.nebula.app.domain.model.NebulaPresenceStatus
 import com.nebula.app.domain.model.NebulaRoom
@@ -400,6 +401,14 @@ class SessionManager(context: Context) {
                             put("messageType", m.messageType)
                             put("isSpoiler", m.isSpoiler)
                             put("mediaMimeType", m.mediaMimeType ?: "")
+                            // Delivery state and the retry key must survive a restart.
+                            // Without them a failed message came back looking delivered
+                            // and could no longer be retried, because the idempotency
+                            // key that a retry reuses had been dropped.
+                            put("sendState", m.sendState.name)
+                            if (m.clientKey != null) put("clientKey", m.clientKey)
+                            m.editedAt?.let { put("editedAt", it) }
+                            m.deletedAt?.let { put("deletedAt", it) }
                         })
                     }
                     put("messages", msgs)
@@ -451,7 +460,15 @@ class SessionManager(context: Context) {
                                 mediaUrl = mObj.optString("mediaUrl", "").ifEmpty { null },
                                 messageType = mObj.optString("messageType", "text"),
                                 isSpoiler = mObj.optBoolean("isSpoiler", false),
-                                mediaMimeType = mObj.optString("mediaMimeType", "").ifEmpty { null }
+                                mediaMimeType = mObj.optString("mediaMimeType", "").ifEmpty { null },
+                                sendState = try {
+                                    MessageSendState.valueOf(mObj.optString("sendState", "SENT"))
+                                } catch (_: Exception) {
+                                    MessageSendState.SENT
+                                },
+                                clientKey = mObj.optString("clientKey", "").ifEmpty { null },
+                                editedAt = mObj.optLong("editedAt", 0L).takeIf { it > 0L },
+                                deletedAt = mObj.optLong("deletedAt", 0L).takeIf { it > 0L }
                             )
                         )
                     }

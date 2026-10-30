@@ -12,7 +12,8 @@
     "test:db": "ts-node-dev --transpile-only src/tests/connectivityTest.ts",
     "test:firebase": "ts-node-dev --transpile-only src/tests/firebaseAuthFlowTest.ts",
     "test:sync": "ts-node-dev --transpile-only src/tests/multiClientSyncTest.ts",
-    "test:resilience": "NEBULA_INACTIVITY_GRACE_MS=1500 ts-node-dev --transpile-only src/tests/playbackResilienceTest.ts"
+    "test:resilience": "NEBULA_INACTIVITY_GRACE_MS=1500 ts-node-dev --transpile-only src/tests/playbackResilienceTest.ts",
+    "load:test": "ts-node-dev --transpile-only src/scripts/loadTest.ts"
   },
   "keywords": [
     "nebula",

@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,11 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,17 +31,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
-import com.nebula.app.ui.components.NebulaAvatarImage
+import com.nebula.app.ui.components.NebulaProfileHeader
 import com.nebula.app.ui.components.PABottomSheet
 
 /**
- * FriendProfileSheet:
- * Clean, restrained social profile sheet for NEBULA.
- * - Avatar & display name
- * - @username & bio
- * - Mutual friends count
- * - Current activity status
- * - Actions: Message, Invite to room, Friend status
+ * FriendProfileSheet — the quick profile shown from a room, a friend list or a
+ * message avatar.
+ *
+ * It deliberately reuses the same immersive header as the full profile screen
+ * (full-bleed banner, blurred top band, overlapping avatar, presence and social
+ * counters). A sheet that rendered a bare centered avatar made the same person
+ * look like a different product depending on where you tapped them.
  */
 @Composable
 fun FriendProfileSheet(
@@ -61,219 +58,148 @@ fun FriendProfileSheet(
     PABottomSheet(
         isVisible = isVisible,
         onDismissRequest = onDismiss,
-        title = "Profile"
+        title = null
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // AVATAR
-            Box(contentAlignment = Alignment.BottomEnd) {
-                Box(
-                    modifier = Modifier
-                        .size(76.dp)
-                        .clip(CircleShape)
-                        .background(theme.colors.surfaceElevated)
-                        .border(2.dp, theme.colors.primaryAccent.copy(alpha = 0.4f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    NebulaAvatarImage(user.avatarUrl, user.avatarLetter, modifier = Modifier.size(76.dp), fallbackTextSize = 26.sp)
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(if (user.isOnline) theme.colors.successColor else theme.colors.textTertiary)
-                        .border(2.dp, theme.colors.background, CircleShape)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // NAME & USERNAME
-            Text(
-                text = user.displayName,
-                style = theme.typography.titleMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 19.sp
-                )
-            )
-
-            Text(
-                text = user.username,
-                style = theme.typography.bodySmall.copy(
-                    color = theme.colors.textSecondary,
-                    fontSize = 13.sp
-                )
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // BIO
-            Text(
-                text = user.bio,
-                style = theme.typography.bodyMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontSize = 13.5.sp,
-                    lineHeight = 18.sp
-                ),
-                modifier = Modifier.padding(horizontal = 14.dp)
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // STATUS & MUTUALS INFO CARD
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Current Status",
-                        style = theme.typography.caption.copy(color = theme.colors.textSecondary)
-                    )
-                    Text(
-                        text = user.status,
-                        style = theme.typography.caption.copy(
-                            color = if (user.currentRoomId != null) theme.colors.primaryAccent else theme.colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold
+        Column(modifier = Modifier.fillMaxWidth()) {
+            NebulaProfileHeader(
+                user = user,
+                friendsCount = user.friendsCount,
+                isFriendCountPublic = user.friendsCount != null,
+                compact = true,
+                topBar = {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.34f))
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close profile",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
                         )
-                    )
-                }
+                    }
+                },
+                actions = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SheetAction(
+                            text = "Message",
+                            icon = Icons.AutoMirrored.Filled.Chat,
+                            filled = true,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                onDismiss()
+                                onMessage(user)
+                            }
+                        )
+                        SheetAction(
+                            text = "Invite",
+                            icon = Icons.Default.Tv,
+                            filled = false,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                onDismiss()
+                                onInviteToRoom(user)
+                            }
+                        )
+                    }
 
+                    if (onViewFullProfile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(theme.colors.surface)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onDismiss()
+                                    onViewFullProfile(user)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "View full profile",
+                                style = theme.typography.bodyMedium.copy(
+                                    color = theme.colors.primaryAccent,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            )
+
+            // Mutual connections stay outside the header so they read as a detail
+            // rather than another counter clipped into the banner.
+            if (user.mutualFriendsCount > 0) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 14.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(theme.colors.surface)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Mutual Connections",
-                        style = theme.typography.caption.copy(color = theme.colors.textSecondary)
-                    )
                     Text(
                         text = "${user.mutualFriendsCount} friends in common",
                         style = theme.typography.caption.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Medium
+                            color = theme.colors.textSecondary,
+                            fontSize = 12.sp
                         )
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
 
-            // PRIMARY ACTIONS: Message & Invite to Room
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onMessage(user)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.primaryAccent,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChatBubbleOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Message",
-                            style = theme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.5.sp
-                            )
-                        )
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onInviteToRoom(user)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.surfaceElevated,
-                        contentColor = theme.colors.textPrimary
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tv,
-                            contentDescription = null,
-                            tint = theme.colors.primaryAccent,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Invite",
-                            style = theme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.5.sp
-                            )
-                        )
-                    }
-                }
-            }
-
-            if (onViewFullProfile != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onViewFullProfile(user)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.surface,
-                        contentColor = theme.colors.primaryAccent
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, theme.colors.surfaceBorder),
-                    modifier = Modifier.fillMaxWidth().height(42.dp)
-                ) {
-                    Text(
-                        text = "View Profile",
-                        style = theme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
+@Composable
+private fun SheetAction(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    filled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val theme = Theme.current
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (filled) theme.colors.primaryAccent else theme.colors.surfaceElevated)
+            .border(1.dp, if (filled) Color.Transparent else theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (filled) theme.colors.onPrimaryAccent else theme.colors.primaryAccent,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = text,
+                style = theme.typography.bodyMedium.copy(
+                    color = if (filled) theme.colors.onPrimaryAccent else theme.colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp
+                )
+            )
         }
     }
 }

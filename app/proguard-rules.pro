@@ -85,7 +85,18 @@
 -dontwarn coil.**
 
 # ------------------------------------------------------------------------------
-# 9. Strip Debug Log Statements in Production
+# 9. Media3 / ExoPlayer
+# ------------------------------------------------------------------------------
+# ExoPlayer loads renderers, extractors and HLS segments reflectively through
+# androidx.media3.common.util, so R8 must not remove the implementations it looks up
+# by name. Without these rules a release build plays YouTube (a WebView) but shows a
+# black surface for every direct .mp4/.m3u8 link.
+-keep class androidx.media3.** { *; }
+-keep interface androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+
+# ------------------------------------------------------------------------------
+# 10. Strip Debug Log Statements in Production
 # ------------------------------------------------------------------------------
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);

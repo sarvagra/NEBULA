@@ -67,11 +67,12 @@ on-device verification.
 |---|---|---|---|---|
 | D1 | Inbox with last message + time | `messages`, `recents_header` | ✅ | `getConversations`, `NebulaChatsScreen` |
 | D2 | 1:1 conversation, persisted in MongoDB | `message_hint` | ✅ | `Message` model with `conversationId` |
-| D3 | Real-time delivery | implied | ✅ | socket `chat:message`; `multiClientSyncTest` |
+| D3 | Real-time delivery | implied | ✅ / 🟡 device | The HTTP send path now broadcasts the stored message to both participants' private channels, and the app keeps a direct-message socket open while signed in (separate from the room socket), so a DM updates the thread and the inbox without waiting for a poll. Compile-verified; a two-account delivery test is still owed |
 | D4 | Pagination / older history | implied | ✅ | `since` cursor on room and conversation history returns only the missed window; suite-asserted including an empty and an invalid cursor |
 | D5 | Unread counts + read receipts | `read_time`, `Sent:` | ✅ | unread dot, `readAt`, read receipts UI |
 | D6 | Delivery/read ticks | `read_time` | ✅ | double/filled tick indicators |
-| D7 | Retry failed sends | `tap_retry_dm_send`, `resending_dm` | ✅ | Bubble carries `SENDING`/`SENT`/`FAILED`; a failed send stays in the thread as `Not sent · Tap to retry`, survives server syncs and process death, and re-sends automatically on reconnect. Device-verified with the radio cut (DEVICE_TEST_PLAN runs 2–3) |
+| D7 | Retry failed sends | `tap_retry_dm_send`, `resending_dm` | ✅ | Bubble carries `SENDING`/`SENT`/`FAILED`; a failed send is marked with a red `!` beside the bubble (tap the bubble or the mark to retry), never gets a delivery tick, and survives list refreshes and process death. Sending with no network fails in the same frame instead of hanging on a connect timeout, and the thread re-sends automatically when the network returns |
+| D17 | Offline chat hint | `chat_offline_hint` ("Offline") | ✅ | The header shows `Offline` in red when the device has no network, a strip above the composer says messages will send on reconnect, and a picked photo/video is held with its own Retry instead of being uploaded into the void |
 | D8 | Idempotent sends (no duplicates) | ⚪ | ✅ | Client now sends an `idempotencyKey` per message and reuses it on retry; unique partial index on `senderId+conversationId+idempotencyKey` |
 | D9 | Edit message with history | `edit_dm`, `edited_at_dm` | ✅ | `PUT /chat/:id`, `editHistory`, tier edit limits |
 | D10 | Unsend with tombstone (2 min) | `unsend_dm` | ✅ | `DELETE /chat/:id`, server-authoritative window |
@@ -92,7 +93,7 @@ on-device verification.
 | E4 | Nearby rooms (geolocation) | `MapFragment`, `enable_location_permission_nearby` | ❌ | Deliberately not implemented (location permission not requested) |
 | E5 | Search / filter rooms | `search_menu_title`, `trending` | ✅ | Search, category and tag filters plus discovery ranking (participants, activity recency, playback state). Busier-room-outranks-empty assertion in the suite |
 | E6 | Create room (name, privacy, media, tags, limit) | `create_rave`, `pick_privacy_prompt` | ✅ | `CreateRoomSheet`, `CreateRoomSchema`, tier participant caps |
-| E7 | Share/invite links | `copy_toast_msg`, `rave.watch/…` deep link | 🟠 | Rooms carry a shareable 8-character code (`GET /rooms/invite/:code`, refused rooms indistinguishable from unknown codes; suite-asserted) plus invite-by-user. The Android share sheet and `nebula://room/<code>` handler are not built yet |
+| E7 | Share/invite links | `copy_toast_msg`, `rave.watch/…` deep link | ✅ Verified on device | Rooms carry a shareable 8-character code (`GET /rooms/invite/:code`, refused rooms indistinguishable from unknown codes; suite-asserted). The header shares through the platform sheet and `nebula://room/<code>` / `https://nebula.app/room/<code>` resolve server-side and join (device-verified, run 4f). A room can also be sent into a friend's thread as a card |
 | E8 | Host (leader) role + transfer | `give_leadership`, `transfer_leadership_title` | ✅ | `POST /rooms/:id/transfer-host` |
 | E9 | Kick participant | `Are you sure you want to kick %s?` | ✅ | `DELETE /rooms/:id/participants/:id`, server-enforced |
 | E10 | Mute / moderation states | `voice_mute`, `user_kicked` | 🟠 | `moderateRoomParticipant` + kick; mute affects voice only conceptually |
@@ -102,7 +103,7 @@ on-device verification.
 | E14 | Room ended state / auto-destruct | ⚪ | ✅ | last participant leaves → room ended; asserted in sync test |
 | E15 | Voice chat (VOIP) | `VOICE CHAT`, `libmediasoupclient` | ❌ | WebRTC SFU out of scope for the current build |
 | E16 | Video/AR filters | `libmediapipe`, face models | ❌ | Out of scope |
-| E17 | Queue / vote-to-skip | `add_queue`, `vote_to_skip`, `vote_queue` | 🟠 | Single-item media state only; no queue model |
+| E17 | Queue / vote-to-skip | `add_queue`, `vote_to_skip`, `vote_queue` | 🟡 | Queue engine suite-asserted (add with link verification and a 20-item cap, strict-majority skip that withdraws on a second tap, host-only advance, host-or-adder removal, `queue:updated` broadcast). The in-room sheet and header entry are built and instrumented but not yet run on a device |
 | E18 | Room polls | ⚪ | ✅ | `Poll` model, `poll:vote` socket, poll UI |
 | E19 | Age verification (face scan) | `age_verification_iris_*` | ❌ | Not implemented; not attempted |
 
@@ -118,7 +119,7 @@ on-device verification.
 | F5 | Reconnect resync | implied | ✅ | Rejoin replays the live playhead (not the DB checkpoint); suite-asserted after a real socket disconnect/reconnect |
 | F6 | Media end handling | `video_unavailable_not_leader` | ✅ | `media:end`, restart affordance |
 | F7 | YouTube playback | `YoutubeGridFragment` | ✅ | IFrame API in WebView |
-| F8 | Direct video URLs (Vimeo / mp4) | `WebGridFragment` | 🟠 | Server validates links (`mediaLinkService`); client player is YouTube-only |
+| F8 | Direct video URLs (Vimeo / mp4) | `WebGridFragment` | 🟡 | Server validates links; the room now plays `.m3u8`/`.mpd`/`.mp4`/`.webm` through Media3 with the same host-clock contract (500 ms samples, 700 ms guest dead-band). Compile- and unit-verified; not yet run on a device |
 | F9 | Netflix / Disney+ / HBO / Crunchyroll / Prime / SoundCloud / Twitch / X / Drive | provider `.js` shims + provider OAuth | ❌ by design | Requires provider OAuth and DRM; explicitly out of scope, documented |
 | F10 | Frame-accurate sync | ⚪ | ❌ | Not achievable with IFrame embedding; not claimed |
 | F11 | Background/floating playback | `floating_video_player_title` | ❌ | Not implemented |
@@ -127,7 +128,7 @@ on-device verification.
 
 | # | Capability | Reference | Nebula | Evidence / gap |
 |---|---|---|---|---|
-| G1 | FCM push for DMs | `notification_channel_chat` | 🟡 | Server send path + token registration exist; no live delivery test (no GMS device) |
+| G1 | FCM push for DMs | `notification_channel_chat` | 🟡 | Server send path, token registration, dead-token pruning and `notificationPrefs.directMessages` enforcement exist; a rotated token is now uploaded on next launch instead of being parked in preferences forever. Still no live delivery test between two devices |
 | G2 | Push for friend requests / invites | implied | 🟡 | Same |
 | G3 | Notification feed with actions | `friend_requests`, invitations | 🟡 | `NotificationsSheet`, swipe dismiss; not re-verified |
 | G4 | Notification expiry (28 days) | ⚪ | ✅ | TTL index + 5-minute invite TTL |
@@ -146,7 +147,7 @@ on-device verification.
 | H5 | Responsive layout (tablet/foldable) | ⚪ | 🟠 | Fixed 1-column Compose layouts |
 | H6 | Offline read cache | ⚪ | ❌ | No offline message cache; requests fail visibly |
 | H7 | Media caching (Coil + HTTP) | `Glide` | ✅ | Coil disk cache + signed URL TTL |
-| H8 | Android automated tests | ⚪ | ❌ | No unit/instrumentation tests |
+| H8 | Android automated tests | ⚪ | 🟡 | JVM specs cover media routing, invite parsing (including a spoofed card), drift tolerance and card selection; a Compose instrumented spec covers the queue sheet's vote/advance/remove semantics. The instrumented suite has not been run on a device yet |
 | H9 | Secrets outside VCS | ⚪ | 🟠 | Keystore passwords were committed (Phase 1 fix); `.env` gitignored |
 | H10 | Rate limiting | ⚪ | ✅ | Per-route limiters; asserted in suite |
 | H11 | Server-side authorisation for every private resource | ⚪ | ✅ | Membership/ownership checks; IDOR tests in suite |

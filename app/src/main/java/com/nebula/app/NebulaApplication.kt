@@ -10,6 +10,9 @@ import coil.decode.ImageDecoderDecoder
 class NebulaApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        // Starts before any screen: the chat send path asks this synchronously to decide
+        // whether a message can leave the device at all.
+        com.nebula.app.data.local.ConnectivityMonitor.start(this)
         try {
             val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
             val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0

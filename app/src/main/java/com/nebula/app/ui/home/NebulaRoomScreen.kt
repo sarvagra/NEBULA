@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Lock
@@ -148,13 +149,18 @@ data class NebulaRoomActions(
     val onViewParticipantProfile: (NebulaUser) -> Unit = {},
     val onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
     val onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
+    val onShareRoomInChat: (NebulaUser) -> Unit = {},
     val onTogglePlayPause: () -> Unit = {},
     val onSendRoomMessage: (String) -> Unit = {},
     val onSendReaction: (String) -> Unit = {},
     val onInviteFriend: (NebulaUser) -> Unit = {},
     val onVotePoll: (String) -> Unit = {},
     val onSeekTo: (Long) -> Unit = {},
-    val onUpdateMedia: (String, String) -> Unit = { _, _ -> }
+    val onUpdateMedia: (String, String) -> Unit = { _, _ -> },
+    val onAddToQueue: (title: String, mediaUrl: String) -> Unit = { _, _ -> },
+    val onVoteSkipQueueItem: (String) -> Unit = {},
+    val onAdvanceQueue: () -> Unit = {},
+    val onRemoveQueueItem: (String) -> Unit = {}
 )
 
 @Composable
@@ -164,6 +170,7 @@ fun NebulaRoomScreen(
     friends: List<NebulaUser> = emptyList(),
     friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest> = emptyList(),
     suggestedPeople: List<NebulaUser> = emptyList(),
+    queue: List<com.nebula.app.domain.model.RoomQueueItem> = emptyList(),
     actions: NebulaRoomActions = NebulaRoomActions(),
     modifier: Modifier = Modifier
 ) {
@@ -182,6 +189,7 @@ fun NebulaRoomScreen(
     val onViewParticipantProfile = actions.onViewParticipantProfile
     val onUpdateRoomSettings = actions.onUpdateRoomSettings
     val onTransferHost = actions.onTransferHost
+    val onShareRoomInChat = actions.onShareRoomInChat
     val onTogglePlayPause = actions.onTogglePlayPause
     val onSendRoomMessage = actions.onSendRoomMessage
     val onSendReaction = actions.onSendReaction
@@ -189,6 +197,11 @@ fun NebulaRoomScreen(
     val onVotePoll = actions.onVotePoll
     val onSeekTo = actions.onSeekTo
     val onUpdateMedia = actions.onUpdateMedia
+    val onAddToQueue = actions.onAddToQueue
+    val onVoteSkipQueueItem = actions.onVoteSkipQueueItem
+    val onAdvanceQueue = actions.onAdvanceQueue
+    val onRemoveQueueItem = actions.onRemoveQueueItem
+    val roomQueue = queue
     val theme = Theme.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -201,6 +214,7 @@ fun NebulaRoomScreen(
     var isMicAllowed by remember(room.id, room.isMicAllowed) { mutableStateOf(room.isMicAllowed) }
     var isVideoAllowed by remember(room.id, room.isVideoAllowed) { mutableStateOf(room.isVideoAllowed) }
     var roomTags by remember(room.id, room.tags) { mutableStateOf(room.tags) }
+    var showRoomQueue by remember(room.id) { mutableStateOf(false) }
 
     // Match server-issued identities; display names/usernames are not authorization keys.
     val currentUserId = currentUser?.id.orEmpty()
@@ -361,10 +375,7 @@ fun NebulaRoomScreen(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            val videoId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
-                ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
-
-            if (videoId.isNullOrBlank()) {
+            if (resolveRoomPlayback(room) == RoomPlaybackTarget.None) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -376,17 +387,13 @@ fun NebulaRoomScreen(
                     )
                 }
             } else {
-                NebulaYoutubePlayer(
-                    roomId = room.id,
-                    videoId = videoId,
-                    playbackPositionMs = room.playbackPositionMs,
-                    isPlaying = room.isPlaying,
+                RoomPlayerSurface(
+                    room = room,
                     isHost = isCurrentUserAdmin,
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
                     onHostVideoEnded = onHostVideoEnded,
-                    mediaEnded = room.mediaEnded,
                     onRestartVideo = onRestartVideo,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -473,6 +480,41 @@ fun NebulaRoomScreen(
                         tint = theme.colors.textSecondary,
                         modifier = Modifier.size(18.dp)
                     )
+                }
+
+                // The queue lives in the header because "what are we watching next"
+                // is a room-level question, not a playback control.
+                IconButton(
+                    onClick = { showRoomQueue = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PlaylistPlay,
+                            contentDescription = "Room queue",
+                            tint = if (roomQueue.isEmpty()) theme.colors.textSecondary else theme.colors.primaryAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        if (roomQueue.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.colors.primaryAccent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "${roomQueue.size}",
+                                    style = theme.typography.caption.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    fontSize = 8.sp
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Column {
@@ -607,10 +649,7 @@ fun NebulaRoomScreen(
                 .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
         ) {
             // 2. LARGE SYNCHRONIZED PLAYER AREA (16:9 cinema layout with clean single seekbar)
-            val videoId = room.mediaItem?.youtubeVideoId?.takeIf { it.isNotBlank() }
-                ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(room.mediaItem?.mediaUrl ?: "")
-
-            if (videoId.isNullOrBlank()) {
+            if (resolveRoomPlayback(room) == RoomPlaybackTarget.None) {
                 // Room in Idle Position: Clean placeholder, zero network errors
                 Column(
                     modifier = Modifier
@@ -645,17 +684,13 @@ fun NebulaRoomScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             } else {
-                NebulaYoutubePlayer(
-                    roomId = room.id,
-                    videoId = videoId,
-                    playbackPositionMs = room.playbackPositionMs,
-                    isPlaying = room.isPlaying,
+                RoomPlayerSurface(
+                    room = room,
                     isHost = isCurrentUserAdmin,
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
                     onHostVideoEnded = onHostVideoEnded,
-                    mediaEnded = room.mediaEnded,
                     onRestartVideo = onRestartVideo,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -1261,6 +1296,18 @@ fun NebulaRoomScreen(
         }
     }
 
+    RoomQueueSheet(
+        isVisible = showRoomQueue,
+        queue = roomQueue,
+        currentUserId = currentUserId,
+        isHost = isCurrentUserAdmin,
+        onAddToQueue = { title, url -> onAddToQueue(title, url) },
+        onVoteSkip = onVoteSkipQueueItem,
+        onAdvance = onAdvanceQueue,
+        onRemove = onRemoveQueueItem,
+        onDismiss = { showRoomQueue = false }
+    )
+
     if (showLeaveConfirmation) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showLeaveConfirmation = false },
@@ -1289,869 +1336,12 @@ fun NebulaRoomScreen(
                 onInviteFriend(friend)
                 showInviteFriends = false
             },
+            onSendInChat = { friend ->
+                onShareRoomInChat(friend)
+                showInviteFriends = false
+            },
             onDismiss = { showInviteFriends = false }
         )
-    }
-}
-
-@Composable
-private fun NebulaYoutubePlayer(
-    roomId: String,
-    videoId: String,
-    playbackPositionMs: Long,
-    isPlaying: Boolean,
-    isHost: Boolean,
-    locallyPaused: Boolean,
-    hostSeekCommand: Pair<Long, Long>?,
-    onHostSample: (Long, Boolean) -> Unit,
-    onHostVideoEnded: (Long) -> Unit,
-    mediaEnded: Boolean,
-    onRestartVideo: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Realme's app-clone profile is a separate Android user on the same audio
-    // device. Keep its YouTube renderer silent so it cannot steal audio focus
-    // from the original profile and pause the room's shared playback.
-    val muteAudioForAndroidProfile = android.os.Process.myUid() / 100000 >= 900
-    val player = remember(roomId, videoId) { mutableStateOf<WebView?>(null) }
-    val latestSample = remember { AtomicReference(onHostSample) }
-    val latestIsHost = remember { AtomicBoolean(isHost) }
-    val latestOnVideoEnded = remember { AtomicReference(onHostVideoEnded) }
-    SideEffect {
-        latestSample.set(onHostSample)
-        latestIsHost.set(isHost)
-        latestOnVideoEnded.set(onHostVideoEnded)
-    }
-    DisposableEffect(roomId, videoId) {
-        onDispose {
-            player.value?.apply {
-                stopLoading()
-                removeJavascriptInterface("Nebula")
-                destroy()
-            }
-            player.value = null
-        }
-    }
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            WebView(ctx).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.mediaPlaybackRequiresUserGesture = false
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                webViewClient = WebViewClient()
-                addJavascriptInterface(object {
-                    @JavascriptInterface
-                    fun sample(seconds: Double, state: Int) {
-                        if (latestIsHost.get() && (state == 1 || state == 3)) {
-                            latestSample.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L), true)
-                        } else if (latestIsHost.get() && state == 2) {
-                            latestSample.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L), false)
-                        }
-                    }
-                    @JavascriptInterface
-                    fun ended(seconds: Double) {
-                        if (latestIsHost.get()) latestOnVideoEnded.get().invoke((seconds * 1000.0).toLong().coerceAtLeast(0L))
-                    }
-                }, "Nebula")
-                player.value = this
-                val html = """
-                    <!doctype html><html style="width:100%;height:100%;margin:0"><head><meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#000}body{position:fixed;inset:0}#p{position:absolute;top:0;left:0}</style></head>
-                    <body><div id="p"></div><script>
-                    let player, pending={position:$playbackPositionMs,playing:$isPlaying,timestamp:Date.now()}, localPause=false, ready=false, ended=$mediaEnded, muteAudioForProfile=$muteAudioForAndroidProfile;
-                    function onYouTubeIframeAPIReady(){let w=Math.max(200,window.innerWidth),h=Math.max(200,window.innerHeight),mount=document.getElementById('p');mount.style.width=w+'px';mount.style.height=h+'px';player=new YT.Player('p',{width:w,height:h,videoId:'$videoId',playerVars:{autoplay:0,controls:${if (isHost) 1 else 0},disablekb:1,playsinline:1,rel:0,iv_load_policy:3,enablejsapi:1,origin:'https://com.nebula.app'},events:{onReady:()=>{let i=player.getIframe();i.setAttribute('width',String(w));i.setAttribute('height',String(h));i.style.width=w+'px';i.style.height=h+'px';i.style.display='block';ready=true;pending=window.__nebulaCommand||pending;applyPending();},onStateChange:(e)=>{if(e.data===0){ended=true;if(window.Nebula){try{Nebula.ended(player.getCurrentTime()||0)}catch(_){}}return;}if(window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,e.data)}catch(_){}}}}});}
-                    function applyPending(){if(!ready||!pending)return;let s=pending; if(muteAudioForProfile)player.mute(); if(localPause){player.pauseVideo();return;}if(ended&&!s.playing){player.pauseVideo();return;}let target=Math.max(0,(s.position+(s.playing?Math.max(0,Date.now()-s.timestamp):0))/1000);let now=player.getCurrentTime()||0; if(Math.abs(now-target)>0.65)player.seekTo(target,true); if(s.playing){if(ended&&target>1){player.pauseVideo();return;}ended=false;if(player.getPlayerState()!==1)player.playVideo();}else if(player.getPlayerState()===1||player.getPlayerState()===3)player.pauseVideo();}
-                    function sync(position,playing,timestamp,pauseLocal){pending={position:position,playing:playing,timestamp:timestamp};window.__nebulaCommand=pending;localPause=pauseLocal;if(position<1000&&playing)ended=false;applyPending();}
-                    setInterval(()=>{if(ready&&player&&window.Nebula){try{Nebula.sample(player.getCurrentTime()||0,player.getPlayerState())}catch(_){}}},250);
-                    let apiScript=document.createElement('script');apiScript.src='https://www.youtube.com/iframe_api';document.head.appendChild(apiScript);
-                    </script></body></html>
-                """.trimIndent()
-                loadDataWithBaseURL("https://com.nebula.app/", html, "text/html", "UTF-8", null)
-            }
-        },
-        update = { /* UI recompositions never issue playback commands. */ }
-    )
-    val syncPosition = if (isHost) 0L else playbackPositionMs
-    LaunchedEffect(player.value, videoId, syncPosition, isPlaying, locallyPaused) {
-        player.value?.evaluateJavascript(
-            "window.__nebulaCommand={position:$playbackPositionMs,playing:$isPlaying,timestamp:${System.currentTimeMillis()}};if(typeof sync==='function')sync($playbackPositionMs,$isPlaying,${System.currentTimeMillis()},$locallyPaused);",
-            null
-        )
-    }
-    LaunchedEffect(player.value, hostSeekCommand?.first) {
-        val positionMs = hostSeekCommand?.second ?: return@LaunchedEffect
-        player.value?.evaluateJavascript("if(typeof player!=='undefined'&&player&&typeof player.seekTo==='function'){player.seekTo(${positionMs.coerceAtLeast(0L) / 1000.0},true);}", null)
-    }
-    LaunchedEffect(player.value, mediaEnded) {
-        player.value?.evaluateJavascript(
-            "if(typeof player!=='undefined'&&player){ended=$mediaEnded;if(ended)player.pauseVideo();else{player.seekTo(0,true);player.playVideo();}}",
-            null
-        )
-    }
-    if (mediaEnded) {
-        val theme = Theme.current
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.95f))
-                .clickable(enabled = true, onClick = {}),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Video ended",
-                    style = theme.typography.titleMedium.copy(
-                        color = theme.colors.textPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-                if (isHost) {
-                    Button(
-                        onClick = onRestartVideo,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = theme.colors.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Restart for everyone", fontWeight = FontWeight.SemiBold)
-                    }
-                } else {
-                    Text(
-                        text = "Waiting for host to restart",
-                        style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * RoomMembersSheet:
- * Displays all participants in the room.
- * - Each row: Avatar, name, host tag, status indicators (mic/camera)
- * - 3 dots menu beside each member: Admin toggle for audio/video mute
- * - Clicking anywhere else on row: opens member's public profile
- * - Dismiss / click outside: returns simply to the room
- */
-@Composable
-fun RoomMembersSheet(
-    isVisible: Boolean,
-    participants: List<RoomParticipant>,
-    friends: List<NebulaUser>,
-    friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest>,
-    suggestedPeople: List<NebulaUser>,
-    currentUserId: String,
-    onAddFriend: (NebulaUser) -> Unit,
-    onAcceptFriendRequest: (String) -> Unit,
-    onDeclineFriendRequest: (String) -> Unit,
-    onCancelFriendRequest: (NebulaUser) -> Unit,
-    onMessageFriend: (NebulaUser) -> Unit,
-    onInviteFriend: (NebulaUser) -> Unit,
-    onToggleAudioMute: (String, Boolean) -> Unit,
-    onToggleVideoMute: (String, Boolean) -> Unit,
-    onKickParticipant: (String) -> Unit,
-    canModerate: Boolean,
-    onSelectParticipantProfile: (NebulaUser) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val theme = Theme.current
-    val context = LocalContext.current
-    var menuOpenUserId by remember { mutableStateOf<String?>(null) }
-    var kickConfirmationUser by remember { mutableStateOf<NebulaUser?>(null) }
-
-    PABottomSheet(
-        isVisible = isVisible,
-        onDismissRequest = onDismiss,
-        title = "Room Members (${participants.size})"
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "Tap a member to view profile, manage friendship, or adjust media controls.",
-                style = theme.typography.caption.copy(
-                    color = theme.colors.textTertiary,
-                    fontSize = 11.5.sp
-                ),
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(participants) { participant ->
-                    val user = participant.user
-                    val isAudioMuted = !participant.isAudioActive
-                    val isVideoMuted = !participant.isVideoActive
-                    val isMe = user.id.isNotBlank() && user.id == currentUserId
-                    val isFriend = friends.any { it.id == user.id }
-                    val outgoingRequest = suggestedPeople.any { it.id == user.id && it.friendRequestPending }
-                    val incomingRequest = friendRequests.firstOrNull { it.sender.id == user.id }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // User Avatar & Name (Clickable to open profile)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { if (!isMe) onSelectParticipantProfile(user) }
-                        ) {
-                            Box(contentAlignment = Alignment.BottomEnd) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(theme.colors.surfaceElevated)
-                                        .border(1.dp, theme.colors.surfaceBorder, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    NebulaAvatarImage(
-                                        avatarUrl = user.avatarUrl,
-                                        fallbackLetter = user.avatarLetter,
-                                        modifier = Modifier.size(38.dp)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(if (user.isOnline) theme.colors.successColor else theme.colors.textTertiary)
-                                        .border(1.5.dp, theme.colors.surface, CircleShape)
-                                )
-                            }
-
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = user.displayName,
-                                        style = theme.typography.bodyMedium.copy(
-                                            color = theme.colors.textPrimary,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.5.sp
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (participant.isHost) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
-                                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                                        ) {
-                                            Text(
-                                                text = "HOST",
-                                                style = theme.typography.caption.copy(
-                                                    color = theme.colors.primaryAccent,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 9.sp
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // Audio status indicator
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isAudioMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                                            contentDescription = null,
-                                            tint = if (isAudioMuted) Color(0xFFEF4444) else theme.colors.successColor,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isAudioMuted) "Muted" else "Mic On",
-                                            style = theme.typography.caption.copy(
-                                                color = if (isAudioMuted) Color(0xFFEF4444) else theme.colors.textSecondary,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-
-                                    // Video status indicator
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isVideoMuted) Icons.Default.VideocamOff else Icons.Default.Videocam,
-                                            contentDescription = null,
-                                            tint = if (isVideoMuted) Color(0xFFEF4444) else theme.colors.successColor,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isVideoMuted) "Camera Off" else "Camera On",
-                                            style = theme.typography.caption.copy(
-                                                color = if (isVideoMuted) Color(0xFFEF4444) else theme.colors.textSecondary,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Friendship controls reflect server state; self is never actionable.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (isMe) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(theme.colors.surfaceElevated)
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "You",
-                                        style = theme.typography.caption.copy(
-                                            color = theme.colors.textSecondary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 10.sp
-                                        )
-                                    )
-                                }
-                            } else if (incomingRequest != null) {
-                                TextButton(onClick = { onAcceptFriendRequest(incomingRequest.id) }) {
-                                    Text("Accept", color = theme.colors.primaryAccent)
-                                }
-                                TextButton(onClick = { onDeclineFriendRequest(incomingRequest.id) }) {
-                                    Text("Decline", color = theme.colors.textSecondary)
-                                }
-                            } else if (outgoingRequest) {
-                                TextButton(onClick = { onCancelFriendRequest(user) }) {
-                                    Text("Cancel request", color = theme.colors.textSecondary)
-                                }
-                            } else if (!isFriend) {
-                                Button(
-                                    onClick = { onAddFriend(user) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = theme.colors.primaryAccent,
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(30.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PersonAdd,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                        Text(
-                                            text = "Add Friend",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text("Friend", color = theme.colors.successColor, fontSize = 11.sp)
-                            }
-
-                            // Only the host can change another participant's room state.
-                            if (canModerate && !isMe && !participant.isHost) {
-                            Box {
-                                IconButton(
-                                    onClick = { menuOpenUserId = user.id },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = "Member options",
-                                        tint = theme.colors.textSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = menuOpenUserId == user.id,
-                                    onDismissRequest = { menuOpenUserId = null },
-                                    modifier = Modifier.background(theme.colors.surfaceElevated)
-                                ) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = if (isAudioMuted) "Unmute Audio" else "Mute Audio",
-                                                style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary)
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isAudioMuted) Icons.Default.Mic else Icons.Default.MicOff,
-                                                contentDescription = null,
-                                                tint = if (isAudioMuted) theme.colors.successColor else Color(0xFFEF4444)
-                                            )
-                                        },
-                                        onClick = {
-                                            onToggleAudioMute(user.id, !isAudioMuted)
-                                            menuOpenUserId = null
-                                        }
-                                    )
-
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = if (isVideoMuted) "Turn On Video" else "Turn Off Video",
-                                                style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary)
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isVideoMuted) Icons.Default.Videocam else Icons.Default.VideocamOff,
-                                                contentDescription = null,
-                                                tint = if (isVideoMuted) theme.colors.successColor else Color(0xFFEF4444)
-                                            )
-                                        },
-                                        onClick = {
-                                            onToggleVideoMute(user.id, !isVideoMuted)
-                                            menuOpenUserId = null
-                                        }
-                                    )
-
-                                    DropdownMenuItem(
-                                        text = { Text("Remove from room", color = Color(0xFFEF4444)) },
-                                        onClick = {
-                                            kickConfirmationUser = user
-                                            menuOpenUserId = null
-                                        }
-                                    )
-                                }
-                            }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-    }
-
-    kickConfirmationUser?.let { target ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { kickConfirmationUser = null },
-            title = { Text("Remove ${target.displayName}?") },
-            text = { Text("They will be removed from this room and cannot rejoin until they join again.") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    onKickParticipant(target.id)
-                    kickConfirmationUser = null
-                }) { Text("Remove", color = Color(0xFFEF4444)) }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { kickConfirmationUser = null }) { Text("Cancel") }
-            },
-            containerColor = theme.colors.surfaceElevated
-        )
-    }
-}
-
-@Composable
-private fun RoomInviteFriendsSheet(
-    friends: List<NebulaUser>,
-    onInvite: (NebulaUser) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val theme = Theme.current
-    PABottomSheet(isVisible = true, onDismissRequest = onDismiss, title = "Invite a friend") {
-        if (friends.isEmpty()) {
-            Text(
-                "All your friends are already here",
-                color = theme.colors.textSecondary,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp)
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(friends, key = { it.id }) { friend ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .background(theme.colors.surface).padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(38.dp))
-                        Text(friend.displayName, color = theme.colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1)
-                        Button(onClick = { onInvite(friend) }) { Text("Invite") }
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-}
-
-/**
- * RoomSettingsSheet:
- * Admin controls for the active room:
- * - Room Name
- * - Max participants count
- * - Mic permissions toggle
- * - Video permissions toggle
- * - Room tags selector
- */
-@Composable
-fun RoomSettingsSheet(
-    isVisible: Boolean,
-    roomName: String,
-    maxParticipants: Int,
-    isMicAllowed: Boolean,
-    isVideoAllowed: Boolean,
-    tags: List<String>,
-    onSaveSettings: (String, Int, Boolean, Boolean, List<String>) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val theme = Theme.current
-    var nameState by remember(roomName, isVisible) { mutableStateOf(roomName) }
-    var maxState by remember(maxParticipants, isVisible) { mutableIntStateOf(maxParticipants) }
-    var micState by remember(isMicAllowed, isVisible) { mutableStateOf(isMicAllowed) }
-    var videoState by remember(isVideoAllowed, isVisible) { mutableStateOf(isVideoAllowed) }
-    var tagsState by remember(tags, isVisible) { mutableStateOf(tags.toSet()) }
-
-    val availableTags = listOf("Cinema", "Music", "WatchParty", "Chill", "Study", "Anime", "Gaming", "Lounge")
-    val maxOptions = listOf(5, 10, 20, 50, 100)
-
-    PABottomSheet(
-        isVisible = isVisible,
-        onDismissRequest = onDismiss,
-        title = "Room Settings"
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Room Name
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "ROOM NAME",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        fontSize = 11.sp
-                    )
-                )
-
-                OutlinedTextField(
-                    value = nameState,
-                    onValueChange = { nameState = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = theme.colors.primaryAccent,
-                        unfocusedBorderColor = theme.colors.surfaceBorder,
-                        focusedTextColor = theme.colors.textPrimary,
-                        unfocusedTextColor = theme.colors.textPrimary,
-                        focusedContainerColor = theme.colors.surface,
-                        unfocusedContainerColor = theme.colors.surface
-                    ),
-                    singleLine = true
-                )
-            }
-
-            // Max Participants
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "MAX PARTICIPANTS: ${if (maxState >= 100) "Unlimited (100)" else maxState}",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        fontSize = 11.sp
-                    )
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    maxOptions.forEach { count ->
-                        val isSelected = maxState == count
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) theme.colors.primaryAccent else theme.colors.surface)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable { maxState = count },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (count >= 100) "∞" else "$count",
-                                style = theme.typography.caption.copy(
-                                    color = if (isSelected) Color.White else theme.colors.textPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Permissions Toggles
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Mic Allowed Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Microphone Allowed",
-                            style = theme.typography.bodyMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        )
-                        Text(
-                            text = "Allow members to speak and voice chat",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-
-                    Switch(
-                        checked = micState,
-                        onCheckedChange = { micState = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = theme.colors.primaryAccent,
-                            uncheckedThumbColor = theme.colors.textTertiary,
-                            uncheckedTrackColor = theme.colors.surfaceElevated
-                        )
-                    )
-                }
-
-                // Video Allowed Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Video Cameras Allowed",
-                            style = theme.typography.bodyMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        )
-                        Text(
-                            text = "Allow members to stream camera video",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-
-                    Switch(
-                        checked = videoState,
-                        onCheckedChange = { videoState = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = theme.colors.primaryAccent,
-                            uncheckedThumbColor = theme.colors.textTertiary,
-                            uncheckedTrackColor = theme.colors.surfaceElevated
-                        )
-                    )
-                }
-            }
-
-            // Room Tags
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "ROOM TAGS",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        fontSize = 11.sp
-                    )
-                )
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(availableTags) { tag ->
-                        val isSelected = tagsState.contains(tag)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable {
-                                    tagsState = if (isSelected) tagsState - tag else tagsState + tag
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "#$tag",
-                                style = theme.typography.caption.copy(
-                                    color = if (isSelected) theme.colors.primaryAccent else theme.colors.textSecondary,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 11.5.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Save Button
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(theme.colors.primaryAccent)
-                    .clickable {
-                        onSaveSettings(
-                            nameState.ifBlank { "Watch Lounge" },
-                            maxState,
-                            micState,
-                            videoState,
-                            tagsState.toList()
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Save Room Settings",
-                    style = theme.typography.bodyMedium.copy(
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-    }
-}
-
-@Composable
-private fun ParticipantAvatarPill(
-    participant: RoomParticipant,
-    onClick: () -> Unit
-) {
-    val theme = Theme.current
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(theme.colors.surface)
-            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(theme.colors.surfaceElevated),
-            contentAlignment = Alignment.Center
-        ) {
-            NebulaAvatarImage(participant.user.avatarUrl, participant.user.avatarLetter, modifier = Modifier.size(22.dp))
-        }
-
-        Text(
-            text = participant.user.displayName.split(" ").first(),
-            style = theme.typography.caption.copy(
-                color = theme.colors.textPrimary,
-                fontWeight = FontWeight.Medium,
-                fontSize = 11.5.sp
-            )
-        )
-
-        if (participant.isHost) {
-            Text(
-                text = "HOST",
-                style = theme.typography.caption.copy(
-                    color = theme.colors.primaryAccent,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
-                )
-            )
-        }
     }
 }
 

@@ -104,6 +104,8 @@ class HomeViewModel(
         viewModelScope.launch {
             if (showIndicator) _uiState.value = _uiState.value.copy(isRefreshing = true)
             try {
+                // Idempotent: connects once the session exists and no-ops afterwards.
+                socialRepository.startRealtime()
                 (roomRepository as? RoomRepositoryImpl)?.refreshRooms()
                 socialRepository.refresh()
                 val notificationResult = com.nebula.app.data.backend.NebulaApiClient.getNotifications()
@@ -212,14 +214,21 @@ class HomeViewModel(
         }
     }
 
+    /** True while the realtime socket is open; presence is maintained by it. */
+    private fun isRealtimeConnected(): Boolean =
+        (roomRepository as? com.nebula.app.data.repository.RoomRepositoryImpl)?.isRealtimeConnected() == true
+
     fun onAppForegrounded() {
         presencePulseJob?.cancel()
         presencePulseJob = viewModelScope.launch {
             while (true) {
-                if (_uiState.value.userProfile.isLoggedIn) {
+                // Presence is maintained by the socket's authenticated connection;
+                // this HTTP pulse only exists for the rare foreground session without
+                // one. At 25 seconds it cost 40 writes/second at a thousand users.
+                if (_uiState.value.userProfile.isLoggedIn && !isRealtimeConnected()) {
                     com.nebula.app.data.backend.NebulaApiClient.updateAppPresence(true)
                 }
-                delay(25_000)
+                delay(240_000)
             }
         }
         viewModelScope.launch {
@@ -308,6 +317,25 @@ class HomeViewModel(
         viewModelScope.launch {
             roomRepository.lastReaction.collect { emoji ->
                 _uiState.value = _uiState.value.copy(lastRoomReaction = emoji)
+            }
+        }
+        viewModelScope.launch {
+            roomRepository.queue.collect { items ->
+                _uiState.value = _uiState.value.copy(roomQueue = items)
+            }
+        }
+
+        // Connectivity is part of the UI state so the chat can say it is offline instead
+        // of leaving a spinner running, and so the moment it comes back the unsent
+        // messages go out without the user tapping anything.
+        viewModelScope.launch {
+            var wasOnline = com.nebula.app.data.local.ConnectivityMonitor.isOnlineNow()
+            com.nebula.app.data.local.ConnectivityMonitor.isOnline.collect { online ->
+                _uiState.value = _uiState.value.copy(isOnline = online)
+                if (online && !wasOnline) {
+                    socialRepository.flushPendingNow()
+                }
+                wasOnline = online
             }
         }
 
@@ -454,6 +482,48 @@ class HomeViewModel(
     }
 
     // --- ROOM ACTIONS ---
+    /**
+     * Joins a room by its shareable code, which is what every invite surface carries.
+     * Resolution happens on the server so a link can never smuggle in a room id the
+     * user was not handed.
+     */
+    fun onJoinRoomByCode(code: String) {
+        val trimmed = code.trim().uppercase()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            val resolved = com.nebula.app.data.backend.NebulaApiClient.resolveRoomInvite(trimmed)
+            val roomId = (resolved as? com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success)
+                ?.data?.optJSONObject("data")?.optString("id")
+                ?.takeIf { it.isNotBlank() }
+            if (roomId != null) onJoinRoom(roomId) else showToast("That watch party has ended.")
+        }
+    }
+
+    /**
+     * Sends the active room into a friend's direct messages as a card.
+     *
+     * The card carries the room's shareable code rather than its id, matching every
+     * other invite surface. The server validates the code before storing it, so a
+     * card can never point at a room that does not exist.
+     */
+    fun onShareRoomIntoDm(friend: NebulaUser) {
+        val room = _uiState.value.activeRoom
+        val code = room?.inviteCode
+        if (room == null || code.isNullOrBlank()) {
+            showToast("This room has no shareable link yet.")
+            return
+        }
+        viewModelScope.launch {
+            val sent = socialRepository.sendMessage(
+                conversationId = friend.id,
+                content = room.name,
+                mediaUrl = "nebula://room/$code",
+                messageType = "room_card"
+            )
+            showToast(if (sent) "Invite sent to ${friend.displayName}" else "Could not send that invite.")
+        }
+    }
+
     fun onJoinRoom(roomId: String) {
         viewModelScope.launch {
             val room = roomRepository.joinRoom(roomId)
@@ -643,6 +713,33 @@ class HomeViewModel(
         }
     }
 
+    // --- ROOM QUEUE ---
+
+    fun onAddToRoomQueue(title: String, mediaUrl: String, subtitle: String = "", durationSeconds: Long = 0L) {
+        viewModelScope.launch {
+            val ok = roomRepository.addToQueue(title, mediaUrl, subtitle, durationSeconds)
+            showToast(
+                if (ok) "Added to the queue"
+                else "Could not add that link. It may not be playable."
+            )
+        }
+    }
+
+    fun onVoteSkipQueueItem(itemId: String) {
+        viewModelScope.launch { roomRepository.voteSkipQueueItem(itemId) }
+    }
+
+    fun onAdvanceRoomQueue() {
+        viewModelScope.launch {
+            val ok = roomRepository.advanceQueue()
+            if (!ok) showToast("The queue is empty")
+        }
+    }
+
+    fun onRemoveQueueItem(itemId: String) {
+        viewModelScope.launch { roomRepository.removeQueueItem(itemId) }
+    }
+
     fun onSendRoomMessage(content: String) {
         viewModelScope.launch {
             roomRepository.sendRoomMessage(content)
@@ -700,7 +797,11 @@ class HomeViewModel(
         conversationSyncJob?.cancel()
         conversationSyncJob = viewModelScope.launch {
             while (true) {
-                delay(4_000)
+                // Messages, read receipts and edits arrive over the DM socket, so this
+                // is only a safety net for a socket that silently died. At four
+                // seconds it was the single largest source of HTTP load once a few
+                // hundred people sat in open threads at the same time.
+                delay(20_000)
                 val open = socialRepository.activeConversation.value ?: break
                 socialRepository.refreshActiveConversation()
                 _uiState.value = _uiState.value.copy(
@@ -803,7 +904,15 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             if (!socialRepository.sendMessage(convId, trimmed)) {
-                showToast("Message not sent. Tap it in the thread to retry.")
+                // Be specific about which failure this is. "Not sent" while offline is a
+                // different instruction from "rejected", and the user acts on it differently.
+                showToast(
+                    if (com.nebula.app.data.local.ConnectivityMonitor.isOnlineNow()) {
+                        "Message not sent. Tap the red ! to retry."
+                    } else {
+                        "You're offline. Saved — it will send when you reconnect."
+                    }
+                )
             }
         }
     }
@@ -998,6 +1107,14 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Persists a profile edit.
+     *
+     * The screen only closes once the server has accepted the write. The old flow
+     * navigated back and printed "Profile saved" before the request finished, so a
+     * rejected edit (taken username, tier-gated status, too many tags) looked like
+     * a success until the next launch restored the old values from the server.
+     */
     fun onSaveProfile(
         displayName: String,
         username: String,
@@ -1008,7 +1125,8 @@ class HomeViewModel(
         isFriendCountPublic: Boolean = true,
         avatarUrl: String? = null,
         bannerUrl: String? = null,
-        customStatus: String = _uiState.value.userProfile.customStatus
+        customStatus: String = _uiState.value.userProfile.customStatus,
+        onResult: (Boolean) -> Unit = {}
     ) {
         viewModelScope.launch {
             val rawClean = username.trim().replace("^@".toRegex(), "").lowercase()
@@ -1019,11 +1137,15 @@ class HomeViewModel(
 
             if (cleanUsername.length !in 3..16 || !cleanUsername.matches("^[a-z0-9][a-z0-9_]*[a-z0-9]$".toRegex())) {
                 showToast("Username must be 3-16 characters, with no leading or trailing underscore")
+                onResult(false)
                 return@launch
             }
 
             val current = _uiState.value.userProfile
-            // ⚡ Immediate optimistic UI update - reflects instantly on Profile
+
+            // Optimistic paint of the editor's own values so the profile behind it
+            // already looks right, but the route is only popped after the server
+            // confirms — see the success branch below.
             val optimisticProfile = current.copy(
                 displayName = displayName,
                 username = "@$cleanUsername",
@@ -1041,12 +1163,9 @@ class HomeViewModel(
             )
             profileRepository.setLoggedInUser(optimisticProfile)
             sessionManager?.saveUserProfile(optimisticProfile)
-
-            val prev = if (navBackStack.isNotEmpty()) navBackStack.pop() else null
             _uiState.value = _uiState.value.copy(
                 userProfile = optimisticProfile,
-                isFriendCountPublic = isFriendCountPublic,
-                fullScreenDestination = prev
+                isFriendCountPublic = isFriendCountPublic
             )
 
             // Only send the tier-gated presence fields when they actually changed.
@@ -1054,36 +1173,81 @@ class HomeViewModel(
             // Basic account, which is exactly what users were hitting.
             val statusChanged = !status.equals(current.status, ignoreCase = true)
             val customStatusChanged = customStatus != current.customStatus
-            val apiRes = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
-                displayName = displayName,
-                username = cleanUsername,
-                bio = bio,
-                status = if (statusChanged) status else null,
-                customStatus = if (customStatusChanged) customStatus else null,
-                bannerIndex = bannerIndex,
-                interests = interests,
-                avatarUrl = avatarUrl,
-                isFriendCountPublic = isFriendCountPublic,
-                bannerUrl = bannerUrl,
-                isOnboardingCompleted = true
-            )
+            suspend fun push(sendStatus: Boolean, sendCustom: Boolean): com.nebula.app.data.backend.NebulaApiClient.ApiResponse<org.json.JSONObject> =
+                com.nebula.app.data.backend.NebulaApiClient.updateProfile(
+                    displayName = displayName,
+                    username = cleanUsername,
+                    bio = bio,
+                    status = if (sendStatus) status else null,
+                    customStatus = if (sendCustom) customStatus else null,
+                    bannerIndex = bannerIndex,
+                    interests = interests,
+                    avatarUrl = avatarUrl,
+                    isFriendCountPublic = isFriendCountPublic,
+                    bannerUrl = bannerUrl,
+                    isOnboardingCompleted = true
+                )
+
+            var apiRes = push(statusChanged, customStatusChanged)
+
+            // A lapsed subscription can leave the stored status on a tier the account
+            // no longer has. The server rejects the whole document for it, so retry
+            // once without the presence fields instead of losing the name, bio and
+            // artwork the user actually came to edit.
+            if (apiRes is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error &&
+                apiRes.statusCode == 403 &&
+                (statusChanged || customStatusChanged) &&
+                apiRes.message.contains("status", ignoreCase = true)
+            ) {
+                apiRes = push(sendStatus = false, sendCustom = false)
+            }
 
             when (apiRes) {
                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                    // Trust the server's copy: it clamps the banner index, trims tags to
+                    // the tier allowance and is the only source of the final URLs.
+                    val saved = apiRes.data.optJSONObject("data")
                     val serverProfile = optimisticProfile.copy(
-                        bannerUrl = bannerUrl ?: current.bannerUrl,
-                        avatarUri = avatarUrl ?: current.avatarUri
+                        displayName = saved?.optString("displayName")?.takeIf { it.isNotBlank() } ?: displayName,
+                        username = saved?.optString("username")?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: optimisticProfile.username,
+                        bio = saved?.optString("bio") ?: bio,
+                        bannerIndex = if (saved?.has("bannerIndex") == true) saved.optInt("bannerIndex", bannerIndex) else bannerIndex,
+                        bannerUrl = saved?.optString("bannerUrl")?.takeIf { it.isNotBlank() } ?: bannerUrl,
+                        avatarUri = saved?.optString("avatarUrl")?.takeIf { it.isNotBlank() } ?: (avatarUrl ?: current.avatarUri),
+                        interests = saved?.optJSONArray("interests")?.let { arr ->
+                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+                        } ?: interests
                     )
                     profileRepository.setLoggedInUser(serverProfile)
                     sessionManager?.saveUserProfile(serverProfile)
-                    showToast("Profile saved successfully")
+
+                    val prev = if (navBackStack.isNotEmpty()) navBackStack.pop() else null
+                    _uiState.value = _uiState.value.copy(
+                        userProfile = serverProfile,
+                        isFriendCountPublic = isFriendCountPublic,
+                        fullScreenDestination = prev
+                    )
+                    showToast("Profile saved")
+                    refreshAll(showIndicator = false)
+                    onResult(true)
                 }
                 is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
-                    if (apiRes.statusCode == 409) {
-                        showToast("Error: Username @$cleanUsername is already taken")
-                    } else {
-                        showToast("Notice: Saved locally (${apiRes.message})")
+                    // Put the old values back so nothing presents an unsaved edit as real.
+                    profileRepository.setLoggedInUser(current)
+                    sessionManager?.saveUserProfile(current)
+                    _uiState.value = _uiState.value.copy(
+                        userProfile = current,
+                        isFriendCountPublic = current.isFriendCountPublic
+                    )
+                    val message = when {
+                        apiRes.statusCode == 409 -> "@$cleanUsername is already taken"
+                        apiRes.statusCode == 403 -> apiRes.message
+                        apiRes.statusCode == 400 -> apiRes.message
+                        apiRes.statusCode == 401 -> "Your session expired. Sign in again."
+                        else -> apiRes.message.ifBlank { "Could not reach Nebula. Check your connection." }
                     }
+                    showToast(message)
+                    onResult(false)
                 }
             }
         }
@@ -1544,6 +1708,9 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(isAuthLoading = true)
             runCatching { roomRepository.leaveRoom() }
             (roomRepository as? RoomRepositoryImpl)?.disconnectRealtime()
+            // Drop the live DM channel before the token is revoked, or it reconnects
+            // with a session that no longer exists.
+            socialRepository.stopRealtime()
             runCatching { com.nebula.app.data.backend.NebulaApiClient.logout() }
             manager?.signOut()
             sessionManager?.clearSession()

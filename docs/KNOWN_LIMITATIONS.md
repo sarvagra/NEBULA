@@ -21,22 +21,25 @@ evidence.
 
 | Area | Limitation |
 |---|---|
-| Playback | YouTube IFrame inside a WebView. No frame-accurate sync; ad breaks and buffering can diverge clients. Direct video URLs are validated server-side but only YouTube is rendered. |
+| Playback | YouTube runs as an IFrame inside a WebView; no frame-accurate sync, and ad breaks or buffering can still diverge clients. Direct `.m3u8`/`.mpd`/`.mp4`/`.webm` links now play through Media3 with the same host-clock contract, but the surface is new and has only been compiled and unit-tested, not watched on a device. Anything else — a provider page, an embed-only URL — still shows the idle placeholder. |
 | Provider playback | Netflix, Disney+, HBO Max, Crunchyroll, Prime Video, Tubi, Pluto, Twitch, X, SoundCloud, Rutube/VK are **not** implemented and will not be: they depend on provider OAuth plus DRM, which cannot be lawfully reimplemented. |
 | Voice/video rooms | Rave's WebRTC voice chat and AR filters are out of scope; no microphone/camera capture is implemented. |
 | Age verification | Rave's face-scan age check is not implemented. |
 | Message expiry | Rave's "disappearing messages" feature is not implemented. |
 | Auto-translate | Not implemented; would require a translation provider and a clear data-processing disclosure. |
-| Room queue | Nebula holds one media item per room; there is no queue/vote-to-skip model yet. |
+| Room queue | The queue is request-only: members add and vote, but nothing auto-advances when the current video ends — the host presses play on the next item. A strict majority is required to drop an item, so in a room of two, one person cannot skip what the other queued. |
 | Nearby rooms | Deliberately not implemented: no location permission is requested. |
-| Offline sends | A message that cannot reach the server stays in the thread marked `Not sent · Tap to retry`; nothing is fabricated as sent. The queue survives process death and re-sends automatically once the server answers again, but only while the app is open — there is no background/WorkManager retry, and nothing is delivered while the app is closed. Messages the server rejects outright (4xx) stop auto-retrying and need an explicit tap. |
+| Offline sends | A message sent with no network is marked failed immediately (red `!` beside the bubble) rather than pretending to send; nothing is fabricated as delivered. The queue survives process death and re-sends automatically when the network returns, but only while the app is open — there is no WorkManager retry, and nothing is delivered while the app is closed. Messages the server rejects outright (4xx) stop auto-retrying and need an explicit tap. |
+| Direct-message socket | The live DM channel is authenticated once at connect time. A token refreshed mid-session does not re-authenticate the existing socket; it is rebuilt on the next foreground/refresh, so a DM that arrives after a refresh-token rotation but before that rebuild is picked up by the polling fallback rather than instantly. |
+| Video attachments | Client and server now agree that `video` is a message type (they did not: every video DM was rejected with a 400). The upload and bubble paths are compile-verified only; no video has been sent on a device. |
 | Two-device session cap | `DEVICE_LIMIT_REACHED` is still the default when a third distinct device signs in. Lockout is no longer permanent: the client retries once with `replaceOldestDevice`, which retires the least recently used session and reports that it did so. The recovery is automatic rather than a picker — a user who still has both devices cannot choose *which* one is signed out from the sign-in screen; they must sign in first and use Settings → Account. |
 | Dependency advisories | `npm audit`: 5 advisories (3 moderate, 2 high) as of 2026-10-30. The zod advisory is bounded by the 100 KB JSON body limit, and the uuid advisories are transitive in the server-only Firebase Admin client. Remediation (zod 4) is a breaking major upgrade and was deliberately not forced. |
 | End-to-end encryption | Not implemented and not claimed anywhere in the UI or docs. |
 | Presence | Single-instance Socket.IO without a Redis adapter; horizontal scaling would break presence fan-out. The 60 s reconciliation sweep is also per instance, so two instances would each only reclaim their own abandoned rows (harmless, but not a distributed lease). |
 | Playback ordering on the client | The server refuses stale commands and out-of-order samples (suite-asserted), and the Android client echoes the playback version and drops older inbound events. The client half has not been exercised against a second live client, so it is compile-verified only. A command packet delayed by more than one command round-trip is corrected rather than applied — a client can therefore see a brief jump back to the authoritative position. |
 | Room chat backfill | Recovery uses `createdAt` cursors. Two messages written in the same millisecond are returned together and de-duplicated by id client-side; there is no per-room monotonic sequence number, so a cursor cannot yet be expressed as a single integer. |
-| Notifications | Server send paths exist; delivery was not verified without a GMS device. |
+| Notifications | Server send paths exist and honour the per-category preference, but delivery between two devices has still not been observed end to end. A push arriving while the app is open on that exact conversation is still shown. |
+| Room shots across accounts | Sharing a room into a DM requires an accepted friendship (server-enforced). A card is validated at send time; if the room ends later, the card stays in the thread and tapping it reports that the party has ended. |
 
 ## 3. Security limitations
 
@@ -53,9 +56,16 @@ evidence.
 
 ## 4. Maintainability limitations
 
-- `NebulaRoomScreen.kt` (2,297 LOC), `HomeViewModel.kt` (1,617 LOC) and
-  `NebulaChatDetailScreen.kt` (1,389 LOC) are monoliths.
-- No Android unit or instrumentation tests.
+- The two screen monoliths were split: the room is now `NebulaRoomScreen.kt`
+  (1,512 LOC) with `NebulaYoutubePlayer.kt` and `NebulaRoomSheets.kt`, and the
+  chat screen is `NebulaChatDetailScreen.kt` (851) with `ChatMessageBubble.kt`,
+  `ChatMessageActions.kt` and `ChatMessageFormatting.kt`. `HomeViewModel.kt`
+  (~1,700 LOC) is still a monolith and remains the largest file in the app.
+- Both splits are compile-verified only: they were landed without a device UX
+  regression pass, which is the next thing owed on them.
+- Android tests exist but are thin: pure JVM specs for the logic that decides
+  behaviour, plus one Compose instrumented spec. There is no coverage of the
+  auth gate, the DM composer or the room join path on a device.
 - Manual dependency injection in `MainActivity`; repositories are singletons
   created per activity instance.
 - No schema-migration strategy for MongoDB (index creation is implicit).

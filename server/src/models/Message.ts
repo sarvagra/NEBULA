@@ -42,7 +42,8 @@ const MessageSchema = new Schema<IMessage>(
     mediaUrl: { type: String },
     isSpoiler: { type: Boolean, default: false },
     mediaMimeType: { type: String },
-    messageType: { type: String, enum: ['text', 'media', 'system'], default: 'text' },
+    // 'room_card' is a shared watch-party invite: mediaUrl holds nebula://room/<code>.
+    messageType: { type: String, enum: ['text', 'media', 'video', 'system', 'room_card'], default: 'text' },
     reactions: [
       {
         emoji: { type: String, required: true },

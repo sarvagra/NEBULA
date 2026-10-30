@@ -20,8 +20,12 @@ data class HomeUiState(
     // Rooms
     val rooms: List<NebulaRoom> = emptyList(),
     val activeRoom: NebulaRoom? = null,
+    /** Live device connectivity; chat fails fast and visibly when this is false. */
+    val isOnline: Boolean = true,
     val roomChatInput: String = "",
     val lastRoomReaction: String? = null,
+    /** Items the active room has agreed to watch later. */
+    val roomQueue: List<com.nebula.app.domain.model.RoomQueueItem> = emptyList(),
 
     // Social & Friends
     val friends: List<NebulaUser> = emptyList(),

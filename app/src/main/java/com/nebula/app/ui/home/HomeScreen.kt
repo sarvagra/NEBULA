@@ -167,18 +167,20 @@ fun HomeScreen(
                         },
                         onOpenEditProfile = {
                             viewModel.onOpenEditProfile()
-                        }
+                        },
+                        viewerFriendsCount = uiState.friends.size
                     )
                 }
 
                 is FullScreenDestination.EditProfile -> {
                     NebulaEditProfileScreen(
                         userProfile = uiState.userProfile,
-                        onSave = { dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus ->
-                            viewModel.onSaveProfile(dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus)
+                        onSave = { dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus, onResult ->
+                            viewModel.onSaveProfile(dName, uName, bio, status, bannerIdx, interests, isFriendPublic, avatarUrl, bannerUrl, customStatus, onResult)
                         },
                         onBack = { viewModel.onNavigateBack() },
-                        onOpenMembership = { viewModel.onOpenMembership() }
+                        onOpenMembership = { viewModel.onOpenMembership() },
+                        friendsCount = uiState.friends.size
                     )
                 }
 
@@ -248,6 +250,7 @@ fun HomeScreen(
                 friends = uiState.friends,
                 friendRequests = uiState.friendRequests,
                 suggestedPeople = uiState.suggestedPeople,
+                queue = uiState.roomQueue,
                 actions = NebulaRoomActions(
                     onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
                     onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
@@ -276,7 +279,12 @@ fun HomeScreen(
                     onVotePoll = { viewModel.onVotePoll(it) },
                     onSeekTo = { viewModel.onSeekTo(it) },
                     onUpdateMedia = { title, url -> viewModel.onUpdateRoomMedia(title, url) },
-                    onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) }
+                    onAddToQueue = { title, url -> viewModel.onAddToRoomQueue(title, url) },
+                    onVoteSkipQueueItem = { viewModel.onVoteSkipQueueItem(it) },
+                    onAdvanceQueue = { viewModel.onAdvanceRoomQueue() },
+                    onRemoveQueueItem = { viewModel.onRemoveQueueItem(it) },
+                    onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) },
+                    onShareRoomInChat = { viewModel.onShareRoomIntoDm(it) }
                 )
             )
         } else if (uiState.activeSocialConversation != null) {
@@ -297,7 +305,9 @@ fun HomeScreen(
                     } else {
                         viewModel.onCreateRoomClick()
                     }
-                }
+                },
+                onJoinRoomByCode = { viewModel.onJoinRoomByCode(it) },
+                isOnline = uiState.isOnline
             )
         } else {
             // STANDARD TAB SHELL
@@ -768,6 +778,7 @@ fun HomeScreen(
                     onInviteToRoom = { friend ->
                         viewModel.onInviteFriendToActiveRoom(friend)
                     },
+                    onViewFullProfile = { friend -> viewModel.onOpenUserProfileById(friend.id) },
                     onDismiss = { viewModel.onDismissModalSheet() }
                 )
             }

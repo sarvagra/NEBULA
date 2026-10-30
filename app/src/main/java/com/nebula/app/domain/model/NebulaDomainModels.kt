@@ -783,3 +783,27 @@ data class NebulaAnalyticsEvent(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+
+/**
+ * One item waiting in a room's play queue.
+ *
+ * The queue is *not* the current playback: an item here is something the room has
+ * agreed to watch later. Voting to skip removes the item; only the host can advance
+ * the room onto it, which is why [skipVotesRequired] travels with every item instead
+ * of the client guessing a threshold.
+ */
+data class RoomQueueItem(
+    val id: String,
+    val roomId: String,
+    val title: String,
+    val subtitle: String = "",
+    val mediaUrl: String,
+    val durationSeconds: Long = 0L,
+    val addedByUserId: String = "",
+    val addedByName: String = "Nebula User",
+    val skipVoteCount: Int = 0,
+    val skipVotesRequired: Int = 1,
+    val skipVoterIds: List<String> = emptyList()
+) {
+    fun hasVoted(userId: String): Boolean = skipVoterIds.contains(userId)
+}

@@ -118,8 +118,20 @@ class MainActivity : ComponentActivity() {
                         notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
                     runCatching {
-                        val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
-                        if (token.isNotBlank()) com.nebula.app.data.backend.NebulaApiClient.registerNotificationDevice(token)
+                        // FCM can rotate a token while the app is closed. onNewToken only
+                        // has a context, so it parks the value here; uploading it on the
+                        // next signed-in launch is what keeps push delivery alive instead
+                        // of silently stopping until the next sign-out.
+                        val pushPrefs = getSharedPreferences("nebula_push", MODE_PRIVATE)
+                        val rotated = pushPrefs.getString("pending_token", null)
+                        val current = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                        val token = rotated?.takeIf { it.isNotBlank() } ?: current
+                        if (!token.isNullOrBlank()) {
+                            val result = com.nebula.app.data.backend.NebulaApiClient.registerNotificationDevice(token)
+                            if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                                pushPrefs.edit().remove("pending_token").apply()
+                            }
+                        }
                     }
                 }
             }

@@ -32,6 +32,29 @@ class SocialRepositoryImpl(
 
     private val backgroundScope = CoroutineScope(Dispatchers.IO)
 
+    /**
+     * Live direct-message channel, connected while the user is signed in.
+     *
+     * Without it a DM only appeared on the next poll of an open thread, so an incoming
+     * message could sit unseen on the Chats tab for as long as the user stayed there.
+     */
+    private val directMessageSocket = com.nebula.app.data.realtime.DirectMessageSocketClient(
+        tokenProvider = { apiClient.authToken },
+        baseUrlProvider = { apiClient.socketBaseUrl() },
+        onDirectMessage = { payload -> applyIncomingDirectMessage(payload) },
+        onReadReceipt = { payload -> applyReadReceipt(payload) },
+        onFriendshipChanged = { backgroundScope.launch { refresh() } },
+        onReconnected = { backgroundScope.launch { refresh() } }
+    )
+
+    override fun startRealtime() {
+        directMessageSocket.connect()
+    }
+
+    override fun stopRealtime() {
+        directMessageSocket.disconnect()
+    }
+
     fun clearLocalState() {
         _friends.value = emptyList()
         _friendRequests.value = emptyList()
@@ -160,9 +183,125 @@ class SocialRepositoryImpl(
 
     /** Applies a change to a conversation in both the inbox list and the open thread. */
     private fun updateConversation(conversationId: String, transform: (NebulaConversation) -> NebulaConversation) {
-        _conversations.value = _conversations.value.map { if (it.id == conversationId) transform(it) else it }
+        // Sending moves the thread to the top of the inbox, which is the one ordering
+        // rule every messaging app shares.
+        _conversations.value = _conversations.value
+            .map { if (it.id == conversationId) transform(it) else it }
+            .sortedByDescending { it.messages.lastOrNull()?.timestamp ?: 0L }
         if (_activeConversation.value?.id == conversationId) {
             _activeConversation.value = _activeConversation.value?.let(transform)
+        }
+    }
+
+    /**
+     * Server history plus anything still waiting to be delivered.
+     *
+     * A message with a client key the server already knows about is dropped from the
+     * local side: the server's copy is authoritative from that point on.
+     */
+    /**
+     * Applies a message that arrived over the socket.
+     *
+     * The payload reaches both participants, so the peer's thread is derived from the
+     * side that is not us. A message this device just sent is already on screen, and is
+     * matched by id rather than added twice.
+     */
+    private fun applyIncomingDirectMessage(payload: JSONObject) {
+        val senderId = payload.optString("senderId")
+        val recipientId = payload.optString("conversationId")
+        val myId = sessionManager?.getUserProfile()?.id?.takeIf { it.isNotBlank() } ?: return
+        val peerId = if (senderId == myId) recipientId else senderId
+        if (peerId.isBlank() || peerId == myId) return
+        val incoming = messageFromJson(payload, peerId)
+        if (incoming.id.isBlank()) return
+
+        var knownConversation = false
+        val conversations = _conversations.value.map { conversation ->
+            if (conversation.id != peerId) conversation else {
+                knownConversation = true
+                if (conversation.messages.any { it.id == incoming.id }) {
+                    conversation
+                } else {
+                    val merged = conversation.messages + incoming
+                    conversation.copy(
+                        messages = merged,
+                        lastMessageText = previewText(incoming),
+                        lastMessageTime = compactTimeLabel(incoming.timestamp),
+                        // Only the peer's messages count as unread, and only while the
+                        // thread is not the one on screen.
+                        unreadCount = if (incoming.role == MessageRole.ASSISTANT &&
+                            _activeConversation.value?.id != peerId
+                        ) conversation.unreadCount + 1 else conversation.unreadCount
+                    )
+                }
+            }
+        }
+        // A thread we have never seen (new friend, or the list not loaded yet) is worth
+        // one refresh rather than a half-built row.
+        if (!knownConversation) {
+            backgroundScope.launch { refresh() }
+            return
+        }
+        _conversations.value = conversations.sortedByDescending { it.messages.lastOrNull()?.timestamp ?: 0L }
+
+        if (_activeConversation.value?.id == peerId) {
+            val active = _activeConversation.value ?: return
+            if (active.messages.none { it.id == incoming.id }) {
+                _activeConversation.value = active.copy(
+                    messages = active.messages + incoming,
+                    unreadCount = 0
+                )
+            }
+            if (incoming.role == MessageRole.ASSISTANT) {
+                backgroundScope.launch { apiClient.markConversationRead(peerId) }
+            }
+        }
+    }
+
+    /** Moves this device's ticks to read when the peer opens the thread. */
+    private fun applyReadReceipt(payload: JSONObject) {
+        val readerId = payload.optString("readerId")
+        if (readerId.isBlank()) return
+        val readAt = System.currentTimeMillis()
+        fun List<ChatMessage>.stamped(): List<ChatMessage> = map { message ->
+            if (message.role == MessageRole.USER && message.readAt == null && message.sendState == MessageSendState.SENT) {
+                message.copy(readAt = readAt)
+            } else message
+        }
+        _conversations.value = _conversations.value.map { conversation ->
+            if (conversation.id == readerId) conversation.copy(messages = conversation.messages.stamped()) else conversation
+        }
+        if (_activeConversation.value?.id == readerId) {
+            _activeConversation.value = _activeConversation.value?.copy(
+                messages = _activeConversation.value?.messages.orEmpty().stamped()
+            )
+        }
+    }
+
+    private fun mergeUnsent(
+        serverMessages: List<ChatMessage>,
+        previousMessages: List<ChatMessage>
+    ): List<ChatMessage> {
+        val unsent = previousMessages.filter { it.sendState != MessageSendState.SENT && it.clientKey != null }
+        if (unsent.isEmpty()) return serverMessages
+        val deliveredKeys = serverMessages.mapNotNull { it.clientKey }.toSet()
+        return serverMessages + unsent.filter { it.clientKey !in deliveredKeys }
+    }
+
+    /** Inbox preview line, honest about state: a failed send never reads as sent. */
+    private fun previewText(message: ChatMessage): String {
+        val body = when {
+            message.deletedAt != null -> "Message deleted"
+            message.messageType == "room_card" -> "Watch party invite"
+            message.messageType == "video" -> message.content.ifBlank { "Video" }
+            message.mediaUrl != null || message.messageType == "media" -> message.content.ifBlank { "Photo" }
+            else -> message.content
+        }
+        return when {
+            message.role != MessageRole.USER -> body
+            message.sendState == MessageSendState.FAILED -> "Not sent · $body"
+            message.sendState == MessageSendState.SENDING -> "Sending…"
+            else -> "you: $body"
         }
     }
 
@@ -188,11 +327,7 @@ class SocialRepositoryImpl(
             val last = messages.lastOrNull()
             conv.copy(
                 messages = messages,
-                lastMessageText = when {
-                    last == null -> conv.lastMessageText
-                    last.role == MessageRole.USER -> if (last.sendState == MessageSendState.FAILED) conv.lastMessageText else "you: ${last.content}"
-                    else -> last.content
-                },
+                lastMessageText = last?.let { previewText(it) } ?: conv.lastMessageText,
                 lastMessageTime = last?.let { compactTimeLabel(it.timestamp) } ?: conv.lastMessageTime
             )
         }
@@ -328,6 +463,14 @@ class SocialRepositoryImpl(
                 conv.copy(messages = conv.messages.filterNot { it.clientKey == clientKey } + placeholder)
             }
         }
+        // No network means no attempt. Waiting for a connect timeout would leave the
+        // bubble spinning for up to 15 s, which a user reads as "the app is broken"
+        // rather than "this did not send".
+        if (!com.nebula.app.data.local.ConnectivityMonitor.isOnlineNow()) {
+            markLocalMessage(conversationId, clientKey, MessageSendState.FAILED)
+            persistPendingQueue()
+            return SendOutcome(ok = false, permanentFailure = false)
+        }
         val response = apiClient.sendDirectMessage(
             conversationId, content.trim(), mediaUrl, messageType, isSpoiler, mediaMimeType, clientKey
         )
@@ -354,7 +497,11 @@ class SocialRepositoryImpl(
     }
 
     override suspend fun retryMessage(clientKey: String): Boolean {
-        val conversation = _conversations.value.firstOrNull { conv -> conv.messages.any { it.clientKey == clientKey } }
+        // The open thread is checked first: it is the only place the user can tap, and
+        // it can legitimately hold a message the conversation list has not absorbed yet
+        // (the very first message of a brand-new thread, for example).
+        val candidates = listOfNotNull(_activeConversation.value) + _conversations.value
+        val conversation = candidates.firstOrNull { conv -> conv.messages.any { it.clientKey == clientKey } }
             ?: return false
         val message = conversation.messages.firstOrNull { it.clientKey == clientKey } ?: return false
         if (message.sendState == MessageSendState.SENT) return true
@@ -367,6 +514,10 @@ class SocialRepositoryImpl(
             conversation.id, message.content, message.mediaUrl, message.messageType,
             message.isSpoiler, message.mediaMimeType, clientKey, insertPlaceholder = false
         ).asBoolean()
+    }
+
+    override suspend fun flushPendingNow() {
+        flushUnsent(null)
     }
 
     override suspend fun editMessage(messageId: String, content: String): Boolean = updateMessageFromResponse(apiClient.editDirectMessage(messageId, content))
@@ -467,13 +618,18 @@ class SocialRepositoryImpl(
                     }
                 }.awaitAll().toMap()
             }
+            val previousById = _conversations.value.associateBy { it.id }
             _conversations.value = _friends.value.map { friend ->
                 val history = histories[friend.id]
-                val messages = if (history is ApiResponse.Success) buildList {
+                val serverMessages = if (history is ApiResponse.Success) buildList {
                     for (index in 0 until history.data.length()) {
                         history.data.optJSONObject(index)?.let { add(messageFromJson(it, friend.id)) }
                     }
-                } else emptyList()
+                } else previousById[friend.id]?.messages.orEmpty()
+                // Rebuilding the list from the server used to silently delete every
+                // message that had not been delivered yet. A refresh now keeps them, so
+                // a failed send survives returning to the Chats tab instead of vanishing.
+                val messages = mergeUnsent(serverMessages, previousById[friend.id]?.messages.orEmpty())
                 val unread = messages.count { it.role == MessageRole.ASSISTANT && it.readAt == null && it.deletedAt == null }
                 val latest = messages.lastOrNull()
                 NebulaConversation(
@@ -482,12 +638,12 @@ class SocialRepositoryImpl(
                     isGroup = false,
                     partnerUser = friend,
                     participants = listOf(NebulaUser.CurrentUser, friend),
-                    lastMessageText = latest?.content ?: "",
+                    lastMessageText = latest?.let { previewText(it) } ?: "",
                     lastMessageTime = latest?.let { compactTimeLabel(it.timestamp) } ?: "",
                     unreadCount = unread,
                     messages = messages,
                 )
-            }
+            }.sortedByDescending { it.messages.lastOrNull()?.timestamp ?: 0L }
         }
         val requests = apiClient.getFriendRequests()
         if (requests is ApiResponse.Success) {

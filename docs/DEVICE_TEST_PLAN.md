@@ -302,6 +302,49 @@ would actually see. Measurements, not just pass/fail:
 Grace was shortened to 1.5 s for the harness via `NEBULA_INACTIVITY_GRACE_MS`;
 production keeps 60 s.
 
+## 4g. Pending run — 2026-10-30 (queue, direct playback, room cards)
+
+Landed without a device pass; the owner is running these. Everything below is
+compile-verified (debug Kotlin, instrumented test sources) and, where noted,
+unit-verified on the JVM.
+
+| Case | Steps | Pass condition |
+|---|---|---|
+| QUEUE-01 Add | Room → header queue icon → add a YouTube link | Sheet lists it with "Queued by <name>"; a second device sees it without a manual refresh |
+| QUEUE-02 Vote | On a *queued* item, tap `Skip 0/2` as one of two members | Button flips to a voted state, `Skip 1/2`; nothing about playback changes |
+| QUEUE-03 Majority | Second member votes | The item disappears from both clients; the playing video is untouched |
+| QUEUE-04 Advance | Host taps ▶ on a queued item | Both clients switch media, playback restarts at 0:00, the item leaves the queue |
+| QUEUE-05 Refusal | Non-host tries to advance | No control is shown; `POST …/queue/advance` returns 403 if forced |
+| PLAY-01 Direct stream | Set room media to an `.m3u8` or `.mp4` URL | It plays instead of "Room in Idle Position"; guests follow within ~0.7 s |
+| PLAY-02 Drift | Guest pauses locally, then resumes | Guest rejoins the shared timeline rather than staying behind |
+| PLAY-03 Release build | `:app:assembleRelease` with signing values | YouTube **and** a direct link both play (this is what the R8 keep rule protects) |
+| DM-01 Room card | Room → invite sheet → the send icon next to a friend | A card appears in that thread with the room name and "Join room · CODE" |
+| DM-02 Card tap | Tap the card | The room opens; a stale code reports "That watch party has ended" |
+| DM-03 Banner | Reopen the thread | Banner pinned above the messages; dismissing hides it for that thread and the card remains |
+| DM-04 Unsent survives restart | Send with the radio off, force-stop, relaunch | Message still reads `Not sent · Tap to retry`, not delivered (regression guard for 3.2) |
+| PUSH-01 Delivery | Two profiles, DM from A to B with B backgrounded | B shows the notification; tapping it opens the conversation with A |
+| PUSH-02 Preference | Turn off Direct messages in B's settings, send again | No push arrives |
+
+The instrumented suite is `./gradlew :app:connectedDebugAndroidTest`; it currently
+covers the queue sheet only.
+
+## 4h. Chat run — 2026-10-30 (offline, attachments, realtime)
+
+Also landed without a device pass. These are the chat behaviours to confirm first.
+
+| Case | Steps | Pass condition |
+|---|---|---|
+| CHAT-01 Offline send | Airplane mode on → open a thread → send "hello" | Bubble appears instantly with a red `!` beside it and a strip/header that say Offline; toast says it will send on reconnect. No spinner |
+| CHAT-02 Reconnect | Airplane mode off | The message sends itself within a few seconds; the red `!` disappears and a tick appears |
+| CHAT-03 Positive failure | With the radio off, force-stop and relaunch, then open the thread | The message is still there, still marked failed and still retryable — not shown as delivered |
+| CHAT-04 Photo preview | Tap + → Image → pick a photo | The photo shows immediately with upload progress; Send stays disabled until it reaches 100%, then sends |
+| CHAT-05 Photo offline | Airplane mode on → pick a photo | Card says Offline with a Retry that is disabled; turning the network back on starts the upload by itself |
+| CHAT-06 Video | Pick a small MP4 and send | It sends (this used to 400) and renders as a playable bubble |
+| CHAT-07 Realtime | Two devices: A open on Chats, B sends a DM | A's inbox row updates and reorders without pulling to refresh |
+| CHAT-08 Read receipt | A opens the thread while B watches it | B's tick turns into a double/read tick without reopening |
+| CHAT-09 Edit guard | Long-press a failed message | No edit/unsend sheet (it has no server id); tap retries instead |
+| CHAT-10 Draft isolation | Start a photo in thread A, back out, open thread B | No draft follows into B |
+
 ## 5. Evidence convention
 
 Store screenshots/UI dumps under `qa_evidence/<date>/` with the case ID in the

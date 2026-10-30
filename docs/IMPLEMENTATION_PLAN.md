@@ -54,8 +54,8 @@ suite green; app launches to the auth gate.
 
 | ID | Task | Depends on | Status |
 |---|---|---|---|
-| 3.1 | Extract `NebulaChatDetailScreen` (1,429 LOC) into message list, composer, attachment, and history modules | — | Not started |
-| 3.2 | Conversation-level caching with explicit staleness (last-sync token) | 3.1 | Not started |
+| 3.1 | Extract `NebulaChatDetailScreen` (1,429 LOC) into message list, composer, attachment, and history modules | — | Done — split into the screen/composer (`NebulaChatDetailScreen.kt`, 851 LOC), the bubble and its media (`ChatMessageBubble.kt`, 547), the long-press actions (`ChatMessageActions.kt`, 217) and the grouping/date helpers (`ChatMessageFormatting.kt`, 132). Compile-verified; a UX regression pass on device is still owed |
+| 3.2 | Conversation-level caching with explicit staleness (last-sync token) | 3.1 | Done — the cache used to drop `sendState` and `clientKey`, so a failed message came back from disk looking delivered and could not be retried (the retry re-sends the original idempotency key). Both are persisted and restored now, along with edit and delete timestamps |
 | 3.3 | Outgoing-message queue with pending/failed states and idempotent retry on reconnect | 3.1 | Done — client sends a per-message idempotency key, the bubble carries `SENDING`/`SENT`/`FAILED`, an unsent message survives server syncs, and tapping a failed bubble retries with the original key. Device-verified (3 runs) |
 | 3.3a | Automatic retry when connectivity returns, and unsent messages surviving process death | 3.3 | Done — unsent messages are mirrored to `SharedPreferences`, restored on launch, and re-sent from a repository-owned scope once the server answers again. Device-verified across a force-stop with the radio off |
 | 3.4 | Missed-message recovery after socket reconnect (cursor-based backfill) | 3.3 | Done — `GET /chat/room/:roomId?since=` and `/chat/conversation/:id?since=` return only the window after a cursor (ascending, bounded, `400` on an unparseable cursor); the Android room client keeps a chat cursor and backfills on every socket reconnect. Suite-verified server-side; client path compile-verified |
@@ -66,9 +66,9 @@ suite green; app launches to the auth gate.
 
 | ID | Task | Depends on |
 |---|---|---|
-| 4.1 | Split `NebulaRoomScreen` (2,297 LOC) into player, chat, participants, controls | — |
+| 4.1 | Split `NebulaRoomScreen` (2,297 LOC) into player, chat, participants, controls | — | Done — the screen, its chat and its composer are 1,512 LOC; the YouTube surface is its own file (`NebulaYoutubePlayer.kt`, 276) and the members/invite/settings sheets plus the participant pill are another (`NebulaRoomSheets.kt`, 859). Compile-verified |
 | 4.2 | Room discovery ranking (recency + participants) and filter chips — **Done:** discovery ranks by participants, activity recency and whether media is playing, instead of newest-first; the candidate window is bounded (≤150) and ties fall back to most recently active. Suite-asserted (busier room outranks a newer empty one) | — |
-| 4.3 | Room queue model (add/vote/skip) matching reference behaviour | 4.1 | **Server done:** separate queue collection, add (verified playable link, 20-item cap), strict-majority skip vote that withdraws on a second tap, host-only advance, host-or-adder removal, and a `queue:updated` broadcast. Suite-asserted (34 assertions). A vote drops the queued item and never changes what is playing. **Remaining:** the in-room queue sheet and header entry |
+| 4.3 | Room queue model (add/vote/skip) matching reference behaviour | 4.1 | **Server done:** separate queue collection, add (verified playable link, 20-item cap), strict-majority skip vote that withdraws on a second tap, host-only advance, host-or-adder removal, and a `queue:updated` broadcast. Suite-asserted (34 assertions). A vote drops the queued item and never changes what is playing. **Client done:** a header entry with a live count opens `RoomQueueSheet` — add by link (the server verifies playability), vote to skip with per-item progress, host-only "play now", and remove-your-own. The sheet is instrumented (vote targets the tapped item, own item offers Remove, host can advance). Not yet run on a device |
 | 4.4 | Shareable invite codes and resolved deep links | — | Partially done — rooms now carry a non-guessable 8-character code (ambiguous characters excluded) exposed in the room DTO, `GET /rooms/invite/:code` resolves it for a viewer who may see the room, and a refused private room answers byte-identically to an unknown code. Suite-asserted. **Client done:** the room header shares a link through the platform sheet, and both `nebula://room/<code>` and `https://nebula.app/room/<code>` resolve server-side and join. Device-verified on the Realme (link opened the room; share sheet carried the exact invite text) |
 | 4.5 | Host-disconnect / host-transfer UX and room lifecycle edge cases — **Engine done:** the inactivity grace is now configurable (`NEBULA_INACTIVITY_GRACE_MS`), and the resilience harness proves that when the host's socket disappears the room and its remaining member survive, ownership transfers and persists, and the promoted member can control playback without reconnecting. **Remaining:** the in-app affordance that tells a user the host dropped | 4.1 |
 | 4.6 | Moderation surface for reports inside rooms | 2.4 |
@@ -78,18 +78,18 @@ suite green; app launches to the auth gate.
 | ID | Task | Depends on |
 |---|---|---|
 | 5.1 | Version playback state server-side; reject stale/out-of-order client commands — **Done:** every accepted host command increments a room version that rides on every playback event; a command built on an older version is refused with an authoritative `media:state` correction, and an out-of-order host sample cannot rewind the playhead (4 new suite assertions) | — |
-| 5.2 | Non-YouTube player path (direct HLS/MP4) so validated links are actually playable | 5.1 |
+| 5.2 | Non-YouTube player path (direct HLS/MP4) so validated links are actually playable | 5.1 | **Done:** Media3 (ExoPlayer + HLS) surface for direct links, chosen by `resolveRoomPlayback` ahead of the idle placeholder. Host samples every 500 ms; a guest corrects only beyond a 700 ms dead-band, which is a pure function with a unit test. R8 keep rules added so the release build keeps ExoPlayer's reflectively-loaded renderers. Compile-verified; not yet run on a device |
 | 5.3 | Reconnect/late-join drift measurement harness (two clients, scripted seeks) — **Done:** `npm run test:resilience` drives a host playhead and measures the error a late joiner and a reconnecting viewer land with. Measured on 2026-10-30: late-join **199 ms**, reconnect **2 ms**, budget 650 ms. Also asserts a listener cannot move the room, before or after reconnecting | 5.1 |
-| 5.4 | Buffering/error states and host hand-off of stalled media | 5.2 |
+| 5.4 | Buffering/error states and host hand-off of stalled media | 5.2 | Partially done — a playback error no longer stops the room (the surface holds the last frame and the host can pick something else), and an ended item shows the shared restart affordance on both surfaces. No explicit retry button yet |
 
 ## Phase 6 — Social integration and notifications
 
 | ID | Task | Depends on |
 |---|---|---|
-| 6.1 | Share room into DM and open invitation from conversation | 3.x, 4.4 |
-| 6.2 | Verified FCM delivery on two devices; dead-token pruning | 1.9 |
+| 6.1 | Share room into DM and open invitation from conversation | 3.x, 4.4 | **Done:** a room can be sent into a friend's thread from the invite sheet as a `room_card` message carrying `nebula://room/<code>` (never the room id). The server re-validates the code against an existing room before storing the message, and a card is excluded from the image/video bubble branches. Tapping the card resolves the code and joins |
+| 6.2 | Verified FCM delivery on two devices; dead-token pruning | 1.9 | **Code complete, delivery unverified:** the DM send path already calls `notifyUser`, dead tokens are pruned on send, `notificationPrefs.directMessages` is now honoured (a push used to ignore the preference screen entirely), and a rotated token parked by `onNewToken` is uploaded on the next signed-in launch instead of waiting for a sign-out. Waiting on one send observed between two profiles |
 | 6.3 | Presence reconciliation on abrupt disconnect (server-side TTL sweep) — **Done:** `sweepStalePresence()` reclaims users whose heartbeat stopped (120 s) while never touching a user with a live socket; runs every 60 s, suite-verified both directions | — |
-| 6.4 | Room context banner inside DM without losing the thread | 6.1 |
+| 6.4 | Room context banner inside DM without losing the thread | 6.1 | **Done:** the thread pins the newest invite as a banner above the messages; dismissing hides it for that thread only, and the card itself stays in place |
 
 ## Phase 7 — Release hardening
 
@@ -97,10 +97,10 @@ suite green; app launches to the auth gate.
 |---|---|
 | 7.1 | Rotate the release keystore and all secrets exposed in git history |
 | 7.2 | Dependency audit (`npm audit`, Gradle dependency check) — **Done:** `npm audit` reports 5 advisories (3 moderate, 2 high). The zod advisory (memory exhaustion on oversized constrained collections) is bounded by the 100 KB `express.json` limit on every non-upload route; the uuid advisories are transitive inside the server-only Firebase Admin client. No dependency was force-upgraded (zod 4 is a breaking change) — the upgrade is tracked below |
-| 7.3 | Android instrumentation tests for auth gate, DM send, room join |
+| 7.3 | Android instrumentation tests for auth gate, DM send, room join | **Partly done:** androidx.test (runner/rules/espresso), Compose UI test artifacts and JUnit are wired, with a Compose instrumented spec for the queue and pure JVM specs for media routing, invite parsing, drift correction and card spoofing. The instrumented suite has not been run on a device yet; auth-gate and DM-send specs still need a device with Play services |
 | 7.4 | Data-deletion verification end-to-end including object storage — **Done:** the purge deleted the profile document and nothing else, leaving messages, friendships, notifications, sessions, uploaded assets and room membership behind. `purgeUserData` now removes all of those, hands room ownership to a remaining member (or deletes a room only the user was in), and schedules deletion of the user's stored objects. Suite-asserted; storage deletion is best-effort and reported |
 | 7.5 | Cost/quota review of Render, MongoDB Atlas, S3, FCM |
-| 7.6 | Signed release build + Play Console internal track |
+| 7.6 | Signed release build + Play Console internal track | **Wiring done, blocked on credentials:** the release build refuses to package without `NEBULA_RELEASE_STORE_FILE`, `..._STORE_PASSWORD`, `..._KEY_ALIAS` and `..._KEY_PASSWORD`, R8 keep rules now cover Media3 (a release build would otherwise play YouTube but black-screen every direct link), and `docs/RELEASE.md` is the runbook. Producing the signed AAB needs the keystore passwords, which only the owner holds |
 
 ---
 

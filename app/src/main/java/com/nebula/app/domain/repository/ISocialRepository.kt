@@ -13,6 +13,11 @@ interface ISocialRepository {
     val conversations: StateFlow<List<NebulaConversation>>
     val activeConversation: StateFlow<NebulaConversation?>
 
+    /** Opens the live direct-message channel. Safe to call repeatedly. */
+    fun startRealtime() {}
+    /** Closes it on sign-out so a stale token is not kept connected. */
+    fun stopRealtime() {}
+
     suspend fun selectConversation(id: String)
     /**
      * Re-pulls the currently open thread. Used to pick up read receipts and
@@ -23,6 +28,11 @@ interface ISocialRepository {
     suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null): Boolean
     /** Re-sends a message that failed to persist, reusing its idempotency key. */
     suspend fun retryMessage(clientKey: String): Boolean
+    /**
+     * Attempts every unsent message. Called when connectivity returns, so a message
+     * typed in a tunnel goes out on its own instead of waiting for a tap.
+     */
+    suspend fun flushPendingNow()
     suspend fun editMessage(messageId: String, content: String): Boolean
     suspend fun unsendMessage(messageId: String): Boolean
     suspend fun acceptFriendRequest(requestId: String): Boolean

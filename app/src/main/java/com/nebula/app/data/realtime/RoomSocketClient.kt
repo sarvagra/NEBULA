@@ -22,7 +22,12 @@ class RoomSocketClient(
      * Fired when the socket comes back after a drop. Anything broadcast while it was
      * down was never delivered, so the room has to backfill from its own cursor.
      */
-    private val onReconnected: () -> Unit = {}
+    private val onReconnected: () -> Unit = {},
+    /**
+     * Fired when the room queue changes. The payload only says *that* it changed, so
+     * the repository reloads instead of patching a list it cannot see the whole of.
+     */
+    private val onQueueChanged: () -> Unit = {}
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
@@ -70,6 +75,7 @@ class RoomSocketClient(
                 onParticipantsChanged()
             }
             on("friendship:changed") { onSocialChanged() }
+            on("queue:updated") { onQueueChanged() }
             on("room:removed") { args ->
                 val payload = args.firstOrNull() as? JSONObject
                 onRoomRemoved(payload?.optString("roomId"), payload?.optString("reason"))

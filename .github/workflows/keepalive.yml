@@ -1,0 +1,31 @@
+name: Keep the API warm
+
+# Render's free web service sleeps after 15 minutes without traffic, and the next
+# request then waits out a ~30s cold start — which every phone that opens Nebula
+# after a quiet spell would feel. A cheap health ping keeps the instance resident.
+# The app itself never depends on this job: if it stops, Nebula still works, the
+# first request is just slower.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            code=$(curl -sS -m 60 -o /tmp/health.json -w '%{http_code}' https://nebula-73kb.onrender.com/health || true)
+            echo "attempt $attempt -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Health ping did not succeed; the service will retry on the next schedule."
+          exit 1

@@ -110,11 +110,16 @@ sealed class UsernameValidationState {
 @Composable
 fun NebulaEditProfileScreen(
     userProfile: UserProfile,
-    onSave: (displayName: String, username: String, bio: String, status: String, bannerIndex: Int, interests: List<String>, isFriendCountPublic: Boolean, avatarUrl: String?, bannerUrl: String?, customStatus: String) -> Unit,
+    // The trailing callback reports whether the server actually accepted the edit.
+    // Without it the screen left on a toast while the profile silently reverted on
+    // the next app launch, which read as "my changes keep disappearing".
+    onSave: (displayName: String, username: String, bio: String, status: String, bannerIndex: Int, interests: List<String>, isFriendCountPublic: Boolean, avatarUrl: String?, bannerUrl: String?, customStatus: String, onResult: (Boolean) -> Unit) -> Unit,
     onBack: () -> Unit,
     onOpenMembership: () -> Unit,
     modifier: Modifier = Modifier,
-    onProfilePreviewChanged: ((bannerIndex: Int, bannerUrl: String?, avatarUrl: String?) -> Unit)? = null
+    onProfilePreviewChanged: ((bannerIndex: Int, bannerUrl: String?, avatarUrl: String?) -> Unit)? = null,
+    /** Friend count of the signed-in user, so the live preview shows real counters. */
+    friendsCount: Int? = null
 ) {
     val theme = Theme.current
     val context = LocalContext.current
@@ -609,7 +614,14 @@ fun NebulaEditProfileScreen(
                                     finalAvatarUrl,
                                     safeBannerUrl,
                                     customStatusText
-                                )
+                                ) { saved ->
+                                    isSavingProfile = false
+                                    if (!saved) {
+                                        // Stay on the editor with the draft intact so the
+                                        // user can fix whatever the server rejected.
+                                        android.util.Log.w("NebulaEditProfile", "Profile update was rejected; draft kept")
+                                    }
+                                }
                             } catch (e: Exception) {
                                 android.util.Log.e("NebulaEditProfile", "Error saving profile", e)
                                 Toast.makeText(context, "Failed to save profile. Please try again.", Toast.LENGTH_SHORT).show()
@@ -660,6 +672,40 @@ fun NebulaEditProfileScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 0. LIVE PREVIEW — the same immersive header the profile screens render,
+            // fed by the unsaved draft. Editing into a 16:9 thumbnail meant the banner
+            // looked correct here and different everywhere else.
+            item {
+                val draftUser = com.nebula.app.domain.model.NebulaUser(
+                    id = userProfile.id,
+                    username = if (username.isBlank()) "nebula_user" else username,
+                    displayName = displayName.ifBlank { "Your name" },
+                    avatarLetter = displayName.firstOrNull()?.uppercase() ?: "N",
+                    avatarUrl = currentAvatarUri,
+                    bannerUrl = customBannerUri,
+                    bannerIndex = selectedBannerIndex,
+                    bio = bio,
+                    status = statusText,
+                    customStatus = customStatusText,
+                    interests = selectedInterests.toList(),
+                    friendsCount = friendsCount.takeIf { isFriendCountPublic },
+                    roomsHostedCount = userProfile.roomsHostedCount,
+                    roomsJoinedCount = userProfile.roomsJoinedCount
+                )
+                com.nebula.app.ui.components.NebulaProfileHeader(
+                    user = draftUser,
+                    friendsCount = draftUser.friendsCount,
+                    isFriendCountPublic = isFriendCountPublic,
+                    statusText = when (statusText) {
+                        "offline" -> "Offline"
+                        "custom" -> customStatusText.ifBlank { "Online" }
+                        else -> "Online"
+                    },
+                    topBar = {},
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                )
+            }
+
             // 1. BANNER & AVATAR PICKER (Fixed 16:9 Display Ratio documented)
             item {
                 Column(

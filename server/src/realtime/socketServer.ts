@@ -122,6 +122,18 @@ export function notifyConversationRead(
   });
 }
 
+/**
+ * Delivers a direct message to a user's private channel.
+ *
+ * Messages posted over HTTP previously reached the recipient only through the
+ * client's polling loop, so a DM could sit unseen for seconds (or until the user
+ * switched tabs). Every authenticated socket joins `user:<id>` on connect, so this
+ * reaches the recipient and the sender's other devices at once.
+ */
+export function notifyDirectMessage(userId: string, payload: unknown): void {
+  roomIo?.to(`user:${userId}`).emit('chat:message', payload);
+}
+
 export function notifyUserSocialChanged(userIds: string[]): void {
   for (const userId of new Set(userIds)) {
     roomIo?.to(`user:${userId}`).emit('friendship:changed');
@@ -185,6 +197,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
     maxHttpBufferSize: 8e6, // bounded room media/chat payload limit
     pingTimeout: 20000,
     pingInterval: 25000,
+    // A deploy or an instance restart drops every socket at once. Without recovery
+    // each of those clients re-syncs by polling; with it, Socket.IO replays the
+    // events they missed during the short reconnect window.
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000,
+      skipMiddlewares: true,
+    },
   });
   roomIo = io;
   livePlaybackByRoom.clear();

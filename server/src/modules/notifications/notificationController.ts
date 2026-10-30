@@ -16,9 +16,27 @@ export async function registerDeviceToken(req: Request, res: Response): Promise<
   }
 }
 
+/** Maps a push category to the user's preference, defaulting to on when unset. */
+function isCategoryAllowed(prefs: Record<string, unknown> | undefined, type: string): boolean {
+  if (!prefs) return true;
+  const key = type === 'dm'
+    ? 'directMessages'
+    : type === 'room_invite'
+      ? 'invites'
+      : type === 'friend_request'
+        ? 'friendRequests'
+        : null;
+  if (!key) return true;
+  return prefs[key] !== false;
+}
+
 export async function notifyUser(userId: string, title: string, body: string, data: Record<string, string> = {}): Promise<void> {
-  const user = await UserModel.findById(userId).select('fcmTokens').lean();
-  if (user?.fcmTokens?.length) await sendDeviceNotification(user.fcmTokens, title, body, data);
+  const user = await UserModel.findById(userId).select('fcmTokens notificationPrefs').lean();
+  if (!user) return;
+  // A push that ignores the preference screen is worse than no push: the user
+  // turned the category off and the app kept talking.
+  if (!isCategoryAllowed((user as any).notificationPrefs, data.type || '')) return;
+  if (user.fcmTokens?.length) await sendDeviceNotification(user.fcmTokens, title, body, data);
 }
 
 export async function listNotifications(req: Request, res: Response): Promise<void> {

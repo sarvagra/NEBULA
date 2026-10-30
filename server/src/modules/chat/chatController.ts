@@ -6,7 +6,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 import { notifyUser } from '../notifications/notificationController';
-import { notifyConversationRead } from '../../realtime/socketServer';
+import { notifyConversationRead, notifyDirectMessage } from '../../realtime/socketServer';
 import { NotificationModel } from '../../models/Notification';
 import { dmRetentionCutoff, dmRetentionCutoffForDays, entitlementsForTier, messageEditLimitForTier } from '../../utils/entitlements';
 import { validateImageResolution } from '../../utils/imageSecurity';
@@ -275,7 +275,24 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { roomId, conversationId, text, mediaUrl, messageType, isSpoiler, mediaMimeType, idempotencyKey } = req.body;
+    const { roomId, conversationId, messageType, isSpoiler, mediaMimeType, idempotencyKey } = req.body;
+    // text/mediaUrl are reassigned for room cards below, so they cannot be const.
+    let { text, mediaUrl } = req.body;
+
+    // A shared room card is an invitation link, not a file. It is validated against
+    // rooms that actually exist whatever the destination is — a card is normally sent
+    // in a DM, so hanging this check off the room branch meant DM cards skipped it.
+    // It also skips the room media tracker, whose image-only rule would reject it.
+    if (messageType === 'room_card') {
+      const code = String(mediaUrl || '').replace(/^nebula:\/\/room\//i, '').trim().toUpperCase();
+      const sharedRoom = code ? await RoomModel.findOne({ inviteCode: code }).select('_id name') : null;
+      if (!sharedRoom) {
+        res.status(400).json({ success: false, error: 'That room invite is no longer valid' });
+        return;
+      }
+      mediaUrl = `nebula://room/${code}`;
+      text = String(text || sharedRoom.name || 'Watch party').slice(0, 120);
+    }
 
     // 1. If sending to a ROOM: verify that the user is an active participant in that room
     if (roomId) {
@@ -295,7 +312,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       }
 
       // Check if message includes media
-      if (mediaUrl || messageType === 'media') {
+      if (messageType !== 'room_card' && (mediaUrl || messageType === 'media')) {
         const trackerKey = `${req.user.id}:${roomId}`;
         const tracker = roomMediaTracker.get(trackerKey) || {
           timestamps: [],
@@ -456,6 +473,15 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
         console.warn('[DM notification] Could not persist notification:', error instanceof Error ? error.message : 'unknown error');
       }
       void notifyUser(conversationId, req.user.displayName, notificationBody, { type: 'dm', conversationId: req.user.id, messageId: message._id.toString() });
+    }
+
+    // Push the stored message to both sides' private channels. Polling stays as a
+    // fallback, but the thread and the inbox now update as soon as the write lands.
+    const delivered = toMessageDTO(message);
+    if (conversationId && !roomId) {
+      notifyDirectMessage(conversationId, delivered);
+      // The sender's other signed-in devices need it too, not only this one.
+      notifyDirectMessage(req.user.id, delivered);
     }
 
     res.status(201).json({ success: true, data: toMessageDTO(message) });

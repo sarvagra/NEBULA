@@ -21,7 +21,11 @@ export const UpdateProfileSchema = z.object({
   customStatus: z.string().trim().max(80).optional(),
   bannerIndex: z.number().int().min(0).max(30).optional(),
   bannerUrl: z.string().trim().max(50_000_000).optional(),
-  interests: z.array(z.string().trim().max(30)).max(5).optional(),
+  // The tier allowance (Basic 5 / Premium 8 / Premium Plus 12) is applied by the
+  // controller. Rejecting anything over 5 here made a Premium account's own saved
+  // tag list unsaveable: it sent 8, the schema failed, and the whole profile edit
+  // was refused.
+  interests: z.array(z.string().trim().max(30)).max(12).optional(),
   avatarUrl: z.string().trim().max(50_000_000).optional(),
   isFriendCountPublic: z.boolean().optional(),
   isOnboardingCompleted: z.boolean().optional(),
@@ -84,7 +88,9 @@ export const SendMessageSchema = z.object({
   conversationId: z.string().trim().max(100).optional(),
   text: z.string().trim().max(500, 'Message cannot exceed 500 characters').optional(),
   mediaUrl: z.string().trim().max(500).optional(),
-  messageType: z.enum(['text', 'media', 'system']).default('text'),
+  // 'video' is a real message kind the Android client sends for video attachments;
+  // leaving it out of the enum rejected every video DM with a 400.
+  messageType: z.enum(['text', 'media', 'video', 'system', 'room_card']).default('text'),
   isSpoiler: z.boolean().optional().default(false),
   mediaMimeType: z.string().trim().max(80).optional(),
 }).refine((data) => !!data.text || !!data.mediaUrl, {
