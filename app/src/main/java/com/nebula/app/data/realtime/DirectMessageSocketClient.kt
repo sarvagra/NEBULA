@@ -47,6 +47,11 @@ class DirectMessageSocketClient(
                 (args.firstOrNull() as? JSONObject)?.let(onReadReceipt)
             }
             on("friendship:changed") { onFriendshipChanged() }
+            on("session:revoked") {
+                disconnect()
+                com.nebula.app.data.backend.NebulaApiClient.onSessionRevoked
+                    ?.invoke("This account was signed out from another device")
+            }
             connect()
         }
     }

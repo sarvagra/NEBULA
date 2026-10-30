@@ -672,34 +672,10 @@ fun NebulaEditProfileScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 0. LIVE PREVIEW — the same immersive header the profile screens render,
-            // fed by the unsaved draft. Editing into a 16:9 thumbnail meant the banner
-            // looked correct here and different everywhere else.
-            item {
-                val draftUser = com.nebula.app.domain.model.NebulaUser(
-                    id = userProfile.id,
-                    username = if (username.isBlank()) "nebula_user" else username,
-                    displayName = displayName.ifBlank { "Your name" },
-                    avatarLetter = displayName.firstOrNull()?.uppercase() ?: "N",
-                    avatarUrl = currentAvatarUri,
-                    bannerUrl = customBannerUri,
-                    bannerIndex = selectedBannerIndex,
-                    bio = bio,
-                    status = statusText,
-                    customStatus = customStatusText,
-                    interests = selectedInterests.toList(),
-                    friendsCount = friendsCount.takeIf { isFriendCountPublic },
-                    roomsHostedCount = userProfile.roomsHostedCount,
-                    roomsJoinedCount = userProfile.roomsJoinedCount
-                )
-                com.nebula.app.ui.components.NebulaProfileHeader(
-                    user = draftUser,
-                    friendsCount = draftUser.friendsCount,
-                    isFriendCountPublic = isFriendCountPublic,
-                    topBar = {},
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp))
-                )
-            }
+            // The editor starts at the first editing card. A live copy of the profile
+            // header used to sit above it, which meant the screen opened with a repeat
+            // of the page you had just left; the banner and avatar pickers below show
+            // the same artwork on the controls that actually change it.
 
             // 1. BANNER & AVATAR PICKER (Fixed 16:9 Display Ratio documented)
             item {

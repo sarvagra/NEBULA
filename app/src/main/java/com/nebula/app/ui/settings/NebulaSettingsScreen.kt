@@ -94,6 +94,15 @@ fun NebulaSettingsScreen(
     val theme = Theme.current
     var showBlockedUsersInPlace by remember { mutableStateOf(false) }
     var showNotificationsInPlace by remember { mutableStateOf(false) }
+
+    // Feature switches live in the same preferences file as the session, so they
+    // survive restarts without inventing a second settings store.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sessionManager = remember { com.nebula.app.data.local.SessionManager(context) }
+    var featureCustomStatus by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_CUSTOM_STATUS)) }
+    var featureCustomBanner by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_CUSTOM_BANNER)) }
+    var featureVideoBanner by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_VIDEO_BANNER)) }
+    var featureAllTags by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_ALL_TAGS)) }
     // Notification switches now live on NebulaNotificationSettingsScreen.
 
     Column(
@@ -221,12 +230,61 @@ fun NebulaSettingsScreen(
 
                     SettingsDivider()
 
-                    // 8. Nebula Premium
-                    SettingNavRow(
-                        icon = Icons.Default.Star,
-                        title = "Nebula Premium",
-                        onClick = onOpenNebulaPremium
-                    )
+                    // 8. FEATURES — everything that used to be a purchase is now a switch.
+                    // There is no store, no plan picker and no receipt: each capability
+                    // simply belongs to the account and can be switched off here.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = "FEATURES",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp,
+                                fontSize = 11.sp
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        FeatureToggleRow(
+                            title = "Custom status",
+                            subtitle = "Set a written status instead of a preset",
+                            checked = featureCustomStatus,
+                            onCheckedChange = {
+                                featureCustomStatus = it
+                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_STATUS, it)
+                            }
+                        )
+                        FeatureToggleRow(
+                            title = "Custom banner",
+                            subtitle = "Upload your own banner image",
+                            checked = featureCustomBanner,
+                            onCheckedChange = {
+                                featureCustomBanner = it
+                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_BANNER, it)
+                            }
+                        )
+                        FeatureToggleRow(
+                            title = "Video banner",
+                            subtitle = "Loop a short clip behind your profile",
+                            checked = featureVideoBanner,
+                            onCheckedChange = {
+                                featureVideoBanner = it
+                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_VIDEO_BANNER, it)
+                            }
+                        )
+                        FeatureToggleRow(
+                            title = "All profile tags",
+                            subtitle = "Show your full tag list, not the first five",
+                            checked = featureAllTags,
+                            onCheckedChange = {
+                                featureAllTags = it
+                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_ALL_TAGS, it)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -249,6 +307,51 @@ fun NebulaSettingsScreen(
     }
 }
 
+
+@Composable
+private fun FeatureToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = theme.typography.bodyMedium.copy(
+                    color = theme.colors.textPrimary,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.5.sp
+                )
+            )
+            Text(
+                text = subtitle,
+                style = theme.typography.caption.copy(
+                    color = theme.colors.textSecondary,
+                    fontSize = 11.5.sp
+                )
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = theme.colors.onPrimaryAccent,
+                checkedTrackColor = theme.colors.primaryAccent,
+                uncheckedThumbColor = theme.colors.textSecondary,
+                uncheckedTrackColor = theme.colors.surfaceElevated
+            )
+        )
+    }
+}
 
 @Composable
 private fun SettingNavRow(

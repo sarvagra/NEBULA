@@ -20,6 +20,44 @@ function addCalendarMonths(date: Date, months: number): Date {
 
 const USERNAME_CHANGE_COOLDOWN_MONTHS = 6;
 
+/**
+ * Tags of the rooms this person takes part in, most frequent first.
+ *
+ * This is what the profile's top-content word cloud is built from, so the sizes
+ * are the real participation counts rather than a guess made on the client.
+ */
+async function topRoomTags(userId: string, limit: number = 6): Promise<{ tag: string; count: number }[]> {
+  try {
+    const rows = await RoomModel.aggregate([
+      { $match: { 'participants.userId': userId } },
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags', count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: limit },
+    ]);
+    return rows
+      .map((row: any) => ({ tag: String(row._id || '').trim(), count: Number(row.count) || 0 }))
+      .filter((row) => row.tag.length > 0 && row.count > 0);
+  } catch {
+    // A tag rollup failing must never take the whole profile down with it.
+    return [];
+  }
+}
+
+/**
+ * Applies the profile's two privacy switches to an already-built public DTO:
+ * room activity (joined/hosted) and top content (tag cloud).
+ */
+async function applyProfileVisibility(profile: any, user: any): Promise<void> {
+  if (!profile.isRoomActivityPublic) {
+    profile.stats.roomsJoinedCount = 0;
+    profile.stats.roomsHostedCount = 0;
+  }
+  if (profile.isTopContentPublic) {
+    profile.topTags = await topRoomTags(user._id.toString());
+  }
+}
+
 export async function updatePresence(req: Request, res: Response): Promise<void> {
   try {
     if (!req.user) { res.status(401).json({ success: false, error: 'Authentication required' }); return; }
@@ -47,7 +85,7 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const { displayName, username, bio, status, customStatus, bannerIndex, bannerUrl, interests, avatarUrl, isFriendCountPublic, isOnboardingCompleted, dateOfBirth, gender } = req.body;
+    const { displayName, username, bio, status, customStatus, bannerIndex, bannerUrl, interests, avatarUrl, isFriendCountPublic, isRoomActivityPublic, isTopContentPublic, isOnboardingCompleted, dateOfBirth, gender } = req.body;
 
     // STRICT SERVER AUTHORIZATION: Only mutate user-permitted properties.
     // NEVER accept tier, role, isBanned, or stats from client!
@@ -217,6 +255,9 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       }
     }
     if (isFriendCountPublic !== undefined) updateFields.isFriendCountPublic = isFriendCountPublic;
+    // Profile blocks are independently public/private; each switch only owns its block.
+    if (isRoomActivityPublic !== undefined) updateFields.isRoomActivityPublic = isRoomActivityPublic;
+    if (isTopContentPublic !== undefined) updateFields.isTopContentPublic = isTopContentPublic;
     if (isOnboardingCompleted !== undefined) {
       updateFields.isOnboardingCompleted = Boolean(isOnboardingCompleted);
     } else {
@@ -358,6 +399,7 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
         ],
       });
     }
+    await applyProfileVisibility(profile, user);
     res.json({ success: true, data: profile });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to retrieve public profile' });
@@ -390,6 +432,7 @@ export async function getPublicProfileById(req: Request, res: Response): Promise
       profile.friendRequestId = incoming?._id.toString();
     }
     if (user.isFriendCountPublic) profile.stats.friendsCount = await FriendshipModel.countDocuments({ status: 'accepted', $or: [{ requesterId: userId }, { recipientId: userId }] });
+    await applyProfileVisibility(profile, user);
     res.json({ success: true, data: profile });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to retrieve public profile' });

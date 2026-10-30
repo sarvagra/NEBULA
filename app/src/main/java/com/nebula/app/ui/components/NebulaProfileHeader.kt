@@ -341,22 +341,14 @@ fun NebulaProfileHeader(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Social counters stay visible on every profile — including the
-            // owner's — because they are the reason people open this screen.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val rooms = user.roomsHostedCount + user.roomsJoinedCount
-                if (rooms > 0) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    CounterChip(text = if (rooms == 1) "1 room" else "$rooms rooms")
-                }
-                if (user.mutualFriendsCount > 0) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    CounterChip(text = "${user.mutualFriendsCount} mutual")
-                }
+            // Only mutual connections sit under the handle. A "N rooms" chip here
+            // stacked a second counter directly beneath the name, which is what made
+            // the identity block read as clutter instead of a header. Friend count
+            // lives beside the name; rooms live in the room activity block.
+            if (user.mutualFriendsCount > 0) {
+                CounterChip(text = "${user.mutualFriendsCount} mutual")
             }
 
             if (user.bio.isNotBlank()) {

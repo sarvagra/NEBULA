@@ -49,11 +49,14 @@ fun FriendProfileSheet(
     user: NebulaUser?,
     onMessage: (NebulaUser) -> Unit,
     onInviteToRoom: (NebulaUser) -> Unit,
+    onJoinTheirRoom: ((String) -> Unit)? = null,
     onViewFullProfile: ((NebulaUser) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     if (user == null) return
     val theme = Theme.current
+    // Someone sitting in a room gets "Join their room"; someone who is merely online
+    // gets "Invite to a room". Two different jobs, so they never share a button.
 
     PABottomSheet(
         isVisible = isVisible,
@@ -98,14 +101,16 @@ fun FriendProfileSheet(
                                 onMessage(user)
                             }
                         )
+                        val roomId = user.currentRoomId
                         SheetAction(
-                            text = "Invite",
+                            text = if (roomId != null) "Join room" else "Invite",
                             icon = Icons.Default.Tv,
                             filled = false,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 onDismiss()
-                                onInviteToRoom(user)
+                                if (roomId != null && onJoinTheirRoom != null) onJoinTheirRoom(roomId)
+                                else onInviteToRoom(user)
                             }
                         )
                     }

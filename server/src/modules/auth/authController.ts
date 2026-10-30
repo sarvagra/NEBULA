@@ -4,6 +4,7 @@ import { AuthService, hashToken } from '../../services/authService';
 import { UserModel } from '../../models/User';
 import { toPrivateUserDTO } from '../../utils/dto';
 import { config } from '../../config/env';
+import { disconnectSessionSockets } from '../../realtime/socketServer';
 
 // Temporary in-memory OTP verification store (scoped to dev / OTP provider integration)
 export type OtpPurpose = 'login' | 'account_deletion';
@@ -193,6 +194,11 @@ export async function logout(req: Request, res: Response): Promise<void> {
       deviceId: targetDeviceId,
       userId: req.user?.id,
     });
+    // Drop the live socket now as well. Signing out only in Mongo left the device
+    // receiving room and DM events until its access token expired.
+    if (req.user?.id) {
+      await disconnectSessionSockets(req.user.id, req.user.sessionId);
+    }
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Logout failed' });
@@ -258,6 +264,10 @@ export async function revokeSessionById(req: Request, res: Response): Promise<vo
       return;
     }
 
+    // The revoked phone must lose its live connection immediately, not at the next
+    // token expiry.
+    await disconnectSessionSockets(req.user.id, sessionId);
+
     res.json({ success: true, message: 'Device session revoked successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to revoke device session' });
@@ -274,6 +284,10 @@ export async function revokeOtherSessions(req: Request, res: Response): Promise<
     const currentDeviceId = (req.headers['x-device-id'] as string) || req.user.deviceId;
     const currentSessionId = req.user.sessionId;
     const count = await AuthService.revokeOtherSessions(req.user.id, currentDeviceId, currentSessionId);
+    // Every socket from the other devices goes with them; this one stays.
+    if (count > 0) {
+      await disconnectSessionSockets(req.user.id, undefined, currentSessionId);
+    }
 
     res.json({
       success: true,

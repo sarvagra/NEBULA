@@ -12,26 +12,67 @@ import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, noti
 import { entitlementsForTier } from '../../utils/entitlements';
 import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
 import { RoomQueueItemModel } from '../../models/RoomQueueItem';
+import { RefreshTokenModel } from '../../models/RefreshToken';
 
-async function claimActiveRoom(userId: string, roomId: string): Promise<boolean> {
+type RoomClaimResult = 'claimed' | 'other_room' | 'other_device';
+
+/**
+ * One account, one room slot, one device.
+ *
+ * Membership alone was enough to stop a second device joining a *different* room,
+ * but the same room could be entered from two phones at once and both would render
+ * the same live session. The slot now records which session owns it, so a second
+ * device is refused with a distinct answer the app can explain.
+ */
+async function claimActiveRoom(
+  userId: string,
+  roomId: string,
+  sessionId?: string,
+  deviceId?: string
+): Promise<RoomClaimResult> {
   const otherMembership = await RoomModel.findOne({
     _id: { $ne: roomId },
     isEnded: { $ne: true },
     'participants.userId': userId,
   }).select('_id');
-  if (otherMembership) return false;
+  if (otherMembership) return 'other_room';
+
+  const current = await UserModel.findById(userId).select(
+    'activeRoomId activeRoomSessionId activeRoomDeviceId'
+  );
+  if (!current) return 'other_room';
+
+  const holderSession = (current.activeRoomSessionId || '').trim();
+  const sameRoom = current.activeRoomId === roomId;
+  if (sameRoom && holderSession && sessionId && holderSession !== sessionId) {
+    // A session that was revoked (signed out, or replaced by a fresh sign-in on the
+    // same phone) no longer holds anything, so it must not lock the account out.
+    const holderStillActive = await RefreshTokenModel.findOne({
+      _id: holderSession,
+      revoked: false,
+      expiresAt: { $gt: new Date() },
+    }).select('_id');
+    if (holderStillActive) return 'other_device';
+  }
 
   const result = await UserModel.updateOne(
     { _id: userId, $or: [{ activeRoomId: null }, { activeRoomId: roomId }, { activeRoomId: { $exists: false } }] },
-    { $set: { activeRoomId: roomId, presenceStatus: 'in_a_room' } }
+    {
+      $set: {
+        activeRoomId: roomId,
+        activeRoomSessionId: sessionId || null,
+        activeRoomDeviceId: deviceId || null,
+        presenceStatus: 'in_a_room',
+      },
+    }
   );
-  return result.matchedCount > 0;
+  return result.matchedCount > 0 ? 'claimed' : 'other_room';
 }
 
 async function releaseActiveRoom(userId: string, roomId: string): Promise<void> {
   await UserModel.updateOne(
     { _id: userId, activeRoomId: roomId },
-    { $set: { activeRoomId: null, presenceStatus: 'online' } }
+    { $set: { activeRoomId: null, activeRoomSessionId: null, activeRoomDeviceId: null, presenceStatus: 'online' } }
   );
 }
 
@@ -296,8 +337,15 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
 
     const roomId = new mongoose.Types.ObjectId().toString();
     const creatorProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
-    if (!(await claimActiveRoom(req.user.id, roomId))) {
-      res.status(409).json({ success: false, error: 'Leave your current room before creating another one' });
+    const claim = await claimActiveRoom(req.user.id, roomId, req.user.sessionId, req.user.deviceId);
+    if (claim !== 'claimed') {
+      res.status(409).json({
+        success: false,
+        code: claim === 'other_device' ? 'ROOM_ON_OTHER_DEVICE' : 'ALREADY_IN_ROOM',
+        error: claim === 'other_device'
+          ? 'Only one device per account can be in a room. Leave the room on your other device first.'
+          : 'Leave your current room before creating another one',
+      });
       return;
     }
 
@@ -419,16 +467,28 @@ export async function joinRoom(req: Request, res: Response): Promise<void> {
     // allow seamless recovery instead of blocking with 409 conflict.
     const alreadyIn = room.participants.some((p) => p.userId === req.user!.id);
     if (alreadyIn) {
-      await claimActiveRoom(req.user.id, room._id.toString());
+      const reentry = await claimActiveRoom(req.user.id, room._id.toString(), req.user.sessionId, req.user.deviceId);
+      if (reentry === 'other_device') {
+        res.status(409).json({
+          success: false,
+          code: 'ROOM_ON_OTHER_DEVICE',
+          error: 'This room is already open on your other device. Only one device per account can be in a room at a time.',
+        });
+        return;
+      }
       res.json({ success: true, data: toPublicRoomDTO(room, req.user.id) });
       return;
     }
 
     const joiningProfile = await UserModel.findById(req.user.id).select('username displayName avatarLetter avatarUrl bannerUrl bio status interests');
-    if (!(await claimActiveRoom(req.user.id, room._id.toString()))) {
+    const claim = await claimActiveRoom(req.user.id, room._id.toString(), req.user.sessionId, req.user.deviceId);
+    if (claim !== 'claimed') {
       res.status(409).json({
         success: false,
-        error: 'Your account is currently active in another room on another device. Only one device per account is allowed to join a room at any time.',
+        code: claim === 'other_device' ? 'ROOM_ON_OTHER_DEVICE' : 'ALREADY_IN_ROOM',
+        error: claim === 'other_device'
+          ? 'This account is already in a room on your other device. Only one device per account can be in a room at a time.'
+          : 'Your account is currently active in another room on another device. Only one device per account is allowed to join a room at any time.',
       });
       return;
     }

@@ -52,6 +52,7 @@ import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.NebulaProfileHeader
 import com.nebula.app.ui.components.PABottomSheet
+import com.nebula.app.ui.components.TagScribble
 
 /**
  * A profile opened from the outside: a friend, a stranger from a room, or the
@@ -190,95 +191,105 @@ fun NebulaPublicProfileScreen(
             )
         }
 
-        // 2. PUBLIC ACTIVITY — friend/room counters stay visible for everyone,
-        // which is what makes a profile feel alive rather than a name card.
-        item {
-            Column(modifier = Modifier.padding(horizontal = 18.dp).padding(top = 18.dp)) {
-                Text(
-                    text = "PUBLIC ACTIVITY",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        fontSize = 11.sp
-                    )
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StatCard(
-                        label = "Friends",
-                        value = effectiveFriendCount?.toString() ?: "—",
-                        caption = if (effectiveFriendCount == null) "Private" else "People"
-                    )
-                    StatCard(
-                        label = "Joined",
-                        value = "${user.roomsJoinedCount}",
-                        caption = "Rooms"
-                    )
-                    StatCard(
-                        label = "Hosted",
-                        value = "${user.roomsHostedCount}",
-                        caption = "Rooms"
-                    )
-                }
-
-                if (user.mutualFriendsCount > 0) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${user.mutualFriendsCount} mutual connections",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 12.sp
-                            )
+        // 2. ROOM ACTIVITY — joined and hosted only. The friend count moved next to
+        // the name in the header, and the hours tile is gone from the product.
+        // A private switch does not render an empty card: the whole block drops out
+        // and top content, if it is public, moves up into its place.
+        if (user.isRoomActivityPublic) {
+            item {
+                Column(modifier = Modifier.padding(horizontal = 18.dp).padding(top = 18.dp)) {
+                    Text(
+                        text = "ROOM ACTIVITY",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                            fontSize = 11.sp
                         )
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        StatCard(
+                            label = "Joined",
+                            value = com.nebula.app.ui.components.compactCount(user.roomsJoinedCount),
+                            caption = "Rooms"
+                        )
+                        StatCard(
+                            label = "Hosted",
+                            value = com.nebula.app.ui.components.compactCount(user.roomsHostedCount),
+                            caption = "Rooms"
+                        )
+                    }
+
+                    if (user.mutualFriendsCount > 0) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(theme.colors.surface)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${user.mutualFriendsCount} mutual connections",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 3. TOP CONTENT
-        item {
-            Column(modifier = Modifier.padding(horizontal = 18.dp).padding(top = 14.dp)) {
-                Text(
-                    text = "TOP CONTENT",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        fontSize = 11.sp
-                    )
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Box(
+        // 3. TOP CONTENT — the tags of the rooms this person actually takes part in,
+        // drawn as a scribble: the most-visited tag is the largest word and the least
+        // is the smallest. Tags with no participation never appear at all.
+        if (user.isTopContentPublic) {
+            item {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(theme.colors.surface)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(horizontal = 18.dp)
+                        .padding(top = if (user.isRoomActivityPublic) 14.dp else 18.dp)
                 ) {
                     Text(
-                        text = "Top content will appear here when viewing history is available.",
+                        text = "TOP CONTENT",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
-                            fontSize = 12.sp
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                            fontSize = 11.sp
                         )
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
+                            .padding(16.dp)
+                    ) {
+                        if (user.topTags.isEmpty()) {
+                            Text(
+                                text = "No room tags yet. Join a room and its tags will show up here.",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        } else {
+                            TagScribble(tags = user.topTags)
+                        }
+                    }
                 }
             }
         }
@@ -290,6 +301,8 @@ fun NebulaPublicProfileScreen(
         isVisible = showProfileMenu,
         isCurrentUser = isCurrentUser,
         displayName = user.displayName,
+        accountCreatedAt = user.accountCreatedAt,
+        usernameChanges = user.usernameChanges,
         onEditProfile = { showProfileMenu = false; onOpenEditProfile() },
         onBlock = { showProfileMenu = false; showBlockConfirmation = true },
         onDismiss = { showProfileMenu = false }
@@ -536,11 +549,29 @@ private fun ProfileActionSheet(
     isVisible: Boolean,
     isCurrentUser: Boolean,
     displayName: String,
+    accountCreatedAt: String?,
+    usernameChanges: List<com.nebula.app.domain.model.NebulaUsernameChange>,
     onEditProfile: () -> Unit,
     onBlock: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
+
+    /** "12 Mar 2026" from an ISO timestamp; blank when the server sent nothing usable. */
+    fun shortDate(iso: String?): String? {
+        if (iso.isNullOrBlank()) return null
+        return try {
+            val normalised = iso.replace(" ", "T").substringBefore('.').removeSuffix("Z")
+            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            val date = parser.parse(normalised) ?: return null
+            val out = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US)
+            out.timeZone = java.util.TimeZone.getDefault()
+            out.format(date)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     PABottomSheet(
         isVisible = isVisible,
@@ -580,7 +611,72 @@ private fun ProfileActionSheet(
                 }
             }
 
+            // PROFILE INFO — account age and the username trail. Both come from the
+            // server, so "previously known as" is a record rather than a guess.
+            val memberSince = shortDate(accountCreatedAt)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(theme.colors.surface)
+                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "PROFILE INFO",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        fontSize = 11.sp
+                    )
+                )
+
+                InfoLine(label = "Member since", value = memberSince ?: "Unknown")
+
+                if (usernameChanges.isEmpty()) {
+                    InfoLine(label = "Username changes", value = "Never changed")
+                } else {
+                    InfoLine(
+                        label = if (usernameChanges.size == 1) "Changed username once" else "Changed username ${usernameChanges.size} times",
+                        value = ""
+                    )
+                    usernameChanges.forEach { change ->
+                        InfoLine(
+                            label = "@${change.previousUsername}",
+                            value = shortDate(change.changedAt) ?: ""
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary, fontSize = 12.5.sp)
+        )
+        if (value.isNotBlank()) {
+            Text(
+                text = value,
+                style = theme.typography.bodySmall.copy(
+                    color = theme.colors.textPrimary,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.5.sp
+                )
+            )
         }
     }
 }

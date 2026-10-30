@@ -18,6 +18,13 @@ import java.net.URL
 object NebulaApiClient {
     var sessionManager: com.nebula.app.data.local.SessionManager? = null
 
+    /**
+     * Fired when the server refuses a request because this session was revoked from
+     * another device. Clearing prefs alone left the app showing a signed-in shell with
+     * dead data, so the UI registers here to leave for the sign-in screen immediately.
+     */
+    var onSessionRevoked: ((String) -> Unit)? = null
+
     private var defaultBaseUrl: String = "https://nebula-73kb.onrender.com/api/v1"
 
     var baseUrl: String
@@ -128,6 +135,7 @@ object NebulaApiClient {
                 if (errorCode == "SESSION_REVOKED") {
                     authToken = null
                     sessionManager?.clearSession()
+                    onSessionRevoked?.invoke("This account was signed out from another device")
                     return@withContext ApiResponse.Error("Your session has been logged out or revoked", 401)
                 }
                 if (allowRefresh && endpoint != "/auth/refresh" && refreshAccessToken()) {
@@ -226,6 +234,16 @@ object NebulaApiClient {
         }
         return request("/auth/logout", "POST", body)
     }
+
+    /** Cooldown and price for replacing the linked Google identity. */
+    suspend fun getEmailChangeStatus(): ApiResponse<JSONObject> = request("/users/me/email", "GET")
+
+    /**
+     * [idToken] must be a freshly verified Firebase token for the *new* identity; the
+     * server reads the address from it and never from the request body.
+     */
+    suspend fun rebindEmail(idToken: String): ApiResponse<JSONObject> =
+        request("/users/me/email/rebind", "POST", JSONObject().put("idToken", idToken))
 
     suspend fun getNotifications(): ApiResponse<JSONArray> {
         val res = request("/notifications?limit=50", "GET")
@@ -447,6 +465,8 @@ object NebulaApiClient {
         interests: List<String> = emptyList(),
         avatarUrl: String? = null,
         isFriendCountPublic: Boolean? = null,
+        isRoomActivityPublic: Boolean? = null,
+        isTopContentPublic: Boolean? = null,
         isOnboardingCompleted: Boolean? = true,
         dateOfBirth: String? = null,
         gender: String? = null,
@@ -479,6 +499,13 @@ object NebulaApiClient {
             }
             if (isFriendCountPublic != null) {
                 put("isFriendCountPublic", isFriendCountPublic)
+            }
+            // Each profile block has its own switch and is only sent when it changes.
+            if (isRoomActivityPublic != null) {
+                put("isRoomActivityPublic", isRoomActivityPublic)
+            }
+            if (isTopContentPublic != null) {
+                put("isTopContentPublic", isTopContentPublic)
             }
             put("isOnboardingCompleted", isOnboardingCompleted ?: true)
             if (dateOfBirth != null) {

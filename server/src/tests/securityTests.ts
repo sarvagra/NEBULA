@@ -301,8 +301,20 @@ async function runSecurityTests() {
         if (!blockedJson.data?.usernameChangeAvailableAt) {
           throw new Error(`${tier} cooldown rejection did not return the exact next allowed time`);
         }
-        const expectedRelease = new Date(afterFirst.usernameChangedAt);
-        expectedRelease.setMonth(expectedRelease.getMonth() + 6);
+        // The cooldown is six calendar months, clamped to the last valid day, so the
+        // fixture has to be derived the same way. `setMonth(+6)` alone overflows: on
+        // 31 October it produces "31 April", which JavaScript silently rolls into
+        // 1 May while the server correctly stores 30 April.
+        const addCalendarMonths = (date: Date, months: number): Date => {
+          const result = new Date(date);
+          const day = result.getDate();
+          result.setDate(1);
+          result.setMonth(result.getMonth() + months);
+          const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+          result.setDate(Math.min(day, lastDay));
+          return result;
+        };
+        const expectedRelease = addCalendarMonths(new Date(afterFirst.usernameChangedAt), 6);
         const reported = new Date(blockedJson.data.usernameChangeAvailableAt);
         if (Math.abs(reported.getTime() - expectedRelease.getTime()) > 1000) {
           throw new Error(`${tier} reported release time does not match the stored six-month boundary`);
@@ -310,8 +322,7 @@ async function runSecurityTests() {
 
         // One day before the boundary it is still locked. The cooldown is calendar
         // months, so the fixtures are derived the same way the server derives them.
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const sixMonthsAgo = addCalendarMonths(new Date(), -6);
         const justBefore = new Date(sixMonthsAgo.getTime() + 24 * 60 * 60 * 1000);
         await UserModel.updateOne({ _id: cooldownUserId }, { $set: { usernameChangedAt: justBefore } });
         const stillLocked = await rename(`cooldown_c_${tier}`.slice(0, 16));

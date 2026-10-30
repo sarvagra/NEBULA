@@ -331,7 +331,10 @@ fun NebulaAccountDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Active Devices (${activeSessions.size}/2)",
+                            // The server returns one row per device, so this is the real
+                            // count. It used to be inflated by duplicate rows for the same
+                            // install, which read as 2/2 on a single phone.
+                            text = "Active Devices (${activeSessions.size.coerceAtMost(MAX_ACTIVE_DEVICES)}/$MAX_ACTIVE_DEVICES)",
                             style = theme.typography.bodyMedium.copy(
                                 color = theme.colors.textSecondary,
                                 fontWeight = FontWeight.SemiBold,
@@ -1153,6 +1156,9 @@ private fun DeletionActionRow(
 }
 
 private const val DEFAULT_GRACE_DAYS = 30
+
+/** Mirrors the server's MAX_ACTIVE_DEVICES; used for the "x / 2" label only. */
+private const val MAX_ACTIVE_DEVICES = 2
 
 private enum class DeletionFlowStage { IDLE, CONFIRM_EXPLANATION, OTP }
 

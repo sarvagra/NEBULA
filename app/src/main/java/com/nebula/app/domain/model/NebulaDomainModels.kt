@@ -42,6 +42,16 @@ enum class NebulaPresenceStatus(
 /**
  * Core User model representing friends and network participants in NEBULA.
  */
+/** One tag with how many rooms of that tag the person took part in. */
+data class NebulaTagCount(val tag: String, val count: Int)
+
+/** A past username change, newest first. */
+data class NebulaUsernameChange(
+    val previousUsername: String,
+    val newUsername: String,
+    val changedAt: String
+)
+
 data class NebulaUser(
     val id: String,
     val username: String,
@@ -68,7 +78,14 @@ data class NebulaUser(
     val isFriend: Boolean = false,
     val friendRequestPending: Boolean = false,
     val friendRequestReceived: Boolean = false,
-    val friendRequestId: String? = null
+    val friendRequestId: String? = null,
+    /** ISO timestamp of account creation, used for "member since" in the profile menu. */
+    val accountCreatedAt: String? = null,
+    val usernameChanges: List<NebulaUsernameChange> = emptyList(),
+    /** Two independent profile privacy switches; each hides only its own block. */
+    val isRoomActivityPublic: Boolean = true,
+    val isTopContentPublic: Boolean = true,
+    val topTags: List<NebulaTagCount> = emptyList()
 ) {
     companion object {
         val CurrentUser = NebulaUser(

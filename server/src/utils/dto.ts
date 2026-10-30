@@ -26,6 +26,17 @@ export interface PublicUserDTO {
     timeInSyncHours: string;
     friendsCount: number | null;
   };
+  /** Account age, shown in the profile's overflow menu. */
+  createdAt?: Date;
+  /** Newest-first username changes, so "also known as" is accurate rather than guessed. */
+  usernameChanges?: { previousUsername: string; newUsername: string; changedAt: Date }[];
+  isRoomActivityPublic: boolean;
+  isTopContentPublic: boolean;
+  /**
+   * Tags of the rooms this person takes part in, most active first. Sizes the
+   * top-content word cloud; empty when the user keeps top content private.
+   */
+  topTags: { tag: string; count: number }[];
 }
 
 export interface PrivateUserDTO {
@@ -91,6 +102,19 @@ export function toPublicUserDTO(user: IUser, relationship: string = 'none'): Pub
       timeInSyncHours: ((user.stats?.timeInSyncMinutes || 0) / 60).toFixed(1),
       friendsCount: user.isFriendCountPublic ? ((user as any).friendsCount ?? (user as any).stats?.friendsCount ?? 0) : null,
     },
+    createdAt: user.createdAt,
+    // Five is plenty for a "previously known as" list and keeps the payload small.
+    usernameChanges: (user.usernameHistory || [])
+      .slice(-5)
+      .reverse()
+      .map((entry) => ({
+        previousUsername: entry.previousUsername,
+        newUsername: entry.newUsername,
+        changedAt: entry.changedAt,
+      })),
+    isRoomActivityPublic: user.isRoomActivityPublic !== false,
+    isTopContentPublic: user.isTopContentPublic !== false,
+    topTags: [],
   };
 }
 

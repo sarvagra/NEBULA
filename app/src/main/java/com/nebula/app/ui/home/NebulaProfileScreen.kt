@@ -103,6 +103,11 @@ fun NebulaProfileScreen(
     onNavigateFriends: () -> Unit,
     onOpenEditProfile: () -> Unit,
     onOpenSettings: () -> Unit,
+    isRoomActivityPublic: Boolean = true,
+    isTopContentPublic: Boolean = true,
+    topTags: List<com.nebula.app.domain.model.NebulaTagCount> = emptyList(),
+    onToggleRoomActivityPrivacy: () -> Unit = {},
+    onToggleTopContentPrivacy: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
     onOpenVault: () -> Unit = {},
     onOpenPremiumPlans: () -> Unit = {},
@@ -115,13 +120,8 @@ fun NebulaProfileScreen(
 ) {
     val theme = Theme.current
 
-    // Individual privacy switches for each analytics item.
-    var isActivityBreakdownPublic by remember { mutableStateOf(true) }
-    var isRoomsHostedPublic by remember { mutableStateOf(true) }
-    var isPollsVotedPublic by remember { mutableStateOf(false) }
-    var isReactionsPublic by remember { mutableStateOf(false) }
-    var isTopContentPublic by remember { mutableStateOf(true) }
-    val isPremiumUser = activeTier != NebulaSubscriptionTier.FREE
+    // Both profile blocks are driven by the owner's saved visibility switches; the
+    // screen never invents a local opinion about privacy that the server disagrees with.
 
     LazyColumn(
         modifier = modifier
@@ -204,39 +204,6 @@ fun NebulaProfileScreen(
                                 contentDescription = "View public profile",
                                 tint = theme.colors.textPrimary,
                                 modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    if (activeTier == NebulaSubscriptionTier.FREE) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(theme.colors.surface)
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                                .clickable(onClick = onOpenPremiumPlans)
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = theme.colors.primaryAccent,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(
-                                text = "Unlock custom status, more tags and longer history",
-                                style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.5.sp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = theme.colors.textTertiary,
-                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
@@ -343,7 +310,9 @@ fun NebulaProfileScreen(
             }
         }
 
-        // 3. NEBULA ANALYTICS with individual item Public / Private switches
+        // 3. ROOM ACTIVITY — the same block a visitor sees, with the owner's switch.
+        // Hours are gone from the product, so this is joined and hosted only, and
+        // both are written in the compact 999 / 1.2K / 3.4M form.
         item {
             Column(modifier = Modifier.padding(horizontal = 18.dp).padding(top = 14.dp)) {
                 Column(
@@ -361,7 +330,7 @@ fun NebulaProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "NEBULA ANALYTICS",
+                            text = "ROOM ACTIVITY",
                             style = theme.typography.caption.copy(
                                 color = theme.colors.textSecondary,
                                 fontWeight = FontWeight.Bold,
@@ -369,85 +338,43 @@ fun NebulaProfileScreen(
                                 fontSize = 11.sp
                             )
                         )
-                        Text(
-                            text = "This Month",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                        PrivacyToggleBadge(
+                            isPublic = isRoomActivityPublic,
+                            onToggle = onToggleRoomActivityPrivacy
                         )
                     }
 
-                    // Activity breakdown with public/private toggle
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Activity Breakdown",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                            PrivacyToggleBadge(
-                                isPublic = isActivityBreakdownPublic,
-                                onToggle = { isActivityBreakdownPublic = !isActivityBreakdownPublic }
-                            )
-                        }
-
-                        val totalRooms = user.roomsHostedCount + user.roomsJoinedCount
-                        if (totalRooms == 0) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(theme.colors.surfaceElevated)
-                                    .padding(vertical = 12.dp, horizontal = 14.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No room sync sessions recorded yet this month",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    // Analytics metric tiles
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
                             label = "Hosted",
-                            value = "${user.roomsHostedCount}",
+                            value = com.nebula.app.ui.components.compactCount(user.roomsHostedCount),
                             icon = Icons.Default.Star,
-                            isPublic = isRoomsHostedPublic,
-                            onTogglePrivacy = { isRoomsHostedPublic = !isRoomsHostedPublic }
+                            isPublic = isRoomActivityPublic,
+                            onTogglePrivacy = onToggleRoomActivityPrivacy
                         )
                         MetricTile(
                             label = "Joined",
-                            value = "${user.roomsJoinedCount}",
+                            value = com.nebula.app.ui.components.compactCount(user.roomsJoinedCount),
                             icon = Icons.Default.Public,
-                            isPublic = isActivityBreakdownPublic,
-                            onTogglePrivacy = { isActivityBreakdownPublic = !isActivityBreakdownPublic }
-                        )
-                        MetricTile(
-                            label = "Hours",
-                            value = String.format("%.1f", user.timeInSyncHours),
-                            icon = Icons.Default.AccessTime,
-                            isPublic = isActivityBreakdownPublic,
-                            onTogglePrivacy = { isActivityBreakdownPublic = !isActivityBreakdownPublic }
+                            isPublic = isRoomActivityPublic,
+                            onTogglePrivacy = onToggleRoomActivityPrivacy
                         )
                     }
+
+                    Text(
+                        text = if (isRoomActivityPublic) {
+                            "Visitors can see how many rooms you have joined and hosted."
+                        } else {
+                            "Only you can see your room activity."
+                        },
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textTertiary,
+                            fontSize = 11.sp
+                        )
+                    )
                 }
             }
         }
@@ -480,7 +407,7 @@ fun NebulaProfileScreen(
                         )
                         PrivacyToggleBadge(
                             isPublic = isTopContentPublic,
-                            onToggle = { isTopContentPublic = !isTopContentPublic }
+                            onToggle = onToggleTopContentPrivacy
                         )
                     }
 
@@ -489,16 +416,19 @@ fun NebulaProfileScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(theme.colors.surfaceElevated)
-                            .padding(horizontal = 14.dp, vertical = 14.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 14.dp, vertical = 14.dp)
                     ) {
-                        Text(
-                            text = "No top content yet. Your watched videos will appear here when available.",
-                            style = theme.typography.bodySmall.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 12.sp
+                        if (topTags.isEmpty()) {
+                            Text(
+                                text = "No room tags yet. The tags of the rooms you join will draw this scribble.",
+                                style = theme.typography.bodySmall.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
                             )
-                        )
+                        } else {
+                            com.nebula.app.ui.components.TagScribble(tags = topTags)
+                        }
                     }
                 }
             }

@@ -7,6 +7,7 @@ import {
   confirmAccountDeletion,
   cancelAccountDeletion,
 } from './accountLifecycleController';
+import { getEmailChangeStatus, rebindEmail } from './emailRebindController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody } from '../../middlewares/validation';
 import { UpdateProfileSchema, CreateAssetSchema } from '../../utils/schemas';
@@ -19,6 +20,10 @@ userRouter.put('/presence', authMiddleware, updatePresence);
 userRouter.get('/check-username/:username', authMiddleware, profileRateLimiter, checkUsername);
 userRouter.get('/public/id/:id', optionalAuthMiddleware, getPublicProfileById);
 userRouter.get('/public/:username', optionalAuthMiddleware, getPublicProfile);
+
+// Replacing the linked Google identity: one free change per six months, priced after.
+userRouter.get('/me/email', authMiddleware, getEmailChangeStatus);
+userRouter.post('/me/email/rebind', authMiddleware, rebindEmail);
 
 // Account lifecycle: OTP-verified deletion scheduled 30 days out, cancellable by login.
 userRouter.get('/me/deletion', authMiddleware, getDeletionStatus);

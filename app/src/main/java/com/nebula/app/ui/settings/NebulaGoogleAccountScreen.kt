@@ -49,7 +49,11 @@ fun NebulaGoogleAccountScreen(
     onBack: () -> Unit,
     onSwitchGoogleAccount: () -> Unit,
     onSignOut: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    emailChangeFreeNow: Boolean = true,
+    emailChangeAvailableFrom: String? = null,
+    emailChangePriceInr: Int = 0,
+    isRebinding: Boolean = false
 ) {
     val theme = Theme.current
 
@@ -176,6 +180,65 @@ fun NebulaGoogleAccountScreen(
                         }
                     }
 
+                }
+            }
+
+            // Switching the linked identity. The same account keeps its rooms, chats
+            // and stored media; only the Google account that can sign in changes.
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(theme.colors.surface)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Switch Google Account",
+                        style = theme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = theme.colors.textPrimary,
+                            fontSize = 15.sp
+                        )
+                    )
+                    Text(
+                        text = if (emailChangeFreeNow) {
+                            "One free change per six months. Your profile, friends, rooms, chats and media stay exactly as they are."
+                        } else {
+                            val date = emailChangeAvailableFrom?.take(10) ?: "later"
+                            "A free change is available from $date. Changing now costs ₹$emailChangePriceInr, and the price rises by ₹25 for each change after this six-month window."
+                        },
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    )
+                    Button(
+                        onClick = onSwitchGoogleAccount,
+                        enabled = !isRebinding,
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = theme.colors.surfaceElevated,
+                            contentColor = theme.colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = if (isRebinding) "Switching…" else "Choose a different Google account",
+                            style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                    Text(
+                        text = "Changing it is only possible through Google sign-in. The new account must not already belong to another Nebula account.",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textTertiary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    )
                 }
             }
 

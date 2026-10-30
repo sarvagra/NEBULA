@@ -792,7 +792,29 @@ class SocialRepositoryImpl(
                     friendRequestPending = item.optString("relationship") == "request_sent",
                     friendRequestReceived = item.optString("relationship") == "request_received",
                     friendRequestId = item.optString("friendRequestId").ifBlank { null },
-                    isFriend = item.optString("relationship") == "friends"
+                    isFriend = item.optString("relationship") == "friends",
+                    accountCreatedAt = item.optString("createdAt").ifBlank { null },
+                    usernameChanges = item.optJSONArray("usernameChanges")?.let { changes ->
+                        List(changes.length()) { index ->
+                            val entry = changes.optJSONObject(index) ?: JSONObject()
+                            com.nebula.app.domain.model.NebulaUsernameChange(
+                                previousUsername = entry.optString("previousUsername"),
+                                newUsername = entry.optString("newUsername"),
+                                changedAt = entry.optString("changedAt")
+                            )
+                        }
+                    } ?: emptyList(),
+                    isRoomActivityPublic = if (item.has("isRoomActivityPublic")) item.optBoolean("isRoomActivityPublic", true) else true,
+                    isTopContentPublic = if (item.has("isTopContentPublic")) item.optBoolean("isTopContentPublic", true) else true,
+                    topTags = item.optJSONArray("topTags")?.let { tags ->
+                        List(tags.length()) { index ->
+                            val entry = tags.optJSONObject(index) ?: JSONObject()
+                            com.nebula.app.domain.model.NebulaTagCount(
+                                tag = entry.optString("tag"),
+                                count = entry.optInt("count", 0)
+                            )
+                        }
+                    } ?: emptyList()
                 )
             )
         }

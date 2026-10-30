@@ -8,6 +8,19 @@ export interface IUser extends Document {
   phone?: string;
   googleId?: string;
   firebaseUid?: string;
+  /**
+   * The linked Google identity can be replaced, but not indefinitely for free: the
+   * last change and the running count drive the six-month cooldown and the price.
+   */
+  emailChangedAt?: Date;
+  emailChangeCount?: number;
+  emailChangeHistory?: {
+    from: string | null;
+    to: string;
+    at: Date;
+    uidFrom: string | null;
+    uidTo: string;
+  }[];
   username: string;
   usernameChangedAt?: Date;
   usernameHistory: { previousUsername: string; newUsername: string; changedAt: Date; eventId: string }[];
@@ -31,6 +44,10 @@ export interface IUser extends Document {
   suggestionRefreshDate?: string;
   suggestionRefreshCount?: number;
   isFriendCountPublic: boolean;
+  /** Whether the rooms a user joined/hosted are shown on their public profile. */
+  isRoomActivityPublic: boolean;
+  /** Whether the tag breakdown of the rooms they take part in is shown publicly. */
+  isTopContentPublic: boolean;
   isBanned: boolean;
   role: 'user' | 'moderator' | 'admin';
   /** Account deletion lifecycle: scheduled grace period plus audit trail. */
@@ -39,6 +56,13 @@ export interface IUser extends Document {
   deletionSuspendedAt?: Date;
   deletionEvents: { action: 'requested' | 'suspended' | 'cancelled' | 'completed'; at: Date; scheduledFor?: Date; eventId: string }[];
   activeRoomId?: string | null;
+  /**
+   * The session that currently holds the room slot. One account may be in a room
+   * from exactly one signed-in device, so a second session is refused rather than
+   * silently sharing (or stealing) the slot.
+   */
+  activeRoomSessionId?: string | null;
+  activeRoomDeviceId?: string | null;
   fcmTokens: string[];
   /**
    * Re-engagement messaging is opt-in only: nothing is scheduled unless the user
@@ -71,6 +95,15 @@ const UserSchema = new Schema<IUser>(
     phone: { type: String, sparse: true, index: true },
     googleId: { type: String, sparse: true, index: true },
     firebaseUid: { type: String, sparse: true, index: true },
+    emailChangedAt: { type: Date },
+    emailChangeCount: { type: Number, default: 0 },
+    emailChangeHistory: [{
+      from: { type: String, default: null },
+      to: { type: String, required: true },
+      at: { type: Date, required: true },
+      uidFrom: { type: String, default: null },
+      uidTo: { type: String, required: true },
+    }],
     username: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
     usernameChangedAt: { type: Date },
     usernameHistory: [{
@@ -99,6 +132,10 @@ const UserSchema = new Schema<IUser>(
     suggestionRefreshDate: { type: String, default: '' },
     suggestionRefreshCount: { type: Number, default: 0 },
     isFriendCountPublic: { type: Boolean, default: true },
+    // Two independent privacy switches, both public by default so a fresh profile
+    // is not an empty shell. Either one can hide its block without touching the other.
+    isRoomActivityPublic: { type: Boolean, default: true },
+    isTopContentPublic: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false, index: true },
     role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
     deletionRequestedAt: { type: Date },
@@ -111,6 +148,8 @@ const UserSchema = new Schema<IUser>(
       eventId: { type: String, required: true },
     }],
     activeRoomId: { type: String, default: null, index: true },
+    activeRoomSessionId: { type: String, default: null },
+    activeRoomDeviceId: { type: String, default: null },
     fcmTokens: { type: [String], default: [] },
     reengagementOptIn: { type: Boolean, default: false },
     reengagementOptInAt: { type: Date },

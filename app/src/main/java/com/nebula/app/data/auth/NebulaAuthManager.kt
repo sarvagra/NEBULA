@@ -165,6 +165,54 @@ class NebulaAuthManager(
         }
     }
 
+    sealed class IdentityTokenResult {
+        data class Success(val idToken: String, val email: String?) : IdentityTokenResult()
+        data class Error(val message: String, val isCancelled: Boolean = false) : IdentityTokenResult()
+    }
+
+    /**
+     * Picks a Google account and returns a verified Firebase ID token without touching
+     * the current Nebula session.
+     *
+     * Re-binding the linked identity is a change to an account that already exists, so
+     * it must not run the sign-in path: that path would mint a session for whatever
+     * account was picked, which is a different (and wrong) operation.
+     */
+    suspend fun acquireIdentityToken(activityContext: Context): IdentityTokenResult {
+        return try {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(webClientId)
+                .setAutoSelectEnabled(false)
+                .build()
+            val credentialResult = credentialManager.getCredential(
+                request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build(),
+                context = activityContext
+            )
+            val credential = credentialResult.credential
+            if (credential !is CustomCredential ||
+                credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+            ) {
+                return IdentityTokenResult.Error("Unsupported credential type: ${credential.type}")
+            }
+            val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+            val authResult = firebaseAuth.signInWithCredential(
+                GoogleAuthProvider.getCredential(googleIdToken, null)
+            ).await()
+            val firebaseUser = authResult.user
+                ?: return IdentityTokenResult.Error("Could not verify that Google account")
+            val token = firebaseUser.getIdToken(true).await().token
+                ?: return IdentityTokenResult.Error("Could not get a fresh token")
+            IdentityTokenResult.Success(token, firebaseUser.email)
+        } catch (e: GetCredentialCancellationException) {
+            IdentityTokenResult.Error("Cancelled", isCancelled = true)
+        } catch (e: GetCredentialException) {
+            IdentityTokenResult.Error("Credential Manager error: ${e.message}")
+        } catch (e: Exception) {
+            IdentityTokenResult.Error(e.localizedMessage ?: "Google account picker failed")
+        }
+    }
+
     /**
      * Signs out from Firebase and clears backend authorization headers.
      */

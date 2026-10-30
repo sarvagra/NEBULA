@@ -7,6 +7,7 @@ import { UserModel, SubscriptionTier } from '../models/User';
 import { RoomModel } from '../models/Room';
 import { MessageModel } from '../models/Message';
 import { PollModel } from '../models/Poll';
+import { RefreshTokenModel } from '../models/RefreshToken';
 import { isValidObjectId } from '../middlewares/validation';
 
 interface AuthenticatedSocketUser {
@@ -17,6 +18,8 @@ interface AuthenticatedSocketUser {
   activeRoomId: string | null;
   avatarUrl?: string;
   avatarLetter?: string;
+  /** The signed-in session this socket belongs to; used to evict a logged-out device. */
+  sessionId?: string;
 }
 
 let roomIo: Server | null = null;
@@ -131,6 +134,29 @@ export function notifyConversationRead(
  * reaches the recipient and the sender's other devices at once.
  */
 /** True when this user has at least one authenticated socket open right now. */
+export async function disconnectSessionSockets(
+  userId: string,
+  sessionId?: string,
+  keepSessionId?: string
+): Promise<void> {
+  if (!roomIo) return;
+  try {
+    const sockets = await roomIo.in(`user:${userId}`).fetchSockets();
+    for (const target of sockets) {
+      const socketUser = target.data.user as AuthenticatedSocketUser | undefined;
+      if (keepSessionId && socketUser?.sessionId === keepSessionId) continue;
+      // A missing session id means the socket predates per-session tracking; it still
+      // belongs to the account being signed out, so it goes too.
+      if (!sessionId || !socketUser?.sessionId || socketUser.sessionId === sessionId) {
+        target.emit('session:revoked', { message: 'This account was signed out from another device' });
+        target.disconnect(true);
+      }
+    }
+  } catch {
+    // Best effort: the HTTP layer already refuses the stored token.
+  }
+}
+
 export async function isUserOnline(userId: string): Promise<boolean> {
   if (!roomIo || !userId) return false;
   try {
@@ -287,14 +313,26 @@ export function initSocketServer(httpServer: HttpServer): Server {
     }
 
     try {
-      const decoded = jwt.verify(rawToken, config.auth.jwtSecret) as { id: string };
+      const decoded = jwt.verify(rawToken, config.auth.jwtSecret) as { id: string; sessionId?: string };
       if (!decoded || !decoded.id) {
         return next(new Error('Authentication failed: Malformed token payload'));
       }
 
       let user: any = null;
       if (mongoose.connection.readyState === 1) {
-        user = await UserModel.findById(decoded.id).select('_id username displayName avatarUrl avatarLetter tier isBanned activeRoomId');
+        // A socket is a long-lived credential. Without this check a device that was
+        // signed out kept receiving room and DM traffic until its token expired.
+        if (decoded.sessionId) {
+          const activeSession = await RefreshTokenModel.findOne({
+            _id: decoded.sessionId,
+            revoked: false,
+            expiresAt: { $gt: new Date() },
+          }).select('_id');
+          if (!activeSession) {
+            return next(new Error('Your session has been logged out or revoked'));
+          }
+        }
+        user = await UserModel.findById(decoded.id).select('_id username displayName avatarUrl avatarLetter tier isBanned activeRoomId activeRoomSessionId');
         if (!user) {
           return next(new Error('Authentication failed: User no longer exists'));
         }
@@ -314,6 +352,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
         avatarLetter: user.avatarLetter,
         tier: user.tier,
         activeRoomId: user.activeRoomId?.toString() ?? null,
+        sessionId: decoded.sessionId,
       };
 
       next();
@@ -362,6 +401,25 @@ export function initSocketServer(httpServer: HttpServer): Server {
         if (!room.participants.some((participant) => participant.userId === user.id)) {
           socket.emit('error', { message: 'You are no longer a participant in this room' });
           return;
+        }
+
+        // The HTTP join already refused a second device; the socket is the other way
+        // into the same live session, so it has to refuse it too.
+        const slot = await UserModel.findById(user.id).select('activeRoomSessionId');
+        const holderSession = (slot?.activeRoomSessionId || '').trim();
+        if (holderSession && user.sessionId && holderSession !== user.sessionId) {
+          const holderStillActive = await RefreshTokenModel.findOne({
+            _id: holderSession,
+            revoked: false,
+            expiresAt: { $gt: new Date() },
+          }).select('_id');
+          if (holderStillActive) {
+            socket.emit('error', {
+              message: 'Only one device per account can be in a room. Leave it on your other device first.',
+              code: 'ROOM_ON_OTHER_DEVICE',
+            });
+            return;
+          }
         }
 
         // A socket may subscribe only to its one current room. This keeps room

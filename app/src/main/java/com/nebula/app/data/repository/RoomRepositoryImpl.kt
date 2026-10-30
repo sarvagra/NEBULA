@@ -227,7 +227,15 @@ class RoomRepositoryImpl(
         return newRoom
     }
 
+    /**
+     * The last server reason a join was refused, so the caller can explain a device
+     * conflict instead of a generic "could not join". Null means no refusal.
+     */
+    var lastJoinBlockReason: String? = null
+        private set
+
     override suspend fun joinRoom(roomId: String): NebulaRoom? {
+        lastJoinBlockReason = null
         val apiRes = apiClient.joinRoom(roomId)
         if (apiRes is ApiResponse.Success) {
             val room = parseRoomFromJson(apiRes.data.optJSONObject("data") ?: apiRes.data)
@@ -240,6 +248,7 @@ class RoomRepositoryImpl(
             return roomWithPoll
         }
 
+        lastJoinBlockReason = (apiRes as? ApiResponse.Error)?.message
         return null
     }
 

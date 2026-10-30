@@ -201,8 +201,18 @@ class HomeViewModel(
                                 _uiState.value = _uiState.value.copy(
                                     userProfile = refreshed,
                                     activeSubscriptionTier = tier,
-                                    isFriendCountPublic = refreshed.isFriendCountPublic
+                                    isFriendCountPublic = refreshed.isFriendCountPublic,
+                                    isRoomActivityPublic = user.optBoolean("isRoomActivityPublic", true),
+                                    isTopContentPublic = user.optBoolean("isTopContentPublic", true)
                                 )
+                                // The owner's own tag scribble is served by the public profile
+                                // endpoint, which is the only place the rollup is computed.
+                                val ownTags = runCatching {
+                                    socialRepository.loadPublicProfileById(refreshed.id)?.topTags
+                                }.getOrNull()
+                                if (ownTags != null) {
+                                    _uiState.value = _uiState.value.copy(myTopTags = ownTags)
+                                }
                             }
 
                         }
@@ -252,6 +262,13 @@ class HomeViewModel(
     }
 
     init {
+        // A session revoked from another device (or an immediate remote logout) makes
+        // every later request fail. Leave for the sign-in screen on the first refusal
+        // instead of leaving a signed-in shell full of dead data on screen.
+        com.nebula.app.data.backend.NebulaApiClient.onSessionRevoked = { reason ->
+            viewModelScope.launch { handleForcedSignOut(reason) }
+        }
+
         // Follow whichever thread the repository considers open, no matter which
         // navigation path opened it, and keep it synced while it stays open.
         // This must live here: the state holder above has to exist first.
@@ -533,7 +550,89 @@ class HomeViewModel(
                     activeSocialConversation = null
                 )
             } else {
-                showToast("Could not join this room. Check access and try again.")
+                val blockReason = (roomRepository as? RoomRepositoryImpl)?.lastJoinBlockReason
+                if (!blockReason.isNullOrBlank() && blockReason.contains("device", ignoreCase = true)) {
+                    // One device per account in a room. This is a rule, not a glitch, so
+                    // it gets a dialog that says why instead of a passing toast.
+                    _uiState.value = _uiState.value.copy(deviceConflictMessage = blockReason)
+                } else {
+                    showToast(blockReason?.takeIf { it.isNotBlank() } ?: "Could not join this room. Check access and try again.")
+                }
+            }
+        }
+    }
+
+    fun dismissDeviceConflict() {
+        _uiState.value = _uiState.value.copy(deviceConflictMessage = null)
+    }
+
+    /**
+     * Refreshes the cooldown/price shown next to "Switch Google Account". The rules live
+     * on the server, so the label is read rather than calculated here.
+     */
+    fun refreshEmailChangeStatus() {
+        viewModelScope.launch {
+            val res = com.nebula.app.data.backend.NebulaApiClient.getEmailChangeStatus()
+            if (res is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                val data = res.data.optJSONObject("data") ?: return@launch
+                _uiState.value = _uiState.value.copy(
+                    emailChangeFreeNow = data.optBoolean("isFreeNow", true),
+                    emailChangeAvailableFrom = data.optString("canChangeFreeAt")
+                        .takeIf { it.isNotBlank() && it != "null" },
+                    emailChangePriceInr = data.optInt("priceInr", 0)
+                )
+            }
+        }
+    }
+
+    /**
+     * Replaces the Google identity behind this account. Data is untouched (rooms,
+     * messages and stored files are keyed by the account id); only the identity that
+     * may sign in changes.
+     */
+    fun onSwitchGoogleAccount(activityContext: Context) {
+        val manager = authManager ?: return
+        if (_uiState.value.isRebindingEmail) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRebindingEmail = true)
+            try {
+                when (val identity = manager.acquireIdentityToken(activityContext)) {
+                    is com.nebula.app.data.auth.NebulaAuthManager.IdentityTokenResult.Error -> {
+                        if (!identity.isCancelled) showToast(identity.message)
+                    }
+                    is com.nebula.app.data.auth.NebulaAuthManager.IdentityTokenResult.Success -> {
+                        val currentEmail = _uiState.value.userProfile.email
+                        if (!identity.email.isNullOrBlank() &&
+                            identity.email.equals(currentEmail, ignoreCase = true)
+                        ) {
+                            showToast("That is already your linked Google account.")
+                        } else {
+                            when (val res = com.nebula.app.data.backend.NebulaApiClient.rebindEmail(identity.idToken)) {
+                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                                    val email = res.data.optJSONObject("data")?.optString("email").orEmpty()
+                                    val updated = _uiState.value.userProfile.copy(
+                                        email = email.ifBlank { identity.email ?: currentEmail }
+                                    )
+                                    profileRepository.setLoggedInUser(updated)
+                                    sessionManager?.saveUserProfile(updated)
+                                    _uiState.value = _uiState.value.copy(userProfile = updated)
+                                    showToast("Google account changed. Your rooms, chats and media are unchanged.")
+                                    refreshEmailChangeStatus()
+                                }
+                                is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
+                                    when (res.statusCode) {
+                                        402 -> showToast(res.message)
+                                        409 -> showToast(res.message)
+                                        else -> showToast(res.message)
+                                    }
+                                    refreshEmailChangeStatus()
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(isRebindingEmail = false)
             }
         }
     }
@@ -1082,6 +1181,27 @@ class HomeViewModel(
         navigateTo(FullScreenDestination.Account)
     }
 
+    /**
+     * The app menu's "Account" row lands straight on session management, which is
+     * the whole point of that destination: devices signed in, revoke, sign out.
+     */
+    fun onOpenAccountDetail() {
+        navigateTo(FullScreenDestination.Account)
+    }
+
+    /**
+     * Horizontal swipe across the tab shell. Tabs are stepped in the same order the
+     * bottom bar draws them, so the gesture and the bar can never disagree about
+     * what "next" means. Swiping past either end simply stays put.
+     */
+    fun onSwipeToAdjacentTab(forward: Boolean) {
+        val tabs = NebulaTab.entries
+        val currentIndex = tabs.indexOf(_uiState.value.currentTab)
+        if (currentIndex < 0) return
+        val targetIndex = (currentIndex + if (forward) 1 else -1).coerceIn(0, tabs.lastIndex)
+        if (targetIndex != currentIndex) onTabSelected(tabs[targetIndex])
+    }
+
     fun onOpenGoogleAccountSettings() {
         navigateTo(FullScreenDestination.GoogleAccount)
     }
@@ -1587,6 +1707,63 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Persists one profile block's privacy switch. Room activity and top content are
+     * independent, so each toggle sends only its own flag and the server keeps the
+     * other one exactly as it was.
+     */
+    fun onToggleRoomActivityPrivacy() {
+        viewModelScope.launch {
+            val profile = _uiState.value.userProfile
+            val nextValue = !_uiState.value.isRoomActivityPublic
+            val result = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
+                displayName = profile.displayName,
+                username = profile.username?.removePrefix("@"),
+                bio = profile.bio,
+                status = profile.status,
+                bannerIndex = profile.bannerIndex,
+                interests = profile.interests,
+                avatarUrl = profile.avatarUri,
+                isRoomActivityPublic = nextValue,
+                dateOfBirth = profile.dateOfBirth,
+                gender = profile.gender,
+                bannerUrl = profile.bannerUrl
+            )
+            if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                _uiState.value = _uiState.value.copy(isRoomActivityPublic = nextValue)
+                showToast(if (nextValue) "Room activity is now public" else "Room activity is now private")
+            } else {
+                showToast("Privacy setting could not be saved. Try again.")
+            }
+        }
+    }
+
+    fun onToggleTopContentPrivacy() {
+        viewModelScope.launch {
+            val profile = _uiState.value.userProfile
+            val nextValue = !_uiState.value.isTopContentPublic
+            val result = com.nebula.app.data.backend.NebulaApiClient.updateProfile(
+                displayName = profile.displayName,
+                username = profile.username?.removePrefix("@"),
+                bio = profile.bio,
+                status = profile.status,
+                bannerIndex = profile.bannerIndex,
+                interests = profile.interests,
+                avatarUrl = profile.avatarUri,
+                isTopContentPublic = nextValue,
+                dateOfBirth = profile.dateOfBirth,
+                gender = profile.gender,
+                bannerUrl = profile.bannerUrl
+            )
+            if (result is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
+                _uiState.value = _uiState.value.copy(isTopContentPublic = nextValue)
+                showToast(if (nextValue) "Top content is now public" else "Top content is now private")
+            } else {
+                showToast("Privacy setting could not be saved. Try again.")
+            }
+        }
+    }
+
     fun onSelectSubscriptionTier(tier: com.nebula.app.domain.model.NebulaSubscriptionTier) {
         if (tier == _uiState.value.userProfile.subscriptionTier) return
 
@@ -1747,26 +1924,45 @@ class HomeViewModel(
             runCatching { com.nebula.app.data.backend.NebulaApiClient.logout() }
             manager?.signOut()
             sessionManager?.clearSession()
-            (socialRepository as? SocialRepositoryImpl)?.clearLocalState()
-            chatRepository.clearAllLocalData()
-            val loggedOutProfile = com.nebula.app.domain.model.UserProfile(isLoggedIn = false)
-            profileRepository.setLoggedInUser(loggedOutProfile)
-            com.nebula.app.data.backend.NebulaApiClient.authToken = null
-            _uiState.value = _uiState.value.copy(
-                isAuthLoading = false,
-                userProfile = loggedOutProfile,
-                activeModalSheet = null,
-                fullScreenDestination = null,
-                activeRoom = null,
-                activeSocialConversation = null,
-                socialConversations = emptyList(),
-                friends = emptyList(),
-                friendRequests = emptyList(),
-                suggestedPeople = emptyList(),
-                notifications = emptyList(),
-                activeSubscriptionTier = NebulaSubscriptionTier.FREE,
-                quickToastMessage = "Signed out of Nebula"
-            )
+            tearDownSignedInState("Signed out of Nebula")
         }
+    }
+
+    /**
+     * The session is already gone server-side. Drop every local artefact and return to
+     * the sign-in screen without calling logout, which would fail by definition.
+     */
+    private suspend fun handleForcedSignOut(reason: String) {
+        if (!_uiState.value.userProfile.isLoggedIn) return
+        runCatching { roomRepository.leaveRoom() }
+        (roomRepository as? RoomRepositoryImpl)?.disconnectRealtime()
+        socialRepository.stopRealtime()
+        runCatching { authManager?.signOut() }
+        sessionManager?.clearSession()
+        tearDownSignedInState(reason)
+    }
+
+    private suspend fun tearDownSignedInState(message: String) {
+        (socialRepository as? SocialRepositoryImpl)?.clearLocalState()
+        chatRepository.clearAllLocalData()
+        val loggedOutProfile = com.nebula.app.domain.model.UserProfile(isLoggedIn = false)
+        profileRepository.setLoggedInUser(loggedOutProfile)
+        com.nebula.app.data.backend.NebulaApiClient.authToken = null
+        _uiState.value = _uiState.value.copy(
+            isAuthLoading = false,
+            userProfile = loggedOutProfile,
+            activeModalSheet = null,
+            fullScreenDestination = null,
+            activeRoom = null,
+            activeSocialConversation = null,
+            socialConversations = emptyList(),
+            friends = emptyList(),
+            friendRequests = emptyList(),
+            suggestedPeople = emptyList(),
+            notifications = emptyList(),
+            activeSubscriptionTier = NebulaSubscriptionTier.FREE,
+            authErrorMessage = message,
+            quickToastMessage = message
+        )
     }
 }

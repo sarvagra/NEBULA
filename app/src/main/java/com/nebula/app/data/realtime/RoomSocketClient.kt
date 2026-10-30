@@ -66,6 +66,14 @@ class RoomSocketClient(
                 emit("room:foreground", JSONObject().put("roomId", roomId))
                 if (hasConnectedOnce) onReconnected() else hasConnectedOnce = true
             }
+            // The account was signed out from another device (or this session was
+            // revoked). The server has already closed the socket; leave the dead
+            // screen behind too.
+            on("session:revoked") {
+                disconnect()
+                com.nebula.app.data.backend.NebulaApiClient.onSessionRevoked
+                    ?.invoke("This account was signed out from another device")
+            }
             on("participant:joined") { onParticipantsChanged() }
             on("participant:left") { onParticipantsChanged() }
             on("participant:updated") { onParticipantsChanged() }

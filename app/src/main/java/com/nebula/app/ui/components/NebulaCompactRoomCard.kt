@@ -107,7 +107,10 @@ fun NebulaCompactRoomCard(
                     val hostParticipant = room.participants.firstOrNull { it.isHost }
                     val otherParticipants = room.participants.filter { !it.isHost }
 
-                    // Host Avatar with Crown
+                    // Host Avatar with Crown. The card used to print each person's initial
+                    // letter, so a room full of people with photos looked like a room full
+                    // of letters; it now renders the real profile picture and only falls
+                    // back to the letter when there is no picture to load.
                     if (hostParticipant != null) {
                         Box(contentAlignment = Alignment.TopEnd) {
                             Box(
@@ -118,13 +121,10 @@ fun NebulaCompactRoomCard(
                                     .border(1.5.dp, theme.colors.primaryAccent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = hostParticipant.user.avatarLetter.take(1),
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
-                                    )
+                                NebulaAvatarImage(
+                                    avatarUrl = hostParticipant.user.avatarUrl,
+                                    fallbackLetter = hostParticipant.user.avatarLetter,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             // Crown Emoji Badge
@@ -146,13 +146,10 @@ fun NebulaCompactRoomCard(
                                 .border(1.5.dp, theme.colors.surface, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = participant.user.avatarLetter.take(1),
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 10.sp
-                                )
+                            NebulaAvatarImage(
+                                avatarUrl = participant.user.avatarUrl,
+                                fallbackLetter = participant.user.avatarLetter,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }

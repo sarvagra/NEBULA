@@ -47,7 +47,13 @@ class SessionManager(context: Context) {
     )
 
     companion object {
-        private const val PREFS_NAME = "nebula_session_prefs"
+        /** Stable keys for the per-feature switches shown in Settings. */
+        const val FEATURE_CUSTOM_STATUS = "feature_custom_status"
+        const val FEATURE_CUSTOM_BANNER = "feature_custom_banner"
+        const val FEATURE_VIDEO_BANNER = "feature_video_banner"
+        const val FEATURE_ALL_TAGS = "feature_all_tags"
+
+        const val PREFS_NAME = "nebula_session_prefs"
         private const val DEFAULT_BACKEND_URL = "https://nebula-73kb.onrender.com/api/v1"
         /** Hosts that identify a developer machine rather than a public Nebula origin. */
         private val LOCAL_BACKEND_HINTS = listOf(
@@ -570,6 +576,19 @@ class SessionManager(context: Context) {
     }
 
     fun getCachedSettings(): String? = prefs.getString(KEY_CACHED_SETTINGS_JSON, null)
+
+    /**
+     * Feature switches that used to be paywalled.
+     *
+     * Payment is gone from the product, so every account owns every feature and each
+     * one is instead a plain switch the owner can turn off for themselves. Defaults
+     * are on, which is what "everyone gets everything" has to mean.
+     */
+    fun isFeatureEnabled(featureKey: String): Boolean = prefs.getBoolean(featureKey, true)
+
+    fun setFeatureEnabled(featureKey: String, enabled: Boolean) {
+        prefs.edit().putBoolean(featureKey, enabled).apply()
+    }
 
     fun hasSession(): Boolean {
         return prefs.contains(KEY_USER_PROFILE_JSON) || !getAuthToken().isNullOrBlank()

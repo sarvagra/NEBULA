@@ -53,10 +53,22 @@ data class HomeUiState(
     // Modal Sheets
     val activeModalSheet: ActiveModalSheet? = null,
     val quickToastMessage: String? = null,
+    /** Shown when a join is refused because the account is in a room on another device. */
+    val deviceConflictMessage: String? = null,
+    /** Cooldown state for replacing the linked Google identity. */
+    val emailChangeFreeNow: Boolean = true,
+    val emailChangeAvailableFrom: String? = null,
+    val emailChangePriceInr: Int = 0,
+    val isRebindingEmail: Boolean = false,
 
     val notifications: List<com.nebula.app.domain.model.NebulaNotification> = emptyList(),
     val savedVaultItems: List<com.nebula.app.domain.model.SavedVaultItem> = emptyList(),
     val isFriendCountPublic: Boolean = true,
+    /** Independent privacy switches for the two profile blocks. */
+    val isRoomActivityPublic: Boolean = true,
+    val isTopContentPublic: Boolean = true,
+    /** Tag rollup for the owner's own top-content scribble. */
+    val myTopTags: List<com.nebula.app.domain.model.NebulaTagCount> = emptyList(),
     val activeSubscriptionTier: com.nebula.app.domain.model.NebulaSubscriptionTier = com.nebula.app.domain.model.NebulaSubscriptionTier.FREE,
     val isAuthLoading: Boolean = false,
     val authErrorMessage: String? = null,

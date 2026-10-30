@@ -41,6 +41,7 @@ export class AuthService {
     replaceOldestDevice = false
   ): Promise<AuthTokens> {
     const userId = user._id.toString();
+    const resolvedDeviceId = deviceId || crypto.randomUUID();
 
     // 1. Query current active (non-revoked, unexpired) sessions
     const activeSessions = await RefreshTokenModel.find({
@@ -49,12 +50,27 @@ export class AuthService {
       expiresAt: { $gt: new Date() },
     }).sort({ updatedAt: -1 });
 
-    // Check if the current device matches an existing session (same deviceId or exact deviceInfo)
-    const existingSameDeviceSession = deviceId
-      ? activeSessions.find((s) => s.deviceId === deviceId)
-      : activeSessions.find((s) => s.deviceInfo === deviceInfo);
+    // A device holds exactly one session. Earlier builds could leave a second row
+    // behind for the same install, which made Settings > Account report two active
+    // devices while the user held one phone. Retire every row for this device, not
+    // just the first match.
+    const sameDeviceSessions = deviceId
+      ? activeSessions.filter((s) => s.deviceId === deviceId)
+      : activeSessions.filter((s) => s.deviceInfo === deviceInfo);
+    for (const duplicate of sameDeviceSessions) {
+      await RefreshTokenModel.updateOne(
+        { _id: duplicate._id },
+        { revoked: true, revokedAt: new Date() }
+      );
+    }
 
-    if (!existingSameDeviceSession && activeSessions.length >= MAX_ACTIVE_DEVICES) {
+    // The device-limit count is per device, so duplicates must not consume slots.
+    const distinctOtherDevices = activeSessions.filter(
+      (s) => !sameDeviceSessions.some((same) => same._id.equals(s._id))
+    );
+    const existingSameDeviceSession = sameDeviceSessions.length > 0;
+
+    if (!existingSameDeviceSession && distinctOtherDevices.length >= MAX_ACTIVE_DEVICES) {
       if (!replaceOldestDevice) {
         const error: any = new Error(
           'Device limit reached. Your account is already logged into 2 devices. Retry with replaceOldestDevice to sign out the least recently used device, or log out from another device in Settings > Account.'
@@ -65,9 +81,9 @@ export class AuthService {
       }
       // Oldest activity first; the session holding the device for the longest wins
       // the eviction. Never evict more than needed.
-      const evictable = [...activeSessions]
+      const evictable = [...distinctOtherDevices]
         .sort((a, b) => new Date(a.lastActiveAt ?? a.createdAt).getTime() - new Date(b.lastActiveAt ?? b.createdAt).getTime())
-        .slice(0, activeSessions.length - (MAX_ACTIVE_DEVICES - 1));
+        .slice(0, distinctOtherDevices.length - (MAX_ACTIVE_DEVICES - 1));
       for (const stale of evictable) {
         await RefreshTokenModel.updateOne(
           { _id: stale._id },
@@ -76,15 +92,6 @@ export class AuthService {
       }
     }
 
-    // If re-authenticating from the same device, retire the previous token for this device
-    if (existingSameDeviceSession) {
-      await RefreshTokenModel.updateOne(
-        { _id: existingSameDeviceSession._id },
-        { revoked: true, revokedAt: new Date() }
-      );
-    }
-
-    const resolvedDeviceId = deviceId || crypto.randomUUID();
     const rawRefreshToken = crypto.randomBytes(40).toString('hex');
     const tokenHash = hashToken(rawRefreshToken);
 
@@ -180,18 +187,25 @@ export class AuthService {
       .sort({ lastActiveAt: -1, createdAt: -1 })
       .limit(10);
 
-    let hasCurrent = false;
+    // One row per device. A device that signed in again before this fix could own
+    // two rows; reporting both would claim a second phone that does not exist.
+    const newestPerDevice = new Map<string, (typeof sessions)[number]>();
+    for (const session of sessions) {
+      const key = (session.deviceId || '').trim() || `session:${session._id.toString()}`;
+      if (!newestPerDevice.has(key)) newestPerDevice.set(key, session);
+    }
+    const distinctSessions = [...newestPerDevice.values()];
+
     const cleanCurrentDevId = (currentDeviceId || '').trim();
     const cleanCurrentSessId = (currentSessionId || '').trim();
 
-    const mapped = sessions.map((s) => {
+    const mapped = distinctSessions.map((s) => {
       const sDevId = (s.deviceId || '').trim();
       const sId = s._id.toString();
       const isCurrent = Boolean(
         (cleanCurrentSessId && sId === cleanCurrentSessId) ||
         (cleanCurrentDevId && sDevId && cleanCurrentDevId === sDevId)
       );
-      if (isCurrent) hasCurrent = true;
       return {
         id: sId,
         deviceId: s.deviceId,
@@ -203,10 +217,8 @@ export class AuthService {
       };
     });
 
-    if (!hasCurrent && mapped.length > 0) {
-      mapped[0].isCurrent = true;
-    }
-
+    // Deliberately no "assume the first row is this device" fallback: labelling a
+    // different phone as "This Device" is worse than showing none.
     mapped.sort((a, b) => (b.isCurrent ? 1 : 0) - (a.isCurrent ? 1 : 0));
     return mapped;
   }
@@ -215,12 +227,13 @@ export class AuthService {
    * Revokes all sessions belonging to the user except the caller's current session.
    */
   static async revokeOtherSessions(userId: string, currentDeviceId?: string, currentSessionId?: string): Promise<number> {
+    // Keep this device, not merely this session: a device that holds a duplicate
+    // row must not be able to log itself out with "log out of other devices".
+    const keep: any[] = [];
+    if (currentSessionId) keep.push({ _id: currentSessionId });
+    if (currentDeviceId) keep.push({ deviceId: currentDeviceId });
     const query: any = { userId, revoked: false };
-    if (currentSessionId) {
-      query._id = { $ne: currentSessionId };
-    } else if (currentDeviceId) {
-      query.deviceId = { $ne: currentDeviceId };
-    }
+    if (keep.length > 0) query.$nor = keep;
     const res = await RefreshTokenModel.updateMany(query, {
       $set: { revoked: true, revokedAt: new Date() },
     });

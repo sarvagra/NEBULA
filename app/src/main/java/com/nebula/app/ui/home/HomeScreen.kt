@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,9 +26,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,7 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.nebula.app.domain.model.NebulaTab
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
-import com.nebula.app.ui.components.LiquidGlassProfileOverlay
+import com.nebula.app.ui.components.NebulaSidebarMenu
 import com.nebula.app.ui.components.NABottomBar
 import com.nebula.app.ui.components.NebulaLogo
 import com.nebula.app.ui.components.NebulaPullRefresh
@@ -105,6 +109,19 @@ fun HomeScreen(
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             viewModel.clearToast()
         }
+    }
+
+    // One account, one room, one device. The server refuses the second device, so say
+    // so plainly instead of letting the tap look like a network failure.
+    uiState.deviceConflictMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDeviceConflict() },
+            title = { Text("Room is open on another device") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissDeviceConflict() }) { Text("Got it") }
+            }
+        )
     }
 
     // Modern Android Back Button Handling
@@ -208,11 +225,16 @@ fun HomeScreen(
                 }
 
                 is FullScreenDestination.GoogleAccount -> {
+                    LaunchedEffect(Unit) { viewModel.refreshEmailChangeStatus() }
                     com.nebula.app.ui.settings.NebulaGoogleAccountScreen(
                         userProfile = uiState.userProfile,
                         onBack = { viewModel.onNavigateBack() },
-                        onSwitchGoogleAccount = { viewModel.signInWithGoogle(context) },
-                        onSignOut = { viewModel.signOutGoogle() }
+                        onSwitchGoogleAccount = { viewModel.onSwitchGoogleAccount(context) },
+                        onSignOut = { viewModel.signOutGoogle() },
+                        emailChangeFreeNow = uiState.emailChangeFreeNow,
+                        emailChangeAvailableFrom = uiState.emailChangeAvailableFrom,
+                        emailChangePriceInr = uiState.emailChangePriceInr,
+                        isRebinding = uiState.isRebindingEmail
                     )
                 }
 
@@ -436,7 +458,34 @@ fun HomeScreen(
                 //
                 // Each tab owns its own pull-to-refresh container so the gesture
                 // works from the top of every tab's list, not only outside a list.
-                Box(modifier = Modifier.weight(1f)) {
+                //
+                // A horizontal swipe moves to the neighbouring tab in bottom-bar order,
+                // which is the gesture people already expect from a feed app. The
+                // detector only claims the pointer once a horizontal drag passes touch
+                // slop, so vertical list scrolling inside each tab is untouched.
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .pointerInput(uiState.currentTab) {
+                            var accumulated = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { accumulated = 0f },
+                                onDragCancel = { accumulated = 0f },
+                                onDragEnd = {
+                                    val threshold = 56.dp.toPx()
+                                    when {
+                                        accumulated <= -threshold -> viewModel.onSwipeToAdjacentTab(forward = true)
+                                        accumulated >= threshold -> viewModel.onSwipeToAdjacentTab(forward = false)
+                                    }
+                                    accumulated = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    accumulated += dragAmount
+                                }
+                            )
+                        }
+                ) {
                     when (uiState.currentTab) {
                         NebulaTab.HOME -> {
                             NebulaPullRefresh(
@@ -542,6 +591,11 @@ fun HomeScreen(
                                 ),
                                 friendsCount = uiState.friends.size,
                                 isFriendCountPublic = uiState.isFriendCountPublic,
+                                isRoomActivityPublic = uiState.isRoomActivityPublic,
+                                isTopContentPublic = uiState.isTopContentPublic,
+                                topTags = uiState.myTopTags,
+                                onToggleRoomActivityPrivacy = { viewModel.onToggleRoomActivityPrivacy() },
+                                onToggleTopContentPrivacy = { viewModel.onToggleTopContentPrivacy() },
                                 onToggleFriendPrivacy = { viewModel.onToggleFriendCountPrivacy() },
                                 onNavigateFriends = { viewModel.onTabSelected(NebulaTab.FRIENDS) },
                                 onOpenEditProfile = { viewModel.onOpenEditProfile() },
@@ -588,36 +642,12 @@ fun HomeScreen(
             )
         }
 
-        // 3. FULL-SCREEN LIQUID GLASS PROFILE OVERLAY (Replaces old sliding sidebar)
-        LiquidGlassProfileOverlay(
+        // 3. APP MENU (Account / Settings / About / Log out)
+        NebulaSidebarMenu(
             isOpen = uiState.isSidebarOpen,
-            userProfile = uiState.userProfile,
-            subscriptionTier = uiState.activeSubscriptionTier,
-            onViewPublicProfile = {
+            onOpenAccount = {
                 viewModel.onDismissSidebar()
-                viewModel.onOpenPublicProfile(
-                    NebulaUser.CurrentUser.copy(
-                        id = uiState.userProfile.id,
-                        username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
-                        displayName = uiState.userProfile.displayName,
-                        email = uiState.userProfile.email,
-                        avatarLetter = uiState.userProfile.avatarFallbackLetter,
-                        avatarUrl = uiState.userProfile.avatarUri,
-                        bannerUrl = uiState.userProfile.bannerUrl,
-                        bannerIndex = uiState.userProfile.bannerIndex,
-                        status = uiState.userProfile.status,
-                        bio = uiState.userProfile.bio,
-                        interests = uiState.userProfile.interests
-                    )
-                )
-            },
-            onEditProfile = {
-                viewModel.onDismissSidebar()
-                viewModel.onOpenEditProfile()
-            },
-            onOpenPremiumPlans = {
-                viewModel.onDismissSidebar()
-                viewModel.onOpenMembership()
+                viewModel.onOpenAccountDetail()
             },
             onOpenSettings = {
                 viewModel.onDismissSidebar()
@@ -785,6 +815,7 @@ fun HomeScreen(
                     onInviteToRoom = { friend ->
                         viewModel.onInviteFriendToActiveRoom(friend)
                     },
+                    onJoinTheirRoom = { roomId -> viewModel.onJoinRoom(roomId) },
                     onViewFullProfile = { friend -> viewModel.onOpenUserProfileById(friend.id) },
                     onDismiss = { viewModel.onDismissModalSheet() }
                 )
