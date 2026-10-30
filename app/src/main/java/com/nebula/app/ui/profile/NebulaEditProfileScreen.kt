@@ -1139,7 +1139,9 @@ fun NebulaEditProfileScreen(
 
                     // Default presets (Online, Offline)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        (if (isPremiumPlus) listOf("dynamic", "offline", "custom") else listOf("dynamic", "offline")).forEach { preset ->
+                        // Every preset is available to every account: there is no
+                        // purchase step left in the product.
+                        listOf("dynamic", "offline", "custom").forEach { preset ->
                             val isSelected = statusText.equals(preset, ignoreCase = true)
                             Box(
                                 modifier = Modifier
@@ -1150,10 +1152,7 @@ fun NebulaEditProfileScreen(
                                         color = if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
                                         shape = RoundedCornerShape(8.dp)
                                     )
-                                    .clickable {
-                                        if (preset == "offline" && !isPremiumUser || preset == "custom" && !isPremiumPlus) onOpenMembership()
-                                        else statusText = preset
-                                    }
+                                    .clickable { statusText = preset }
                                     .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Row(
