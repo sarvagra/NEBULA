@@ -1,6 +1,6 @@
 # Nebula — Known Limitations
 
-Last updated: 2026-10-29. This file distinguishes verified facts from
+Last updated: 2026-10-30. This file distinguishes verified facts from
 unverified claims. Nothing here should be read as "working" unless it names
 evidence.
 
@@ -35,7 +35,7 @@ evidence.
 | Two-device session cap | `DEVICE_LIMIT_REACHED` is still the default when a third distinct device signs in. Lockout is no longer permanent: the client retries once with `replaceOldestDevice`, which retires the least recently used session and reports that it did so. The recovery is automatic rather than a picker — a user who still has both devices cannot choose *which* one is signed out from the sign-in screen; they must sign in first and use Settings → Account. |
 | Dependency advisories | `npm audit`: 5 advisories (3 moderate, 2 high) as of 2026-10-30. The zod advisory is bounded by the 100 KB JSON body limit, and the uuid advisories are transitive in the server-only Firebase Admin client. Remediation (zod 4) is a breaking major upgrade and was deliberately not forced. |
 | End-to-end encryption | Not implemented and not claimed anywhere in the UI or docs. |
-| Presence | Single-instance Socket.IO without a Redis adapter; horizontal scaling would break presence fan-out. The 60 s reconciliation sweep is also per instance, so two instances would each only reclaim their own abandoned rows (harmless, but not a distributed lease). |
+| Presence | Single-instance Socket.IO without a Redis adapter; horizontal scaling would break presence fan-out. The 60 s reconciliation sweep is also per instance, so two instances would each only reclaim their own abandoned rows (harmless, but not a distributed lease). Presence itself is now derived from the socket lifecycle (connect/disconnect) rather than the 4 s HTTP pulses the client used to send, so an idle app costs nothing but a heartbeat. |
 | Playback ordering on the client | The server refuses stale commands and out-of-order samples (suite-asserted), and the Android client echoes the playback version and drops older inbound events. The client half has not been exercised against a second live client, so it is compile-verified only. A command packet delayed by more than one command round-trip is corrected rather than applied — a client can therefore see a brief jump back to the authoritative position. |
 | Room chat backfill | Recovery uses `createdAt` cursors. Two messages written in the same millisecond are returned together and de-duplicated by id client-side; there is no per-room monotonic sequence number, so a cursor cannot yet be expressed as a single integer. |
 | Notifications | Server send paths exist and honour the per-category preference, but delivery between two devices has still not been observed end to end. A push arriving while the app is open on that exact conversation is still shown. |
@@ -72,11 +72,34 @@ evidence.
 
 ## 5. Infrastructure and cost limitations
 
-- Render free tier sleeps on idle; MongoDB Atlas free tier has connection and
-  storage caps; S3-compatible egress is billed.
+- The API runs on Render (`nebula-73kb.onrender.com`), not on the developer's
+  machine, so the app keeps working with the laptop off. Deployment is
+  automatic: a push to `main` rebuilds and restarts the service, and `/health`
+  reports the running commit (`revision`) to prove which build is live.
+- Render's free plan sleeps after 15 minutes idle, and the next request pays a
+  ~20-30 s cold start. `.github/workflows/keepalive.yml` pings `/health` every
+  10 minutes to keep it awake; if that job ever stops, the app still works — the
+  first request after a quiet spell is just slow.
+- **Measured capacity (2026-10-30, `server/src/scripts/loadTest.ts`)**: 1000
+  sockets across 25 rooms on a local server → 985 connected, 985 joined, chat
+  broadcast p95 407 ms / p99 429 ms while fanning out 591 messages per second,
+  zero server-side errors (the 15 failures were client-side socket handshakes on
+  the test host, not server rejects). 200 users across 8 rooms → 200/200
+  connected, broadcast p95 228 ms, 0 errors.
+- That measurement says the *code* holds 1000 clients on one node. It does not
+  say the free Render instance does: free web services get a fraction of a CPU
+  and 512 MB, which is enough for a busy room or two and for hundreds of idle
+  sockets, not for a thousand simultaneous chat senders. Sustained 1000-user
+  traffic needs the paid instance size, which also removes the sleep.
+- Socket count is not the same as CPU load. A room where one person is playing
+  video and 999 watch costs almost nothing; 1000 people typing does. Scale the
+  instance for the second case.
+- MongoDB Atlas free tier has connection and storage caps; S3-compatible egress
+  is billed.
 - No CDN in front of media beyond the storage provider's own.
 - No Redis, no queue, no multi-region deployment — intentional until measured
-  load justifies them.
+  load justifies them. Multi-instance additionally needs the Socket.IO Redis
+  adapter before it is safe (see the presence row above).
 
 ## 6. Explicitly unverified claims inherited from earlier notes
 

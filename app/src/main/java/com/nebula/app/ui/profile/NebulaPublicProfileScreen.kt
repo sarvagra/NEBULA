@@ -97,7 +97,7 @@ fun NebulaPublicProfileScreen(
         modifier = modifier
             .fillMaxSize()
             .background(theme.colors.background),
-        contentPadding = PaddingValues(bottom = 32.dp)
+        contentPadding = PaddingValues(bottom = 112.dp)
     ) {
         // 1. IMMERSIVE HEADER
         item {
@@ -105,13 +105,14 @@ fun NebulaPublicProfileScreen(
                 user = user,
                 friendsCount = effectiveFriendCount,
                 isFriendCountPublic = effectiveFriendCount != null,
-                topBar = {
+                topBarStart = {
                     CircleGlyphButton(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         onClick = onBack
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                },
+                topBar = {
                     CircleGlyphButton(
                         icon = Icons.Default.MoreHoriz,
                         contentDescription = "Profile options",

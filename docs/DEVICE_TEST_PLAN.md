@@ -345,6 +345,23 @@ Also landed without a device pass. These are the chat behaviours to confirm firs
 | CHAT-09 Edit guard | Long-press a failed message | No edit/unsend sheet (it has no server id); tap retries instead |
 | CHAT-10 Draft isolation | Start a photo in thread A, back out, open thread B | No draft follows into B |
 
+## 4i. Profile run — 2026-10-30 (immersive headers, editing)
+
+Run on `Realme RMX3842` / Android 16 against the deployed API
+(`nebula-73kb.onrender.com`, revision `3e80c97`).
+
+| Case | Result | Evidence |
+|---|---|---|
+| PROF-01 Own header | Pass | Banner is edge-to-edge under the status bar, bottom corners rounded, avatar overlaps it, presence dot sits on the avatar's corner, `2 friends` / `3 rooms` chips visible |
+| PROF-02 Public profile | Pass | Back control top-left, overflow top-right, same header, Public Activity counters (Friends/Joined/Hosted) intact |
+| PROF-03 Editor preview | Pass | The editor's live header renders the same component; banner picker sits below it |
+| PROF-04 Save round-trip | Pass | Edited the bio → Save → `Profile saved` toast, profile behind the editor updated, value still present after force-stop and relaunch (server-persisted) |
+| PROF-05 Friend route | Pass | Tapping a friend's name in Friends opened their public profile with the same header |
+| PROF-06 Tab-bar clearance | Fixed | The last profile card no longer ends under the floating tab bar |
+
+Not exercised on device this run: image/video banner upload from the system picker
+(the asset apply/upload path is unchanged and covered by the server suite).
+
 ## 5. Evidence convention
 
 Store screenshots/UI dumps under `qa_evidence/<date>/` with the case ID in the

@@ -311,10 +311,16 @@ fun HomeScreen(
             )
         } else {
             // STANDARD TAB SHELL
+            // Profile owns the full screen: its header banner runs under the status
+            // bar and insets only its own floating controls, so the shell must not
+            // add a second top inset for that tab.
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
+                    .then(
+                        if (uiState.currentTab == NebulaTab.PROFILE) Modifier
+                        else Modifier.statusBarsPadding()
+                    )
             ) {
                 // TOP BAR: Avatar (opens overlay), Wordmark "NEBULA", Notifications banner, Quick Room
                 // Hide on Profile tab because Profile has its own dedicated header with Settings gear only (no redundant bell)

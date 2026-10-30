@@ -127,7 +127,9 @@ fun NebulaProfileScreen(
         modifier = modifier
             .fillMaxSize()
             .background(theme.colors.background),
-        contentPadding = PaddingValues(bottom = 32.dp)
+        // The floating tab bar overlays the list, so the last card needs room to
+        // scroll clear of it instead of ending underneath the pill.
+        contentPadding = PaddingValues(bottom = 112.dp)
     ) {
         // 1. IMMERSIVE HEADER: full-bleed banner, floating settings action,
         // overlapping avatar and the owner's own social counters.

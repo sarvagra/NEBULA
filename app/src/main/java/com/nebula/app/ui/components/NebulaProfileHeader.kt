@@ -163,6 +163,7 @@ fun NebulaProfileHeader(
     tierLabel: String? = null,
     statusText: String? = null,
     presenceColor: Color? = null,
+    topBarStart: (@Composable RowScope.() -> Unit)? = null,
     topBar: (@Composable RowScope.() -> Unit)? = null,
     actions: (@Composable ColumnScope.() -> Unit)? = null,
     trailingNameBadge: (@Composable () -> Unit)? = null
@@ -199,17 +200,31 @@ fun NebulaProfileHeader(
                 height = bannerHeight
             )
 
-            // Floating controls over the artwork, inset for the status bar.
-            if (topBar != null) {
+            // Floating controls over the artwork, inset for the status bar. Leading
+            // controls (back) and trailing ones (settings, overflow) are separate
+            // slots so a back arrow can never drift to the right edge.
+            if (topBar != null || topBarStart != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
+                        // A sheet already sits below the status bar, so only the
+                        // full-screen headers inset their controls.
+                        .then(if (compact) Modifier else Modifier.statusBarsPadding())
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                    content = topBar
-                )
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        content = topBarStart ?: {}
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        content = topBar ?: {}
+                    )
+                }
             }
 
             // Avatar hangs over the banner's bottom edge.
@@ -220,9 +235,8 @@ fun NebulaProfileHeader(
                     .size(avatarSize)
                     .clip(CircleShape)
                     .background(theme.colors.background)
-                    .padding(3.dp)
-                    .clip(CircleShape)
-                    .border(1.dp, theme.colors.surfaceBorder, CircleShape),
+                    .padding(3.5.dp)
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 NebulaAvatarImage(
@@ -234,16 +248,20 @@ fun NebulaProfileHeader(
                 )
             }
 
-            // Presence dot pinned to the avatar, not the banner, so it stays glued
-            // to the face when the layout is compact.
+            // Presence dot pinned to the avatar's own bottom-right corner. Both the
+            // avatar and the dot are bottom-aligned to the banner, so the dot's
+            // offset is measured from that edge too: `overlap` is exactly how far
+            // the avatar hangs below it. Using the avatar height here instead placed
+            // the dot a full badge-width below the face.
+            val dotSize = 20.dp
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .offset(x = gutter + avatarSize - 24.dp, y = overlap + avatarSize - 24.dp)
-                    .size(22.dp)
+                    .offset(x = gutter + avatarSize - 20.dp, y = overlap - 16.dp)
+                    .size(dotSize)
                     .clip(CircleShape)
                     .background(dotColor)
-                    .border(4.dp, theme.colors.background, CircleShape)
+                    .border(3.dp, theme.colors.background, CircleShape)
             )
         }
 
