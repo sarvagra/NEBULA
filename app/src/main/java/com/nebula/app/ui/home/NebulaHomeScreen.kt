@@ -426,6 +426,40 @@ private fun HomeRoomCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
+                // Who is actually in the room, so the card shows faces instead of a
+                // number that could belong to anyone.
+                if (room.participants.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        room.participants.take(4).forEachIndexed { index, participant ->
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = if (index == 0) 0.dp else (-8).dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .border(1.5.dp, theme.colors.background, CircleShape)
+                            ) {
+                                NebulaAvatarImage(
+                                    avatarUrl = participant.user.avatarUrl,
+                                    fallbackLetter = participant.user.avatarLetter,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        val extra = (room.participantCount - minOf(4, room.participants.size)).coerceAtLeast(0)
+                        if (extra > 0) {
+                            Text(
+                                text = " +$extra",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))

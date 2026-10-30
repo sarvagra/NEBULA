@@ -309,115 +309,6 @@ fun NebulaFriendsScreen(
             }
         }
 
-        // 2. ACTIVE NOW (Just like the home page)
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "ACTIVE NOW",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            fontSize = 11.5.sp
-                        )
-                    )
-
-                    Text(
-                        text = "${friends.count { it.isOnline }} friends online",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textTertiary,
-                            fontSize = 11.5.sp
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                val activeFriends = friends.filter { it.isOnline }
-                if (activeFriends.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                            .padding(vertical = 12.dp, horizontal = 14.dp)
-                    ) {
-                        Text(
-                            text = "No friends active right now • Connect with people below",
-                            style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary, fontSize = 12.sp)
-                        )
-                    }
-                } else {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(activeFriends) { friend ->
-                            Column(
-                                modifier = Modifier
-                                    .width(72.dp)
-                                    .clickable { onFriendClick(friend) },
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Box(contentAlignment = Alignment.BottomEnd) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(52.dp)
-                                            .clip(CircleShape)
-                                            .background(theme.colors.surfaceElevated)
-                                            .border(
-                                                width = if (friend.currentRoomId != null) 2.dp else 1.dp,
-                                                color = if (friend.currentRoomId != null) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(52.dp))
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .size(13.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(friend.presenceStatus.hexColor))
-                                            .border(2.dp, theme.colors.background, CircleShape)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Text(
-                                    text = friend.displayName.split(" ").first(),
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 12.sp
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                Text(
-                                    text = friend.presenceStatus.label,
-                                    style = theme.typography.caption.copy(
-                                        color = Color(friend.presenceStatus.hexColor),
-                                        fontSize = 10.sp
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // 2. FRIEND REQUESTS (if any)
         if (friendRequests.isNotEmpty()) {
             item {
@@ -527,90 +418,6 @@ fun NebulaFriendsScreen(
             }
         }
 
-        // 3. MY FRIENDS LIST
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "MY FRIENDS",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        fontSize = 11.5.sp
-                    )
-                )
-
-                if (filteredFriends.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
-                            .padding(20.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = if (searchQuery.isBlank()) "0 friends connected" else "No matching friends",
-                                style = theme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = theme.colors.textSecondary
-                                )
-                            )
-                            Text(
-                                text = if (searchQuery.isBlank()) "Invite your friends or search by their @handle to get connected" else "Check spelling or search for someone else",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textTertiary,
-                                    fontSize = 11.5.sp
-                                )
-                            )
-                        }
-                    }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
-                    ) {
-                        filteredFriends.forEachIndexed { index, friend ->
-                            if (searchQuery.length >= 2 && !friend.isFriend) {
-                                SearchPersonItem(
-                                    user = friend,
-                                    onProfileClick = { onFriendClick(friend) },
-                                    onAdd = { onAddSuggested(friend) },
-                                    onAccept = { friend.friendRequestId?.let(onAcceptRequest) },
-                                    // Withdrawing an outgoing request is keyed by the user, not by
-                                    // a friendship id, which only exists for received requests.
-                                    onWithdraw = { onWithdrawRequest(friend) }
-                                )
-                            } else {
-                                FriendListItem(
-                                    user = friend,
-                                    onMessage = { onMessageFriend(friend) },
-                                    onInvite = { onInviteToRoom(friend) },
-                                    onProfileClick = { onFriendClick(friend) }
-                                )
-                            }
-                            if (index < filteredFriends.lastIndex) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(0.6.dp)
-                                        .background(theme.colors.surfaceBorder.copy(alpha = 0.4f))
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // 4. SUGGESTED PEOPLE
         if (suggestedPeople.isNotEmpty()) {
             item {
@@ -632,7 +439,8 @@ fun NebulaFriendsScreen(
                             .background(theme.colors.surface)
                             .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
                     ) {
-                        suggestedPeople.forEachIndexed { index, person ->
+                        // At most five suggestions at a time; the rest arrive on refresh.
+                        suggestedPeople.take(5).forEachIndexed { index, person ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -719,7 +527,7 @@ fun NebulaFriendsScreen(
                                     }
                                 }
                             }
-                            if (index < suggestedPeople.lastIndex) {
+                            if (index < suggestedPeople.take(5).lastIndex) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -732,6 +540,91 @@ fun NebulaFriendsScreen(
                 }
             }
         }
+
+        // 3. MY FRIENDS LIST
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "MY FRIENDS",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        fontSize = 11.5.sp
+                    )
+                )
+
+                if (filteredFriends.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
+                            .padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = if (searchQuery.isBlank()) "0 friends connected" else "No matching friends",
+                                style = theme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = theme.colors.textSecondary
+                                )
+                            )
+                            Text(
+                                text = if (searchQuery.isBlank()) "Invite your friends or search by their @handle to get connected" else "Check spelling or search for someone else",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textTertiary,
+                                    fontSize = 11.5.sp
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
+                    ) {
+                        filteredFriends.forEachIndexed { index, friend ->
+                            if (searchQuery.length >= 2 && !friend.isFriend) {
+                                SearchPersonItem(
+                                    user = friend,
+                                    onProfileClick = { onFriendClick(friend) },
+                                    onAdd = { onAddSuggested(friend) },
+                                    onAccept = { friend.friendRequestId?.let(onAcceptRequest) },
+                                    // Withdrawing an outgoing request is keyed by the user, not by
+                                    // a friendship id, which only exists for received requests.
+                                    onWithdraw = { onWithdrawRequest(friend) }
+                                )
+                            } else {
+                                FriendListItem(
+                                    user = friend,
+                                    onMessage = { onMessageFriend(friend) },
+                                    onInvite = { onInviteToRoom(friend) },
+                                    onProfileClick = { onFriendClick(friend) }
+                                )
+                            }
+                            if (index < filteredFriends.lastIndex) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(0.6.dp)
+                                        .background(theme.colors.surfaceBorder.copy(alpha = 0.4f))
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 }
 

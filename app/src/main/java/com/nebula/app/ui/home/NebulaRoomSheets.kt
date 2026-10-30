@@ -146,6 +146,11 @@ internal fun RoomMembersSheet(
     friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest>,
     suggestedPeople: List<NebulaUser>,
     currentUserId: String,
+    isHost: Boolean = false,
+    onShareRoom: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onLeaveRoomAction: () -> Unit = {},
+    onInviteRoom: () -> Unit = {},
     onAddFriend: (NebulaUser) -> Unit,
     onAcceptFriendRequest: (String) -> Unit,
     onDeclineFriendRequest: (String) -> Unit,
@@ -167,7 +172,7 @@ internal fun RoomMembersSheet(
     PABottomSheet(
         isVisible = isVisible,
         onDismissRequest = onDismiss,
-        title = "Room Members (${participants.size})"
+        title = "Room options"
     ) {
         Column(
             modifier = Modifier
@@ -175,19 +180,65 @@ internal fun RoomMembersSheet(
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Tap a member to view profile, manage friendship, or adjust media controls.",
-                style = theme.typography.caption.copy(
-                    color = theme.colors.textTertiary,
-                    fontSize = 11.5.sp
-                ),
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
+            // Fixed actions: share, invite, settings (host) and leave never scroll away
+            // while the participant list does.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RoomOptionTile(
+                    label = "Invite",
+                    icon = Icons.Default.PersonAdd,
+                    onClick = onInviteRoom,
+                    modifier = Modifier.weight(1f)
+                )
+                RoomOptionTile(
+                    label = "Share",
+                    icon = Icons.Default.Share,
+                    onClick = onShareRoom,
+                    modifier = Modifier.weight(1f)
+                )
+                if (isHost) {
+                    RoomOptionTile(
+                        label = "Settings",
+                        icon = Icons.Default.Settings,
+                        onClick = onOpenSettings,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                RoomOptionTile(
+                    label = "Leave",
+                    icon = Icons.AutoMirrored.Filled.ExitToApp,
+                    tint = Color(0xFFEF4444),
+                    onClick = onLeaveRoomAction,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "IN THIS ROOM (${participants.size})",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        fontSize = 10.5.sp
+                    )
+                )
+                Text(
+                    text = "Kick or mute from ⋮",
+                    style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp)
+                )
+            }
 
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp),
+                    .heightIn(max = 380.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(participants) { participant ->
@@ -541,6 +592,47 @@ internal fun RoomInviteFriendsSheet(
  * - Video permissions toggle
  * - Room tags selector
  */
+/** One fixed action in the room options header. */
+@Composable
+private fun RoomOptionTile(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color? = null
+) {
+    val theme = Theme.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(theme.colors.surface)
+            .border(
+                1.dp,
+                if (tint != null) tint.copy(alpha = 0.35f) else theme.colors.surfaceBorder,
+                RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint ?: theme.colors.textPrimary,
+            modifier = Modifier.size(17.dp)
+        )
+        Text(
+            text = label,
+            style = theme.typography.caption.copy(
+                color = tint ?: theme.colors.textSecondary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 10.5.sp
+            )
+        )
+    }
+}
+
 @Composable
 internal fun RoomSettingsSheet(
     isVisible: Boolean,

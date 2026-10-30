@@ -195,6 +195,7 @@ export function toMessageDTO(message: IMessage) {
     messageType: message.messageType,
     reactions: message.reactions,
     readAt: message.readAt,
+    deliveredAt: message.deliveredAt,
     editedAt: message.editedAt,
     editHistory: message.editHistory || [],
     deletedAt: message.deletedAt,

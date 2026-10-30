@@ -1044,7 +1044,10 @@ fun NebulaEditProfileScreen(
                 EditField(
                     label = "Display Name",
                     value = displayName,
-                    onValueChange = { displayName = it },
+                    onValueChange = { input ->
+                        // Matches the server rule: 10 characters, letters/numbers/spaces.
+                        displayName = input.filter { it.isLetterOrDigit() || it == ' ' }.take(10)
+                    },
                     singleLine = true
                 )
             }

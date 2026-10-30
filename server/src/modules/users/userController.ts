@@ -103,9 +103,15 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     }
 
     if (displayName) {
-      const trimmed = displayName.trim();
-      if (trimmed.length > 60) {
-        res.status(400).json({ success: false, error: 'Display name cannot exceed 60 characters' });
+      const trimmed = String(displayName).trim();
+      // Names are short and clean, like every social app: 1-10 characters, letters,
+      // numbers and spaces only. Symbols made the name collide with UI labels.
+      if (trimmed.length === 0 || trimmed.length > 10) {
+        res.status(400).json({ success: false, error: 'Name must be between 1 and 10 characters' });
+        return;
+      }
+      if (!/^[\p{L}\p{N} ]+$/u.test(trimmed)) {
+        res.status(400).json({ success: false, error: 'Name can only use letters, numbers and spaces' });
         return;
       }
       updateFields.displayName = trimmed;

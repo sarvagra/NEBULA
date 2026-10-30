@@ -130,6 +130,16 @@ export function notifyConversationRead(
  * switched tabs). Every authenticated socket joins `user:<id>` on connect, so this
  * reaches the recipient and the sender's other devices at once.
  */
+/** True when this user has at least one authenticated socket open right now. */
+export async function isUserOnline(userId: string): Promise<boolean> {
+  if (!roomIo || !userId) return false;
+  try {
+    return (await roomIo.in(`user:${userId}`).fetchSockets()).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function notifyDirectMessage(userId: string, payload: unknown): void {
   roomIo?.to(`user:${userId}`).emit('chat:message', payload);
 }

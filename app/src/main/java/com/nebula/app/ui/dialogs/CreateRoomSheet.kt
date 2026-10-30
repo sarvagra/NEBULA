@@ -99,10 +99,10 @@ const val EMPTY_LINK_ERROR = "Enter a video link to play in this room."
 const val MAX_ROOM_TAGS = 3
 const val MAX_ROOM_TAG_LENGTH = 30
 
-/** Server-authoritative room participant caps (mirrors server entitlements). */
-const val BASIC_ROOM_PARTICIPANT_CAP = 20
-const val PREMIUM_ROOM_PARTICIPANT_CAP = 25
-const val PREMIUM_PLUS_ROOM_PARTICIPANT_CAP = 50
+/** Server-authoritative room participant caps. Every tier allows the same 24-seat room. */
+const val BASIC_ROOM_PARTICIPANT_CAP = 24
+const val PREMIUM_ROOM_PARTICIPANT_CAP = 24
+const val PREMIUM_PLUS_ROOM_PARTICIPANT_CAP = 24
 
 private val IMAGE_LINK_EXTENSIONS = listOf(
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".heic"
@@ -119,9 +119,9 @@ fun singleLineLinkError(message: String): String =
  * Cheap offline pre-check for room media links. Returns the one-line error to
  * show, or null when the link is worth submitting to the server.
  *
- * Only the two obvious cases are rejected here (image files and Google Drive);
- * everything else is deliberately left to the server, which verifies the link
- * and answers with a 422 the caller shows verbatim.
+ * Only an image file is rejected here: every other http(s) link (a page, a file, an
+ * embeddable player) is left to the server, which classifies it and answers with a
+ * 422 the caller shows verbatim.
  */
 fun mediaLinkPrecheckError(rawUrl: String): String? {
     val trimmed = rawUrl.trim()
@@ -129,14 +129,6 @@ fun mediaLinkPrecheckError(rawUrl: String): String? {
 
     val lower = trimmed.lowercase()
     val withoutScheme = lower.substringAfter("://", lower).removePrefix("//")
-    val host = withoutScheme.substringBefore('/').substringBefore('?').substringBefore('#')
-
-    if (host == "drive.google.com" || host.endsWith(".drive.google.com") ||
-        host == "docs.google.com" || host.endsWith(".docs.google.com") ||
-        lower.startsWith("drive.google.com") || lower.startsWith("docs.google.com")
-    ) {
-        return DRIVE_LINK_ERROR
-    }
 
     // Mirrors the server: only the URL path decides, query/fragment are ignored.
     val path = withoutScheme.substringAfter('/', "").substringBefore('?').substringBefore('#')
@@ -152,11 +144,7 @@ fun roomParticipantCapForTier(tier: NebulaSubscriptionTier?): Int = when (tier) 
     else -> BASIC_ROOM_PARTICIPANT_CAP
 }
 
-private fun tierCapLabel(cap: Int): String = when (cap) {
-    PREMIUM_PLUS_ROOM_PARTICIPANT_CAP -> "Premium Plus"
-    PREMIUM_ROOM_PARTICIPANT_CAP -> "Premium"
-    else -> "Basic"
-}
+private fun tierCapLabel(cap: Int): String = "Room cap"
 
 /**
  * Extracts YouTube video ID from URL if valid, otherwise null.
@@ -211,10 +199,11 @@ fun CreateRoomSheet(
 
     var roomName by remember { mutableStateOf("") }
     var nameError by remember { mutableStateOf<String?>(null) }
-    var selectedPrivacy by remember { mutableStateOf(RoomPrivacy.FRIENDS) }
+    var selectedPrivacy by remember { mutableStateOf(RoomPrivacy.PUBLIC) }
     var selectedMedia by remember { mutableStateOf<SharedMediaItem?>(null) }
     var selectedMaxParticipants by remember { mutableIntStateOf(BASIC_ROOM_PARTICIPANT_CAP) }
-    var selectedSource by remember { mutableStateOf("YouTube") }
+    var selectedSource by remember { mutableStateOf(RoomMediaSource.YOUTUBE) }
+    var startWithoutVideo by remember { mutableStateOf(false) }
     var sourceUrl by remember { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var isVerifyingLink by remember { mutableStateOf(false) }
@@ -245,20 +234,8 @@ fun CreateRoomSheet(
     val hintStyle = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 11.sp)
 
     fun acceptSourceVideo(url: String) {
-        val title = when (selectedSource) {
-            "YouTube" -> "YouTube Video"
-            "Vimeo" -> "Vimeo video"
-            else -> url.substringAfterLast('/').substringBefore('?').ifBlank { "Web video" }
-        }
-        selectedMedia = SharedMediaItem(
-            id = "media_${System.currentTimeMillis()}",
-            title = title,
-            source = selectedSource,
-            durationLabel = if (selectedSource == "Vimeo") "Vimeo" else "Web",
-            durationMs = 0L,
-            mediaUrl = url,
-            youtubeVideoId = if (selectedSource == "YouTube") extractYouTubeId(url) else null
-        )
+        selectedMedia = buildMediaItem(url, selectedSource)
+        startWithoutVideo = false
         sourceUrl = ""
         sourceError = null
     }
@@ -393,13 +370,20 @@ fun CreateRoomSheet(
                 }
             }
 
-            // 2. PRIVACY
+            // 2. PRIVACY — public first, then friends, then invite-only.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(text = "PRIVACY", style = sectionHeaderStyle)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    PrivacyOption(
+                        label = "Public",
+                        icon = Icons.Default.Public,
+                        isSelected = selectedPrivacy == RoomPrivacy.PUBLIC,
+                        onClick = { selectedPrivacy = RoomPrivacy.PUBLIC },
+                        modifier = Modifier.weight(1f)
+                    )
                     PrivacyOption(
                         label = "Friends",
                         icon = Icons.Default.People,
@@ -414,225 +398,91 @@ fun CreateRoomSheet(
                         onClick = { selectedPrivacy = RoomPrivacy.INVITE_ONLY },
                         modifier = Modifier.weight(1f)
                     )
-                    PrivacyOption(
-                        label = "Public",
-                        icon = Icons.Default.Public,
-                        isSelected = selectedPrivacy == RoomPrivacy.PUBLIC,
-                        onClick = { selectedPrivacy = RoomPrivacy.PUBLIC },
-                        modifier = Modifier.weight(1f)
-                    )
                 }
             }
 
-            // 3. MEDIA & ACTIVITY
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = "MEDIA / ACTIVITY", style = sectionHeaderStyle)
-
+            // 3. MEDIA & ACTIVITY (one picker shared with the in-room playlist)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf(
-                        Triple("YouTube", Icons.Default.Tv, "Search / URL"),
-                        Triple("URL", Icons.Default.Link, "Direct Stream"),
-                        Triple("None", Icons.Default.Mic, "Ambient Voice")
-                    ).forEach { (label, icon, subtitle) ->
-                        ActivityOption(
-                            label = label,
-                            subtitle = subtitle,
-                            icon = icon,
-                            isSelected = selectedSource == label,
-                            onClick = {
-                                if (selectedSource != label) {
-                                    selectedSource = label
-                                    sourceUrl = ""
-                                    sourceError = null
-                                    selectedMedia = null
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                // Media details/inputs based on selected source
-                when (selectedSource) {
-                    "YouTube" -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { isYouTubeBrowserOpen = true },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFCC0000),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Search YouTube",
-                                        style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = sourceUrl,
-                                onValueChange = {
-                                    sourceUrl = it
-                                    sourceError = null
-                                },
-                                placeholder = {
-                                    Text(
-                                        text = "Or paste YouTube link…",
-                                        style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary)
-                                    )
-                                },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = theme.colors.surface,
-                                    unfocusedContainerColor = theme.colors.surface,
-                                    focusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.primaryAccent,
-                                    unfocusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
-                                    focusedTextColor = theme.colors.textPrimary,
-                                    unfocusedTextColor = theme.colors.textPrimary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            Button(
-                                onClick = { submitSourceLink() },
-                                enabled = !isVerifyingLink && sourceUrl.isNotBlank(),
-                                modifier = Modifier.height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = theme.colors.primaryAccent,
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = if (isVerifyingLink) "…" else "Add",
-                                    style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                    }
-
-                    "URL" -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = sourceUrl,
-                                onValueChange = {
-                                    sourceUrl = it
-                                    sourceError = null
-                                },
-                                placeholder = {
-                                    Text(
-                                        text = "https://example.com/video.mp4",
-                                        style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary)
-                                    )
-                                },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = theme.colors.surface,
-                                    unfocusedContainerColor = theme.colors.surface,
-                                    focusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.primaryAccent,
-                                    unfocusedBorderColor = if (sourceError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
-                                    focusedTextColor = theme.colors.textPrimary,
-                                    unfocusedTextColor = theme.colors.textPrimary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            Button(
-                                onClick = { submitSourceLink() },
-                                enabled = !isVerifyingLink && sourceUrl.isNotBlank(),
-                                modifier = Modifier.height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = theme.colors.primaryAccent,
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = if (isVerifyingLink) "…" else "Add",
-                                    style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                    }
-
-                    else -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(theme.colors.surface)
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = null,
-                                tint = theme.colors.primaryAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Ambient Lounge (No Video)",
-                                    style = theme.typography.bodySmall.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp
-                                    )
-                                )
-                                Text(
-                                    text = "Audio & text chat only. You can stream media later.",
-                                    style = hintStyle
-                                )
-                            }
-                        }
-                    }
-                }
-
-                sourceError?.let { err ->
+                    Text(text = "MEDIA / ACTIVITY", style = sectionHeaderStyle)
                     Text(
-                        text = singleLineLinkError(err),
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.errorColor,
-                            fontSize = 11.5.sp
-                        ),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        text = if (startWithoutVideo) "Voice + chat" else selectedSource.label,
+                        style = hintStyle
                     )
                 }
+
+                if (startWithoutVideo) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                            .clickable {
+                                startWithoutVideo = false
+                                selectedSource = RoomMediaSource.YOUTUBE
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "Ambient lounge (no video)",
+                                style = theme.typography.bodySmall.copy(
+                                    color = theme.colors.textPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            )
+                            Text(text = "Tap to pick a video instead", style = hintStyle)
+                        }
+                        Text(
+                            text = "Change",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.primaryAccent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp
+                            )
+                        )
+                    }
+                } else {
+                    MediaSourcePicker(
+                        selected = selectedSource,
+                        onSelect = { source ->
+                            selectedSource = source
+                            sourceUrl = ""
+                            sourceError = null
+                        },
+                        linkValue = sourceUrl,
+                        onLinkChange = {
+                            sourceUrl = it
+                            sourceError = null
+                            // Pasting a link from another host switches the tab so the
+                            // label and the verification path always agree.
+                            if (it.trim().length > 8) {
+                                val detected = RoomMediaSource.detect(it)
+                                if (detected != selectedSource && it.contains("://")) selectedSource = detected
+                            }
+                        },
+                        error = sourceError,
+                        isBusy = isVerifyingLink,
+                        onOpenYouTube = { isYouTubeBrowserOpen = true },
+                        onSubmit = { submitSourceLink() }
+                    )
+
+                    AmbientRoomRow(onClick = {
+                        startWithoutVideo = true
+                        selectedMedia = null
+                        sourceUrl = ""
+                        sourceError = null
+                    })
+                }
+            }
 
                 // Chosen video preview card
                 selectedMedia?.let { media ->
@@ -704,7 +554,6 @@ fun CreateRoomSheet(
                         }
                     }
                 }
-            }
 
             // 4. PARTICIPANT LIMIT
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -715,7 +564,7 @@ fun CreateRoomSheet(
                 ) {
                     Text(text = "PARTICIPANT LIMIT", style = sectionHeaderStyle)
                     Text(
-                        text = "$selectedMaxParticipants / $participantCap max",
+                        text = "$selectedMaxParticipants of $participantCap seats",
                         style = theme.typography.caption.copy(
                             color = theme.colors.primaryAccent,
                             fontWeight = FontWeight.SemiBold,
@@ -724,9 +573,8 @@ fun CreateRoomSheet(
                     )
                 }
 
-                // Six even steps up to the largest room this app supports. The odd
-                // 5/25/50 ladder made the chips read as arbitrary numbers and left
-                // gaps in the middle where people actually sit.
+                // Six even steps up to the largest room this app supports (24 seats),
+                // identical to the ladder the host can change later in room settings.
                 val participantLimits = listOf(4, 8, 12, 16, 20, 24)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -796,6 +644,7 @@ fun CreateRoomSheet(
                         val canSelect = isSelected || (selectedTags.size < MAX_ROOM_TAGS && !isTooLong)
                         Box(
                             modifier = Modifier
+                                .height(30.dp)
                                 .alpha(if (isTooLong) 0.4f else 1f)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surface)
@@ -815,7 +664,8 @@ fun CreateRoomSheet(
                                         }
                                     }
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "#$tag",
@@ -854,7 +704,13 @@ fun CreateRoomSheet(
                         .distinct()
                         .take(MAX_ROOM_TAGS)
                     val safeMaxParticipants = selectedMaxParticipants.coerceIn(2, participantCap)
-                    onCreateRoom(finalName, selectedPrivacy, safeTags, safeMaxParticipants, selectedMedia)
+                    onCreateRoom(
+                        finalName,
+                        selectedPrivacy,
+                        safeTags,
+                        safeMaxParticipants,
+                        if (startWithoutVideo) null else selectedMedia
+                    )
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = theme.colors.primaryAccent,

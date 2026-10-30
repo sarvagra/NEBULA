@@ -432,74 +432,75 @@ fun NebulaRoomScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // 1. TOP BAR: Back, Room Info, Members Icon, Settings (Admin), Leave Button
+        // 1. TOP BAR — room identity on the left, playlist and room options on the right.
+        // Participants, share, settings and leave live inside the options sheet, so the
+        // header stays two controls wide instead of six.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier.weight(1f)
             ) {
                 IconButton(
-                    onClick = { showInviteFriends = true },
-                    modifier = Modifier.size(36.dp)
+                    onClick = { showLeaveConfirmation = true },
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = "Invite friends to room",
-                        tint = theme.colors.primaryAccent,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = theme.colors.textPrimary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
-
-                // Sharing goes through the platform sheet so the link can be sent
-                // wherever the user already talks to people, not only inside Nebula.
-                IconButton(
-                    onClick = {
-                        val code = room.inviteCode
-                        if (code.isNullOrBlank()) return@IconButton
-                        val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(
-                                android.content.Intent.EXTRA_TEXT,
-                                "Join my Nebula watch party: https://nebula.app/room/$code"
-                            )
-                        }
-                        context.startActivity(android.content.Intent.createChooser(share, "Share room"))
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "Share room link",
-                        tint = theme.colors.textSecondary,
-                        modifier = Modifier.size(18.dp)
+                Column {
+                    Text(
+                        text = roomName,
+                        style = theme.typography.bodyLarge.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.5.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${participantsList.size} watching • $hostDisplayName",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 11.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
 
-                // The queue lives in the header because "what are we watching next"
-                // is a room-level question, not a playback control.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                // Playlist: everything queued for this room, and the way in to add to it.
                 IconButton(
                     onClick = { showRoomQueue = true },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.PlaylistPlay,
-                            contentDescription = "Room queue",
+                            contentDescription = "Room playlist",
                             tint = if (roomQueue.isEmpty()) theme.colors.textSecondary else theme.colors.primaryAccent,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                         if (roomQueue.isNotEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .size(14.dp)
+                                    .size(13.dp)
                                     .clip(CircleShape)
                                     .background(theme.colors.primaryAccent),
                                 contentAlignment = Alignment.Center
@@ -517,200 +518,65 @@ fun NebulaRoomScreen(
                     }
                 }
 
-                Column {
-                    Text(
-                        text = roomName,
-                        style = theme.typography.bodyLarge.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    Text(
-                        text = "${participantsList.size} watching • Hosted by $hostDisplayName",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontSize = 11.5.sp
-                        )
-                    )
-                }
-            }
-
-            // Top Right Action Cluster: Members, Admin Settings, Leave
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // View Participants / Members Icon Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surface)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .clickable {
-                            showMembersSheet = true
-                            onRefreshRoom()
-                        }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.People,
-                            contentDescription = "View Participants",
-                            tint = theme.colors.textPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "${participantsList.size}",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp
-                            )
-                        )
-                    }
-                }
-
-                // Room settings (video switch is pinned to the player itself)
                 if (isCurrentUserAdmin) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable { showRoomSettings = true },
-                        contentAlignment = Alignment.Center
+                    IconButton(
+                        onClick = { showMediaSearchSheet = true },
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Room Settings",
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Play something else",
                             tint = theme.colors.textPrimary,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                 }
 
-                // Leave / Exit Room Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFEF4444).copy(alpha = 0.15f))
-                        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-                        .clickable { triggerLeaveFlow() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    contentAlignment = Alignment.Center
+                IconButton(
+                    onClick = {
+                        showMembersSheet = true
+                        onRefreshRoom()
+                    },
+                    modifier = Modifier.size(34.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                            contentDescription = "Leave",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Leave",
-                            style = theme.typography.caption.copy(
-                                color = Color(0xFFEF4444),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Room options",
+                        tint = theme.colors.textPrimary,
+                        modifier = Modifier.size(21.dp)
+                    )
                 }
             }
         }
 
-        // 2. LARGE SYNCHRONIZED PLAYER AREA (16:9 cinema layout with clean single seekbar)
+        // 2. PLAYER — edge to edge, 16:9, and nothing else competing with the video.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp)
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(14.dp))
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF181B26),
-                            Color(0xFF0F1118)
-                        )
-                    )
-                )
-                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
+                .background(Color.Black)
         ) {
-            // 2. LARGE SYNCHRONIZED PLAYER AREA (16:9 cinema layout with clean single seekbar)
             if (resolveRoomPlayback(room) == RoomPlaybackTarget.None) {
-                // Room in Idle Position: Clean placeholder, zero network errors
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .clickable(enabled = isCurrentUserAdmin) { showMediaSearchSheet = true },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Tv,
-                        contentDescription = "Idle Room",
-                        tint = theme.colors.textSecondary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Room in Idle Position",
-                        style = theme.typography.bodyLarge.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.size(30.dp)
                         )
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = if (isCurrentUserAdmin) "No video playing yet" else "Waiting for the host to pick something",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontSize = 11.sp
+                        Text(
+                            text = if (isCurrentUserAdmin) "Tap to put something on" else "The host is picking something",
+                            style = theme.typography.caption.copy(color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                         )
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Without this the idle room was a dead end for the host: the
-                    // "switch video" control only existed once a video was already
-                    // playing, so the very first video could not be started from here.
-                    if (isCurrentUserAdmin) {
-                        Button(
-                            onClick = { showMediaSearchSheet = true },
-                            modifier = Modifier.height(36.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = theme.colors.primaryAccent,
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Add a video",
-                                style = theme.typography.caption.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
                     }
                 }
             } else {
@@ -727,15 +593,44 @@ fun NebulaRoomScreen(
 
                 if (isCurrentUserAdmin) {
                     Box(
-                        Modifier.align(Alignment.TopEnd).padding(8.dp).size(32.dp).clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.65f)).clickable { showMediaSearchSheet = true },
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { showMediaSearchSheet = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = "Switch video for room", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Play something else",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                } else {
+                    // A guest may still step out of the shared timeline for a moment
+                    // without leaving the room.
+                    Box(
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { guestLocallyPaused = !guestLocallyPaused },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (guestLocallyPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (guestLocallyPaused) "Resume" else "Pause for me",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
 
-                // Fullscreen / Landscape Toggle Button
                 IconButton(
                     onClick = {
                         val activity = context as? Activity
@@ -744,261 +639,55 @@ fun NebulaRoomScreen(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(8.dp)
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black.copy(alpha = 0.65f))
+                        .background(Color.Black.copy(alpha = 0.55f))
                 ) {
                     Icon(
                         imageVector = Icons.Default.Fullscreen,
                         contentDescription = "Landscape mode",
                         tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
-                }
-
-            }
-        }
-
-        // 2b. PLAYBACK CONTROLS BAR (Host Controls & Participant Sync Status)
-        val hasVideo = !room.mediaItem?.youtubeVideoId.isNullOrBlank() ||
-            !room.mediaItem?.mediaUrl.isNullOrBlank()
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            if (isCurrentUserAdmin) {
-                if (hasVideo) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surface.copy(alpha = 0.5f))
-                            .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(theme.colors.successColor)
-                            )
-                            Text(
-                                text = "YouTube Controls Active • In Sync",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textSecondary,
-                                    fontSize = 11.5.sp
-                                )
-                            )
-                        }
-                        Text(
-                            text = "Change Video",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.5.sp
-                            ),
-                            modifier = Modifier.clickable { showMediaSearchSheet = true }
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surface.copy(alpha = 0.5f))
-                            .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tv,
-                                contentDescription = "Idle",
-                                tint = theme.colors.textSecondary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Room Idle • Ready to stream",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surface.copy(alpha = 0.6f))
-                        .border(1.dp, theme.colors.surfaceBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Host control",
-                        tint = theme.colors.textSecondary,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = if (hasVideo) "Synchronized with host ($hostDisplayName)" else "Waiting for host to pick video",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontSize = 11.5.sp
-                        )
-                    )
-                }
-                if (hasVideo) {
-                    IconButton(
-                        onClick = { guestLocallyPaused = !guestLocallyPaused },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (guestLocallyPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                            contentDescription = if (guestLocallyPaused) "Resume for me at host position" else "Pause for me",
-                            tint = theme.colors.primaryAccent
-                        )
-                    }
                 }
             }
         }
 
 
-        // 4. INTERACTIVE ROOM POLL (Poll Play) if active
-        if (room.activePoll != null) {
-            val poll = room.activePoll
-            val totalVotes = poll.options.sumOf { it.votes }.coerceAtLeast(1)
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "POLL PLAY",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.primaryAccent,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 9.5.sp
-                                )
-                            )
-                        }
-                        Text(
-                            text = poll.question,
-                            style = theme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = theme.colors.textPrimary,
-                                fontSize = 13.sp
-                            )
-                        )
-                    }
-                    Text(
-                        text = "${poll.options.sumOf { it.votes }} votes",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-
-                poll.options.forEach { opt ->
-                    val isUserVote = opt.id == poll.userVotedOptionId
-                    val fraction = opt.votes.toFloat() / totalVotes.toFloat()
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(theme.colors.surfaceElevated)
-                            .clickable { onVotePoll(opt.id) }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(fraction)
-                                .height(34.dp)
-                                .background(if (isUserVote) theme.colors.primaryAccent.copy(alpha = 0.3f) else theme.colors.surfaceBorder.copy(alpha = 0.5f))
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = opt.text,
-                                style = theme.typography.caption.copy(
-                                    fontWeight = if (isUserVote) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isUserVote) theme.colors.primaryAccent else theme.colors.textPrimary,
-                                    fontSize = 12.sp
-                                )
-                            )
-                            Text(
-                                text = "${opt.votes}",
-                                style = theme.typography.caption.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = theme.colors.textSecondary,
-                                    fontSize = 11.5.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. REALTIME ROOM CHAT FEED
-        LazyColumn(
-            state = chatListState,
+        // 5. LIVE CHAT — the feed fades into the dark under the player, so messages
+        // dissolve as they scroll up instead of meeting a hard edge.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 6.dp)
         ) {
-            items(room.recentMessages) { msg ->
-                RoomChatMessageItem(message = msg)
+            LazyColumn(
+                state = chatListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(top = 52.dp, bottom = 6.dp)
+            ) {
+                items(room.recentMessages) { msg ->
+                    RoomChatMessageItem(message = msg)
+                }
             }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                theme.colors.background,
+                                theme.colors.background.copy(alpha = 0f)
+                            )
+                        )
+                    )
+            )
         }
 
         // 6. CHAT COMPOSER WITH ATTACHMENT PAPERCLIP BUTTON
@@ -1187,6 +876,34 @@ fun NebulaRoomScreen(
             friendRequests = friendRequests,
             suggestedPeople = suggestedPeople,
             currentUserId = currentUserId,
+            isHost = isCurrentUserAdmin,
+            onShareRoom = {
+                val code = room.inviteCode
+                if (code.isNullOrBlank()) {
+                    Toast.makeText(context, "This room has no share link yet", Toast.LENGTH_SHORT).show()
+                } else {
+                    val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            android.content.Intent.EXTRA_TEXT,
+                            "Join my Nebula watch party: https://nebula.app/room/$code"
+                        )
+                    }
+                    context.startActivity(android.content.Intent.createChooser(share, "Share room"))
+                }
+            },
+            onOpenSettings = {
+                showMembersSheet = false
+                showRoomSettings = true
+            },
+            onLeaveRoomAction = {
+                showMembersSheet = false
+                showLeaveConfirmation = true
+            },
+            onInviteRoom = {
+                showMembersSheet = false
+                showInviteFriends = true
+            },
             onAddFriend = onAddFriend,
             onAcceptFriendRequest = onAcceptFriendRequest,
             onDeclineFriendRequest = onDeclineFriendRequest,
@@ -1506,37 +1223,10 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
             }
 
             if (showFullImage) {
-                androidx.compose.ui.window.Dialog(onDismissRequest = { showFullImage = false }) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black)
-                            .clickable { showFullImage = false },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val fullBitmap = if (rawUrl.startsWith("data:image/")) {
-                            try {
-                                val bytes = android.util.Base64.decode(rawUrl.substringAfter("base64,"), android.util.Base64.DEFAULT)
-                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            } catch (_: Exception) { null }
-                        } else null
-                        if (fullBitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = fullBitmap.asImageBitmap(),
-                                contentDescription = "Full-size shared photo",
-                                modifier = Modifier.fillMaxWidth(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                            )
-                        } else {
-                            coil.compose.AsyncImage(
-                                model = rawUrl,
-                                contentDescription = "Full-size shared photo",
-                                modifier = Modifier.fillMaxWidth(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                            )
-                        }
-                    }
-                }
+                com.nebula.app.ui.components.NebulaImageViewer(
+                    images = listOf(rawUrl),
+                    onDismiss = { showFullImage = false }
+                )
             }
         }
     }

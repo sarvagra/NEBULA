@@ -513,15 +513,42 @@ internal fun ModernChatBubble(
             // like a delivered message.
             // Only the transient state needs words; failure is the red badge beside the
             // bubble. A failed message stays tappable as a whole, not just on the icon.
-            if (isMe && message.deletedAt == null && message.sendState == MessageSendState.SENDING) {
-                Text(
-                    text = "Sending…",
-                    modifier = Modifier.padding(top = 4.dp),
-                    style = theme.typography.caption.copy(
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 11.sp
-                    )
-                )
+            // One marker for every state this device knows about, in the order a
+            // message moves through it: dot while it is still going out, one tick once
+            // the server has it, two ticks when the recipient's device has it, and two
+            // accent ticks when they have opened it.
+            if (isMe && message.deletedAt == null) {
+                val markerColor = Color.White.copy(alpha = 0.75f)
+                Row(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    when {
+                        message.sendState == MessageSendState.SENDING -> Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(markerColor)
+                        )
+                        message.sendState == MessageSendState.SENT -> {
+                            val seen = message.readAt != null
+                            val delivered = seen || message.deliveredAt != null
+                            Icon(
+                                imageVector = if (delivered) Icons.Default.DoneAll else Icons.Default.Done,
+                                contentDescription = when {
+                                    seen -> "Seen"
+                                    delivered -> "Delivered"
+                                    else -> "Sent"
+                                },
+                                tint = if (seen) theme.colors.primaryAccent else markerColor,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+                }
             }
             }
         }

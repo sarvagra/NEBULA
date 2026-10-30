@@ -280,7 +280,7 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
 
     // Server-enforced max participants based on authenticated user tier, respecting client preference
     const tierLimit = entitlementsForTier(req.user.tier).maxRoomParticipants;
-    const defaultParticipants = req.user.tier === 'premium_plus' ? 50 : 20;
+    const defaultParticipants = 24;
     const maxParticipants = requestedMax ? Math.min(Math.max(parseInt(String(requestedMax), 10) || 20, 2), tierLimit) : defaultParticipants;
 
     // A room may only open onto a verified playable video source.
@@ -291,7 +291,7 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
         res.status(422).json({ success: false, code: verification.code, error: verification.error });
         return;
       }
-      verifiedMediaUrl = verification.link.sourceUrl;
+      verifiedMediaUrl = verification.link.embedUrl;
     }
 
     const roomId = new mongoose.Types.ObjectId().toString();
@@ -746,7 +746,7 @@ export async function updateMedia(req: Request, res: Response): Promise<void> {
           res.status(422).json({ success: false, code: verification.code, error: verification.error });
           return;
         }
-        room.mediaState.mediaUrl = verification.link.sourceUrl;
+        room.mediaState.mediaUrl = verification.link.embedUrl;
         if (title === undefined) room.mediaState.title = verification.link.title;
         if (verification.link.thumbnailUrl === undefined && !room.mediaState.subtitle) {
           room.mediaState.subtitle = 'Synchronized Session';
@@ -934,7 +934,7 @@ export async function addRoomQueueItem(req: Request, res: Response): Promise<voi
       roomId: room._id.toString(),
       title: String(title || 'Queued video').slice(0, 150),
       subtitle: String(subtitle || '').slice(0, 150),
-      mediaUrl: verification.link.sourceUrl,
+      mediaUrl: verification.link.embedUrl,
       durationSeconds: Math.max(0, Number(durationSeconds) || 0),
       addedByUserId: req.user!.id,
       addedByName: req.user!.displayName || 'Nebula User',

@@ -71,7 +71,9 @@ fun RoomQueueSheet(
     val theme = Theme.current
     var showAddField by remember { mutableStateOf(false) }
     var linkText by remember { mutableStateOf("") }
-    var titleText by remember { mutableStateOf("") }
+    var linkError by remember { mutableStateOf<String?>(null) }
+    var selectedSource by remember { mutableStateOf(com.nebula.app.ui.dialogs.RoomMediaSource.YOUTUBE) }
+    var isYouTubeBrowserOpen by remember { mutableStateOf(false) }
 
     PABottomSheet(isVisible = isVisible, onDismissRequest = onDismiss, content = {
         Column(
@@ -89,7 +91,7 @@ fun RoomQueueSheet(
             ) {
                 Column {
                     Text(
-                        text = "Up next",
+                        text = "Playlist",
                         style = theme.typography.titleLarge.copy(
                             color = theme.colors.textPrimary,
                             fontWeight = FontWeight.Bold
@@ -97,9 +99,9 @@ fun RoomQueueSheet(
                     )
                     Text(
                         text = if (queue.isEmpty()) {
-                            "Nothing queued yet"
+                            "Nothing in the playlist yet"
                         } else {
-                            "${queue.size} waiting · the host starts each one"
+                            "${queue.size} coming up · the host starts each one"
                         },
                         style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary)
                     )
@@ -127,7 +129,7 @@ fun RoomQueueSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Add a YouTube link or an .m3u8/.mp4 stream",
+                        text = "Add YouTube, Vimeo, Prime Video or any other link",
                         style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary),
                         fontSize = 12.sp
                     )
@@ -174,7 +176,7 @@ fun RoomQueueSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Add something to watch",
+                        text = "Add a video to the playlist",
                         style = theme.typography.bodyMedium.copy(
                             color = theme.colors.textPrimary,
                             fontWeight = FontWeight.SemiBold
@@ -182,76 +184,54 @@ fun RoomQueueSheet(
                     )
                 }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    QueueTextField(
-                        value = titleText,
-                        placeholder = "Title (optional)",
-                        onChange = { titleText = it }
-                    )
-                    QueueTextField(
-                        value = linkText,
-                        placeholder = "YouTube or .mp4 / .m3u8 link",
-                        onChange = { linkText = it }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
-                                .clickable {
-                                    showAddField = false
-                                    linkText = ""
-                                    titleText = ""
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "Cancel",
-                                style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary)
-                            )
+                // Same picker as room creation: YouTube (search or link), Vimeo,
+                // Prime Video, or any other link.
+                com.nebula.app.ui.dialogs.MediaSourcePicker(
+                    selected = selectedSource,
+                    onSelect = { source ->
+                        selectedSource = source
+                        linkError = null
+                    },
+                    linkValue = linkText,
+                    onLinkChange = {
+                        linkText = it
+                        linkError = null
+                        if (it.trim().length > 8 && it.contains("://")) {
+                            val detected = com.nebula.app.ui.dialogs.RoomMediaSource.detect(it)
+                            if (detected != selectedSource) selectedSource = detected
                         }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (linkText.isBlank()) {
-                                        theme.colors.primaryAccent.copy(alpha = 0.4f)
-                                    } else {
-                                        theme.colors.primaryAccent
-                                    }
-                                )
-                                .clickable(enabled = linkText.isNotBlank()) {
-                                    val url = linkText.trim()
-                                    val title = titleText.trim().ifBlank {
-                                        url.substringAfterLast('/').ifBlank { "Queued video" }
-                                    }
-                                    onAddToQueue(title, url)
-                                    showAddField = false
-                                    linkText = ""
-                                    titleText = ""
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "Add",
-                                style = theme.typography.bodyMedium.copy(
-                                    color = Color.White,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            )
+                    },
+                    error = linkError,
+                    isBusy = false,
+                    onOpenYouTube = { isYouTubeBrowserOpen = true },
+                    onSubmit = {
+                        val url = linkText.trim()
+                        if (url.isEmpty()) {
+                            linkError = "Paste a video link, or open YouTube to pick one."
+                            return@MediaSourcePicker
                         }
+                        val item = com.nebula.app.ui.dialogs.buildMediaItem(url, selectedSource)
+                        onAddToQueue(item.title, item.mediaUrl.ifBlank { url })
+                        showAddField = false
+                        linkText = ""
+                        linkError = null
                     }
-                }
+                )
             }
         }
     })
+
+    com.nebula.app.ui.dialogs.YouTubeInAppBrowserDialog(
+        isOpen = isYouTubeBrowserOpen,
+        onVideoSelected = { videoId, titleText ->
+            isYouTubeBrowserOpen = false
+            val cleanTitle = titleText.removeSuffix(" - YouTube").removeSuffix("- YouTube").trim().ifBlank { "YouTube video" }
+            onAddToQueue(cleanTitle, "https://www.youtube.com/watch?v=$videoId")
+            showAddField = false
+            linkText = ""
+        },
+        onDismiss = { isYouTubeBrowserOpen = false }
+    )
 }
 
 @Composable

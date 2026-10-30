@@ -55,6 +55,15 @@ export async function listFriends(req: Request, res: Response): Promise<void> {
       isBanned: false,
     });
 
+    // Newest friendship first: the list is how people find who they just added,
+    // so it must not be ordered by whatever the user collection happens to return.
+    const addedAtByFriendId = new Map<string, number>();
+    for (const friendship of friendships) {
+      const otherId = friendship.requesterId === req.user!.id ? friendship.recipientId : friendship.requesterId;
+      addedAtByFriendId.set(otherId, friendship.createdAt ? new Date(friendship.createdAt).getTime() : 0);
+    }
+    friends.sort((a, b) => (addedAtByFriendId.get(b._id.toString()) || 0) - (addedAtByFriendId.get(a._id.toString()) || 0));
+
     res.json({
       success: true,
       data: friends.map((f) => toPublicUserDTO(f, 'friends')),

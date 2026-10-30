@@ -6,7 +6,7 @@ import { FriendshipModel } from '../../models/Friendship';
 import { toMessageDTO } from '../../utils/dto';
 import { uploadObject } from '../../services/objectStorage';
 import { notifyUser } from '../notifications/notificationController';
-import { notifyConversationRead, notifyDirectMessage } from '../../realtime/socketServer';
+import { isUserOnline, notifyConversationRead, notifyDirectMessage } from '../../realtime/socketServer';
 import { NotificationModel } from '../../models/Notification';
 import { dmRetentionCutoff, dmRetentionCutoffForDays, entitlementsForTier, messageEditLimitForTier } from '../../utils/entitlements';
 import { validateImageResolution } from '../../utils/imageSecurity';
@@ -391,7 +391,14 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // 2. If sending a DIRECT MESSAGE: verify friendship exists to prevent spam
+    // 2. If sending a DIRECT MESSAGE: the destination is the friend's user id, never
+    // the sender's own. A self-addressed DM used to create a notification on the
+    // sender's own list, which read as if their own message had arrived.
+    if (conversationId && !roomId && String(conversationId) === req.user.id) {
+      res.status(400).json({ success: false, error: 'You cannot message yourself' });
+      return;
+    }
+
     if (conversationId && !roomId) {
       const friendship = await FriendshipModel.findOne({
         $or: [
@@ -459,6 +466,13 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     });
 
     if (conversationId && !roomId) {
+      // Double tick means the recipient's device actually has it. If they are
+      // connected right now the message is delivered on the spot; otherwise it stays
+      // a single tick until their next read receipt upgrades it.
+      if (await isUserOnline(conversationId)) {
+        message.deliveredAt = new Date();
+        await message.save();
+      }
       const notificationBody = text?.trim() || 'Sent you an attachment';
       try {
         await NotificationModel.create({

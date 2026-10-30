@@ -16,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -93,7 +95,21 @@ fun isDirectMediaUrl(url: String?): Boolean {
 sealed interface RoomPlaybackTarget {
     data class YouTube(val videoId: String) : RoomPlaybackTarget
     data class Direct(val mediaUrl: String) : RoomPlaybackTarget
+
+    /**
+     * Any other http(s) source: Vimeo, Dailymotion, Drive, xHamster, Prime Video, or
+     * a plain page. It plays in the in-room web surface, which drives the page's own
+     * <video> element through JavaScript so the host still owns the clock.
+     */
+    data class Web(val mediaUrl: String) : RoomPlaybackTarget
     data object None : RoomPlaybackTarget
+}
+
+/** True for an http(s) URL that is not a direct media file. */
+fun isWebPageMediaUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    val lower = url.trim().lowercase()
+    return (lower.startsWith("http://") || lower.startsWith("https://")) && !isDirectMediaUrl(lower)
 }
 
 /**
@@ -110,10 +126,10 @@ fun resolveRoomPlayback(room: com.nebula.app.domain.model.NebulaRoom): RoomPlayb
     val videoId = media.youtubeVideoId?.takeIf { it.isNotBlank() }
         ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(media.mediaUrl)
     if (!videoId.isNullOrBlank()) return RoomPlaybackTarget.YouTube(videoId)
-    return if (isDirectMediaUrl(media.mediaUrl)) {
-        RoomPlaybackTarget.Direct(media.mediaUrl)
-    } else {
-        RoomPlaybackTarget.None
+    return when {
+        isDirectMediaUrl(media.mediaUrl) -> RoomPlaybackTarget.Direct(media.mediaUrl)
+        isWebPageMediaUrl(media.mediaUrl) -> RoomPlaybackTarget.Web(media.mediaUrl)
+        else -> RoomPlaybackTarget.None
     }
 }
 
@@ -148,6 +164,20 @@ fun RoomPlayerSurface(
             onRestartVideo = onRestartVideo,
             modifier = modifier
         )
+        is RoomPlaybackTarget.Web -> NebulaWebPlayer(
+            roomId = room.id,
+            mediaUrl = target.mediaUrl,
+            playbackPositionMs = room.playbackPositionMs,
+            isPlaying = room.isPlaying,
+            isHost = isHost,
+            locallyPaused = locallyPaused,
+            hostSeekCommand = hostSeekCommand,
+            onHostSample = onHostSample,
+            onHostVideoEnded = onHostVideoEnded,
+            mediaEnded = room.mediaEnded,
+            onRestartVideo = onRestartVideo,
+            modifier = modifier
+        )
         is RoomPlaybackTarget.Direct -> NebulaMediaPlayer(
             roomId = room.id,
             mediaUrl = target.mediaUrl,
@@ -163,6 +193,162 @@ fun RoomPlayerSurface(
             modifier = modifier
         )
         RoomPlaybackTarget.None -> Unit
+    }
+}
+
+/**
+ * Room playback for web sources (Vimeo, Dailymotion, Drive, xHamster, Prime Video,
+ * or any other page).
+ *
+ * The page plays inside a WebView, and the room's sync contract is applied to its
+ * <video> element through JavaScript:
+ *
+ *  - the host samples the page's own playhead and publishes it, exactly like the
+ *    Media3 surface, so what guests follow is the page's real time;
+ *  - a guest seeks only past [GUEST_DRIFT_TOLERANCE_MS] of drift and mirrors the
+ *    host's play/pause state;
+ *  - a host seek command is forwarded verbatim.
+ *
+ * A page with no reachable <video> simply shows itself; it never blocks the room.
+ */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun NebulaWebPlayer(
+    roomId: String,
+    mediaUrl: String,
+    playbackPositionMs: Long,
+    isPlaying: Boolean,
+    isHost: Boolean,
+    locallyPaused: Boolean,
+    hostSeekCommand: Pair<Long, Long>?,
+    onHostSample: (Long, Boolean) -> Unit,
+    onHostVideoEnded: (Long) -> Unit,
+    mediaEnded: Boolean,
+    onRestartVideo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val theme = Theme.current
+    val webViewRef = remember { java.util.concurrent.atomic.AtomicReference<android.webkit.WebView?>(null) }
+    val latestSample = remember { java.util.concurrent.atomic.AtomicReference(onHostSample) }
+    val latestIsHost = remember { java.util.concurrent.atomic.AtomicReference(isHost) }
+    val latestEnded = remember { java.util.concurrent.atomic.AtomicReference(onHostVideoEnded) }
+    var hasVideoElement by remember(mediaUrl) { androidx.compose.runtime.mutableStateOf(true) }
+    var webViewReady by remember(mediaUrl) { androidx.compose.runtime.mutableStateOf(false) }
+
+    SideEffect {
+        latestSample.set(onHostSample)
+        latestIsHost.set(isHost)
+        latestEnded.set(onHostVideoEnded)
+    }
+
+    fun run(js: String) {
+        webViewRef.get()?.evaluateJavascript(js, null)
+    }
+
+    LaunchedEffect(webViewReady, mediaUrl) {
+        if (!webViewReady) return@LaunchedEffect
+        if (!isHost) return@LaunchedEffect
+        val probe = "(function(){var v=document.querySelector('video');" +
+            "if(!v)return '0';return JSON.stringify({t:Math.round(v.currentTime*1000),p:!v.paused,e:v.ended});})()"
+        while (true) {
+            delay(1000L)
+            val view = webViewRef.get() ?: continue
+            if (!latestIsHost.get()) continue
+            view.evaluateJavascript(probe) { raw ->
+                val text = raw?.trim()?.trim('"') ?: return@evaluateJavascript
+                if (text.isBlank() || text == "null" || text == "0") {
+                    hasVideoElement = false
+                    return@evaluateJavascript
+                }
+                hasVideoElement = true
+                val position = Regex("\"t\":(\\d+)").find(text)?.groupValues?.get(1)?.toLongOrNull() ?: return@evaluateJavascript
+                val playing = text.contains("\"p\":true")
+                val ended = text.contains("\"e\":true")
+                latestSample.get().invoke(position, playing)
+                if (ended) latestEnded.get().invoke(position)
+            }
+        }
+    }
+
+    LaunchedEffect(webViewReady, playbackPositionMs, isPlaying, locallyPaused, isHost, mediaUrl) {
+        if (!webViewReady) return@LaunchedEffect
+        if (isHost) {
+            run("try{var v=document.querySelector('video'); if(v){ if(!${isPlaying}) v.pause(); else v.play().catch(function(){}); }}catch(e){}")
+            return@LaunchedEffect
+        }
+        val target = playbackPositionMs.coerceAtLeast(0L)
+        run(
+            "try{var v=document.querySelector('video'); if(!v)return;" +
+                "var d=Math.abs(v.currentTime*1000-$target); if(d>700){v.currentTime=$target/1000;}" +
+                (if (!isPlaying || locallyPaused) "v.pause();" else "v.play().catch(function(){});") +
+                "}catch(e){}"
+        )
+    }
+
+    LaunchedEffect(webViewReady, hostSeekCommand?.first) {
+        if (!webViewReady) return@LaunchedEffect
+        val target = hostSeekCommand?.second ?: return@LaunchedEffect
+        run("try{var v=document.querySelector('video'); if(v){v.currentTime=${target.coerceAtLeast(0L) / 1000.0};}}catch(e){}")
+    }
+
+    Box(modifier = modifier.background(Color.Black)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    webViewRef.set(this)
+                    webViewReady = true
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mediaPlaybackRequiresUserGesture = false
+                    settings.loadsImagesAutomatically = true
+                    settings.userAgentString =
+                        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            // Many players only create their <video> after a click. A
+                            // gentle synthetic nudge starts muted autoplay where allowed.
+                            view?.evaluateJavascript(
+                                "try{document.querySelectorAll('video').forEach(function(v){v.muted=false;" +
+                                    "var p=v.play(); if(p&&p.catch)p.catch(function(){});});}catch(e){}",
+                                null
+                            )
+                        }
+                    }
+                    loadUrl(mediaUrl)
+                }
+            },
+            update = { it.loadUrl(mediaUrl) }
+        )
+        if (mediaEnded) {
+            EndedOverlay(isHost = isHost, onRestartVideo = onRestartVideo)
+        }
+        if (!hasVideoElement) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = "Playing from the web • tap the page to start",
+                    style = theme.typography.caption.copy(color = Color.White, fontSize = 10.5.sp)
+                )
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewRef.get()?.apply {
+                loadUrl("about:blank")
+                destroy()
+            }
+            webViewRef.set(null)
+        }
     }
 }
 

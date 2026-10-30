@@ -109,6 +109,7 @@ internal fun MessageActionSheet(
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
+    var showInfo by remember(message.id) { mutableStateOf(false) }
     var remainingFraction by remember(message.id) {
         mutableFloatStateOf(remainingFractionFor(message.timestamp))
     }
@@ -152,6 +153,51 @@ internal fun MessageActionSheet(
                     enabled = remainingFraction > 0f,
                     onClick = onUnsend
                 )
+                CountdownAction(
+                    label = if (showInfo) "Hide info" else "Info",
+                    subtitle = "Sent, delivered and seen times",
+                    fraction = 1f,
+                    accent = theme.colors.textSecondary,
+                    enabled = true,
+                    onClick = { showInfo = !showInfo }
+                )
+
+                if (showInfo) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.surface)
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        MessageInfoRow("Sent", message.timestamp)
+                        MessageInfoRow("Delivered", message.deliveredAt)
+                        MessageInfoRow("Seen", message.readAt)
+                        message.editedAt?.let { edited ->
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "EDIT HISTORY",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textTertiary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 9.5.sp,
+                                    letterSpacing = 0.8.sp
+                                )
+                            )
+                            message.editHistory.forEachIndexed { index, previous ->
+                                Text(
+                                    text = "${index + 1}. $previous",
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
+                            MessageInfoRow("Last edited", edited)
+                        }
+                    }
+                }
             }
         }
     }
@@ -213,3 +259,30 @@ internal fun CountdownAction(
         }
     }
 }
+
+/** One "Sent / Delivered / Seen" line in the message info panel. */
+@Composable
+private fun MessageInfoRow(label: String, at: Long?) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 11.sp)
+        )
+        Text(
+            text = at?.let { formatInfoTime(it) } ?: "—",
+            style = theme.typography.caption.copy(
+                color = if (at == null) theme.colors.textTertiary else theme.colors.textPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+        )
+    }
+}
+
+private fun formatInfoTime(at: Long): String =
+    java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at))

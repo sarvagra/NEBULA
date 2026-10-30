@@ -812,6 +812,7 @@ class SocialRepositoryImpl(
             editHistory = history,
             deletedAt = item.optString("deletedAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
             readAt = item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            deliveredAt = item.optString("deliveredAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
             isSpoiler = item.optBoolean("isSpoiler", false),
             mediaMimeType = item.optString("mediaMimeType").ifBlank { null },
         )

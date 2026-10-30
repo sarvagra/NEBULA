@@ -945,13 +945,13 @@ async function runSecurityTests() {
       const editOtherFields = await makeRequest('/api/v1/users/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ displayName: 'Renamed Free', bio: 'new bio', bannerIndex: 2, interests: ['music'] }),
+        body: JSON.stringify({ displayName: 'Renamed', bio: 'new bio', bannerIndex: 2, interests: ['music'] }),
       });
       if (editOtherFields.status !== 200) {
         throw new Error(`Editing unrelated fields on a Basic account failed with ${editOtherFields.status}`);
       }
       const after = await UserModel.findById(userId).select('displayName bio bannerIndex status');
-      if (after?.displayName !== 'Renamed Free' || after?.bio !== 'new bio' || after?.bannerIndex !== 2) {
+      if (after?.displayName !== 'Renamed' || after?.bio !== 'new bio' || after?.bannerIndex !== 2) {
         throw new Error('Unrelated profile fields were not persisted');
       }
       if (after?.status !== 'offline') {
@@ -1361,19 +1361,30 @@ async function runSecurityTests() {
         throw new Error('Rejected link did not return a single-line error message');
       }
 
+      // Any other video host is playable now: Drive becomes its embeddable preview
+      // player, and a Vimeo page that has no numeric id still opens in the room's web
+      // surface instead of being refused.
       const driveLink = await makeRequest('/api/v1/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${linkToken}` },
-        body: JSON.stringify({ name: 'Drive Link Room', mediaUrl: 'https://drive.google.com/file/d/abc123/view' }),
+        body: JSON.stringify({ name: 'Drive Link Room', mediaUrl: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view' }),
       });
-      if (driveLink.status !== 422) throw new Error(`Google Drive link should be rejected with 422, got ${driveLink.status}`);
+      if (driveLink.status !== 201) throw new Error(`Google Drive link should be accepted with 201, got ${driveLink.status}`);
+      const driveJson = (await driveLink.json()) as any;
+      if (!String(driveJson?.data?.mediaState?.mediaUrl || '').includes('/preview')) {
+        throw new Error('Google Drive link was not normalised to its preview player');
+      }
+      await RoomModel.deleteOne({ name: 'Drive Link Room', hostId: linkUserId });
+      await UserModel.updateOne({ _id: linkUserId }, { $set: { activeRoomId: null } });
 
-      const invalidVimeo = await makeRequest('/api/v1/rooms', {
+      const vimeoChannel = await makeRequest('/api/v1/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${linkToken}` },
         body: JSON.stringify({ name: 'Vimeo Room', mediaUrl: 'https://vimeo.com/channels/staffpicks' }),
       });
-      if (invalidVimeo.status !== 422) throw new Error(`Non-video Vimeo page should be rejected with 422, got ${invalidVimeo.status}`);
+      if (vimeoChannel.status !== 201) throw new Error(`A Vimeo page should be accepted as a web source, got ${vimeoChannel.status}`);
+      await RoomModel.deleteOne({ name: 'Vimeo Room', hostId: linkUserId });
+      await UserModel.updateOne({ _id: linkUserId }, { $set: { activeRoomId: null } });
 
       // The client preflight endpoint applies the same rules so a link can be
       // rejected inline before the user reaches the create step.
