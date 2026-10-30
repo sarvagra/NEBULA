@@ -675,13 +675,43 @@ fun NebulaRoomScreen(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "No video playing • Search YouTube to stream together",
+                        text = if (isCurrentUserAdmin) "No video playing yet" else "Waiting for the host to pick something",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
                             fontSize = 11.sp
                         )
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    // Without this the idle room was a dead end for the host: the
+                    // "switch video" control only existed once a video was already
+                    // playing, so the very first video could not be started from here.
+                    if (isCurrentUserAdmin) {
+                        Button(
+                            onClick = { showMediaSearchSheet = true },
+                            modifier = Modifier.height(36.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = theme.colors.primaryAccent,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Add a video",
+                                style = theme.typography.caption.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
                 }
             } else {
                 RoomPlayerSurface(

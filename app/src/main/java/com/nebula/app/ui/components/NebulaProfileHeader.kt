@@ -161,7 +161,6 @@ fun NebulaProfileHeader(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     tierLabel: String? = null,
-    statusText: String? = null,
     presenceColor: Color? = null,
     topBarStart: (@Composable RowScope.() -> Unit)? = null,
     topBar: (@Composable RowScope.() -> Unit)? = null,
@@ -174,17 +173,12 @@ fun NebulaProfileHeader(
     val overlap = if (compact) COMPACT_AVATAR_OVERLAP else AVATAR_OVERLAP
     val gutter = if (compact) 16.dp else 20.dp
 
+    // Presence is carried by the badge on the avatar corner alone. Repeating it as
+    // a dot plus a word under the handle said the same thing twice and pushed the
+    // counters people actually read further down.
     val isOffline = user.status.equals("offline", ignoreCase = true) ||
         user.presenceStatus == NebulaPresenceStatus.OFFLINE ||
         !user.isOnline
-    val status = statusText?.takeIf { it.isNotBlank() } ?: run {
-        when {
-            isOffline -> "Offline"
-            user.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> "In a room"
-            user.presenceStatus == NebulaPresenceStatus.PRIVATE_CHAT -> "In a private chat"
-            else -> "Online"
-        }
-    }
     val dotColor = presenceColor ?: when {
         isOffline -> theme.colors.textTertiary
         user.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> theme.colors.secondaryAccent
@@ -326,28 +320,6 @@ fun NebulaProfileHeader(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-
-            // Presence line, Discord-style: a coloured dot then the status text.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
-                Spacer(modifier = Modifier.size(6.dp))
-                Text(
-                    text = status,
-                    style = theme.typography.caption.copy(
-                        color = if (isOffline) theme.colors.textSecondary else theme.colors.textPrimary,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 220.dp)
-                )
-            }
 
             Spacer(modifier = Modifier.height(10.dp))
 

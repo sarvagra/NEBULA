@@ -560,7 +560,8 @@ internal fun RoomSettingsSheet(
     var tagsState by remember(tags, isVisible) { mutableStateOf(tags.toSet()) }
 
     val availableTags = listOf("Cinema", "Music", "WatchParty", "Chill", "Study", "Anime", "Gaming", "Lounge")
-    val maxOptions = listOf(5, 10, 20, 50, 100)
+    // Same steps as the create-room sheet: 4 · 8 · 12 · 16 · 20 · 24.
+    val maxOptions = listOf(4, 8, 12, 16, 20, 24)
 
     PABottomSheet(
         isVisible = isVisible,
@@ -605,7 +606,7 @@ internal fun RoomSettingsSheet(
             // Max Participants
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "MAX PARTICIPANTS: ${if (maxState >= 100) "Unlimited (100)" else maxState}",
+                    text = "MAX PARTICIPANTS: $maxState",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textSecondary,
                         fontWeight = FontWeight.Bold,
@@ -635,7 +636,7 @@ internal fun RoomSettingsSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (count >= 100) "∞" else "$count",
+                                text = "$count",
                                 style = theme.typography.caption.copy(
                                     color = if (isSelected) Color.White else theme.colors.textPrimary,
                                     fontWeight = FontWeight.Bold,

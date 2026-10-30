@@ -696,11 +696,6 @@ fun NebulaEditProfileScreen(
                     user = draftUser,
                     friendsCount = draftUser.friendsCount,
                     isFriendCountPublic = isFriendCountPublic,
-                    statusText = when (statusText) {
-                        "offline" -> "Offline"
-                        "custom" -> customStatusText.ifBlank { "Online" }
-                        else -> "Online"
-                    },
                     topBar = {},
                     modifier = Modifier.clip(RoundedCornerShape(16.dp))
                 )

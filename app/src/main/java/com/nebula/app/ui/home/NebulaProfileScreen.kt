@@ -139,7 +139,6 @@ fun NebulaProfileScreen(
                 friendsCount = friendsCount,
                 isFriendCountPublic = isFriendCountPublic,
                 tierLabel = activeTier.badgeLabel,
-                statusText = nebulaStatusDisplayText(user),
                 presenceColor = nebulaStatusIndicatorColor(user),
                 topBar = {
                     Box(

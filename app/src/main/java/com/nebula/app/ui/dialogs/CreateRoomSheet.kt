@@ -724,7 +724,10 @@ fun CreateRoomSheet(
                     )
                 }
 
-                val participantLimits = listOf(5, 10, 20, 25, 50)
+                // Six even steps up to the largest room this app supports. The odd
+                // 5/25/50 ladder made the chips read as arbitrary numbers and left
+                // gaps in the middle where people actually sit.
+                val participantLimits = listOf(4, 8, 12, 16, 20, 24)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

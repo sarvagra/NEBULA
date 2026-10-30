@@ -65,6 +65,10 @@ fun NebulaHomeScreen(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
+    // Active Now means active. A friend list where everyone reads "Offline" under the
+    // heading defeats the section, so the row is filtered down to people who are
+    // actually connected and the empty state owns the rest.
+    val activeFriends = friends.filter { it.isOnline }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -92,7 +96,11 @@ fun NebulaHomeScreen(
                     )
 
                     Text(
-                        text = "${friends.count { it.isOnline }} friends online",
+                        text = when (activeFriends.size) {
+                            0 -> "Nobody online"
+                            1 -> "1 friend online"
+                            else -> "${activeFriends.size} friends online"
+                        },
                         style = theme.typography.caption.copy(
                             color = theme.colors.textTertiary,
                             fontSize = 11.5.sp
@@ -102,7 +110,7 @@ fun NebulaHomeScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                if (friends.isEmpty()) {
+                if (activeFriends.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -113,7 +121,7 @@ fun NebulaHomeScreen(
                             .padding(vertical = 14.dp, horizontal = 16.dp)
                     ) {
                         Text(
-                            text = "No friends active right now • Connect with people in the Friends tab",
+                            text = "Nobody's active right now • Friends who come online will show up here",
                             style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary, fontSize = 12.sp)
                         )
                     }
@@ -122,7 +130,7 @@ fun NebulaHomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        items(friends) { friend ->
+                        items(activeFriends) { friend ->
                             ActiveFriendItem(
                                 user = friend,
                                 onClick = { onFriendClick(friend) }

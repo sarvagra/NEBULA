@@ -122,22 +122,10 @@ fun InRoomMediaSearchSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFCC0000)),
-                contentAlignment = Alignment.Center
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(36.dp)
-                )
-            }
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "Switch the room video",
                     style = theme.typography.titleMedium.copy(
@@ -146,45 +134,52 @@ fun InRoomMediaSearchSheet(
                         fontSize = 17.sp
                     )
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Search YouTube in the popup, or paste a YouTube, Vimeo, or direct video link. Every switch is verified by the server before it plays.",
+                    text = "Search YouTube, or paste a YouTube / Vimeo / direct video link. The server verifies every switch before it plays.",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textSecondary,
                         fontSize = 12.sp
-                    ),
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    )
                 )
             }
 
-            Button(
-                onClick = { isYouTubeBrowserOpen = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFCC0000),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp)
+            // Search and link entry sit side by side, exactly like the create-room
+            // sheet. The old stacked layout put the paste field below a 64dp badge
+            // and a paragraph, so on a phone the sheet opened looking like it only
+            // offered YouTube.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Button(
+                    onClick = { isYouTubeBrowserOpen = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFCC0000),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = "Search YouTube",
-                        style = theme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
-                    )
+                        Text(
+                            text = "Search YouTube",
+                            style = theme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
                 }
             }
 
@@ -199,33 +194,79 @@ fun InRoomMediaSearchSheet(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            OutlinedTextField(
-                value = linkInput,
-                onValueChange = {
-                    linkInput = it
-                    // Any change clears the previous rejection immediately.
-                    linkError = null
-                },
-                placeholder = {
-                    Text(
-                        text = "https://youtube.com/watch?v=... · vimeo.com/... · video.mp4",
-                        style = theme.typography.bodyMedium.copy(color = theme.colors.textTertiary)
-                    )
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = theme.colors.surface,
-                    unfocusedContainerColor = theme.colors.surface,
-                    focusedBorderColor = if (linkError != null) theme.colors.errorColor else theme.colors.primaryAccent,
-                    unfocusedBorderColor = if (linkError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
-                    focusedTextColor = theme.colors.textPrimary,
-                    unfocusedTextColor = theme.colors.textPrimary
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = linkInput,
+                    onValueChange = {
+                        linkInput = it
+                        // Any change clears the previous rejection immediately.
+                        linkError = null
+                    },
+                    placeholder = {
+                        Text(
+                            text = "YouTube · Vimeo · .mp4 / .m3u8",
+                            style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary)
+                        )
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = theme.colors.surface,
+                        unfocusedContainerColor = theme.colors.surface,
+                        focusedBorderColor = if (linkError != null) theme.colors.errorColor else theme.colors.primaryAccent,
+                        unfocusedBorderColor = if (linkError != null) theme.colors.errorColor else theme.colors.surfaceBorder,
+                        focusedTextColor = theme.colors.textPrimary,
+                        unfocusedTextColor = theme.colors.textPrimary
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                )
 
-            // One inline line directly under the link field — never a dialog or a toast dump.
+                Button(
+                    onClick = {
+                        val url = linkInput.trim()
+                        if (url.isEmpty()) {
+                            linkError = EMPTY_LINK_ERROR
+                            return@Button
+                        }
+                        submitMedia(
+                            SharedMediaItem(
+                                id = "media_${System.currentTimeMillis()}",
+                                title = url.substringAfterLast('/').substringBefore('?').ifBlank { "Web video" },
+                                source = when {
+                                    url.contains("youtube.com") || url.contains("youtu.be") -> "YouTube"
+                                    url.contains("vimeo.com") -> "Vimeo"
+                                    else -> "URL"
+                                },
+                                durationLabel = "Stream",
+                                durationMs = 0L,
+                                mediaUrl = url,
+                                youtubeVideoId = extractYouTubeId(url)
+                            )
+                        )
+                    },
+                    // Always tappable: a disabled Material button turns into a
+                    // near-invisible block on this dark sheet, so an empty field
+                    // answers with the inline error instead of a ghost control.
+                    enabled = !isSubmitting,
+                    modifier = Modifier.height(44.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.colors.primaryAccent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = if (isSubmitting) "…" else "Switch",
+                        style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+
+            // One inline line directly under the link row — never a dialog or a toast dump.
             linkError?.let { err ->
                 Text(
                     text = singleLineLinkError(err),
@@ -237,59 +278,6 @@ fun InRoomMediaSearchSheet(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth()
                 )
-            }
-
-            Button(
-                onClick = {
-                    val url = linkInput.trim()
-                    if (url.isEmpty()) {
-                        linkError = EMPTY_LINK_ERROR
-                        return@Button
-                    }
-                    submitMedia(
-                        SharedMediaItem(
-                            id = "media_${System.currentTimeMillis()}",
-                            title = url.substringAfterLast('/').substringBefore('?').ifBlank { "Web video" },
-                            source = when {
-                                url.contains("youtube.com") || url.contains("youtu.be") -> "YouTube"
-                                url.contains("vimeo.com") -> "Vimeo"
-                                else -> "URL"
-                            },
-                            durationLabel = "Stream",
-                            durationMs = 0L,
-                            mediaUrl = url,
-                            youtubeVideoId = extractYouTubeId(url)
-                        )
-                    )
-                },
-                enabled = !isSubmitting,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = theme.colors.primaryAccent,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Link,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = if (isSubmitting) "Checking link…" else "Switch room video",
-                        style = theme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
