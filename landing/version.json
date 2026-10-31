@@ -1,11 +1,11 @@
 {
   "success": true,
-  "versionCode": 7,
-  "versionName": "1.1.5",
+  "versionCode": 8,
+  "versionName": "1.1.6",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Authentic celestial purple & cyan logo matched across app icon, splash screen, and website\n• Completely rewired image & video sending in DMs and Live Chat with 50MB pipeline\n• Clean minimalist message bubbles: dots and ticks removed; swipe sideways to reveal time & delivery info\n• Red ! failure indicator with instant Resend or Delete (purges unsent message permanently)",
+  "releaseNotes": "• App icon background set to pure space black across all Android app drawer launchers\n• Fixed photo and video sending in DMs and rooms: added image enum to message schema\n• Main send button now sends attached photos/videos with optional caption text\n• Smooth spoiler toggle and multi-image grid sending",
   "forceUpdate": false,
-  "publishedAt": "2026-10-31T17:45:00Z"
+  "publishedAt": "2026-11-01T00:30:00Z"
 }
 

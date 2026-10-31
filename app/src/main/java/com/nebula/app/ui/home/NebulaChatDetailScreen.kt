@@ -824,33 +824,58 @@ fun NebulaChatDetailScreen(
                 )
 
                 // Send Button
+                val hasReadyAttachments = drafts.any { it.canSend }
+                val hasPendingAttachments = drafts.any { it.state == AttachmentUploadState.UPLOADING }
+                val canSendNow = (inputText.isNotBlank() || hasReadyAttachments) && inputText.length <= MAX_DIRECT_MESSAGE_CHARS
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(
                             when {
-                                inputText.isBlank() || inputText.length > MAX_DIRECT_MESSAGE_CHARS -> theme.colors.surfaceElevated
+                                !canSendNow -> theme.colors.surfaceElevated
                                 editingMessage != null -> theme.colors.successColor
                                 else -> theme.colors.primaryAccent
                             }
                         )
-                        .clickable(enabled = inputText.isNotBlank() && inputText.length <= MAX_DIRECT_MESSAGE_CHARS) {
+                        .clickable(enabled = canSendNow || hasPendingAttachments) {
+                            if (hasPendingAttachments && !hasReadyAttachments) {
+                                android.widget.Toast.makeText(context, "Uploading attachments, please wait...", android.widget.Toast.LENGTH_SHORT).show()
+                                return@clickable
+                            }
                             val editing = editingMessage
                             if (editing != null) {
                                 onEditMessage(editing.id, inputText.trim())
                                 editingMessage = null
+                                inputText = ""
                             } else {
-                                onSendMessage(inputText)
+                                val sentDrafts = drafts.filter { it.canSend }
+                                val ready = sentDrafts.mapNotNull { it.remoteUrl?.takeIf { url -> url.isNotBlank() } }
+                                if (ready.isNotEmpty()) {
+                                    val allImages = sentDrafts.none { it.isVideo }
+                                    onSendAttachments(
+                                        inputText.trim(),
+                                        ready,
+                                        if (allImages) "image" else "media",
+                                        attachmentIsSpoiler,
+                                        sentDrafts.first().mimeType
+                                    )
+                                    val sentUris = sentDrafts.map { it.localUri }.toSet()
+                                    drafts = drafts.filterNot { it.localUri in sentUris }
+                                    if (drafts.isEmpty()) attachmentIsSpoiler = false
+                                    inputText = ""
+                                } else if (inputText.isNotBlank()) {
+                                    onSendMessage(inputText)
+                                    inputText = ""
+                                }
                             }
-                            inputText = ""
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = if (inputText.isNotBlank()) Color.White else theme.colors.textTertiary,
+                        tint = if (canSendNow) Color.White else theme.colors.textTertiary,
                         modifier = Modifier.size(16.dp)
                     )
                 }

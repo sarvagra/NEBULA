@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type MessageType = 'text' | 'media' | 'system';
+export type MessageType = 'text' | 'media' | 'image' | 'video' | 'system' | 'room_card';
 
 export interface IMessage extends Document {
   roomId?: string;
@@ -47,7 +47,7 @@ const MessageSchema = new Schema<IMessage>(
     isSpoiler: { type: Boolean, default: false },
     mediaMimeType: { type: String },
     // 'room_card' is a shared watch-party invite: mediaUrl holds nebula://room/<code>.
-    messageType: { type: String, enum: ['text', 'media', 'video', 'system', 'room_card'], default: 'text' },
+    messageType: { type: String, enum: ['text', 'media', 'image', 'video', 'system', 'room_card'], default: 'text' },
     reactions: [
       {
         emoji: { type: String, required: true },
