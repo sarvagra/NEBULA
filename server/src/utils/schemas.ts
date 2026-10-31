@@ -82,14 +82,15 @@ export const SendMessageSchema = z.object({
   roomId: z.string().trim().max(100).optional(),
   conversationId: z.string().trim().max(100).optional(),
   text: z.string().trim().max(500, 'Message cannot exceed 500 characters').optional(),
-  mediaUrl: z.string().trim().max(500).optional(),
-  // 'video' is a real message kind the Android client sends for video attachments;
-  // leaving it out of the enum rejected every video DM with a 400.
-  messageType: z.enum(['text', 'media', 'video', 'system', 'room_card']).default('text'),
+  mediaUrl: z.string().trim().max(1000).optional(),
+  mediaUrls: z.array(z.string().trim().max(1000)).max(5).optional(),
+  idempotencyKey: z.string().trim().max(128).optional(),
+  // Both 'image' and 'media' / 'video' are valid attachment types sent by Android clients
+  messageType: z.enum(['text', 'media', 'image', 'video', 'system', 'room_card']).default('text'),
   isSpoiler: z.boolean().optional().default(false),
   mediaMimeType: z.string().trim().max(80).optional(),
-}).refine((data) => !!data.text || !!data.mediaUrl, {
-  message: 'Message must contain either text or a media URL',
+}).refine((data) => !!data.text || !!data.mediaUrl || (Array.isArray(data.mediaUrls) && data.mediaUrls.length > 0), {
+  message: 'Message must contain either text, mediaUrl, or mediaUrls',
 });
 
 export const AddReactionSchema = z.object({

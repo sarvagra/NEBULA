@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.nebula.app.ui.home
 
 import android.widget.Toast
@@ -490,42 +492,37 @@ fun HomeScreen(
                 // which is the gesture people already expect from a feed app. The
                 // detector only claims the pointer once a horizontal drag passes touch
                 // slop, so vertical list scrolling inside each tab is untouched.
+                // Real-time interactive pager: swiping between tabs slides smoothly in real time
+                val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+                    initialPage = uiState.currentTab.ordinal,
+                    pageCount = { NebulaTab.values().size }
+                )
+
+                // Sync tab changes from navigation to pager
+                androidx.compose.runtime.LaunchedEffect(uiState.currentTab) {
+                    if (pagerState.currentPage != uiState.currentTab.ordinal) {
+                        pagerState.animateScrollToPage(uiState.currentTab.ordinal)
+                    }
+                }
+
+                // Sync tab changes from interactive swipe to ViewModel
+                androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
+                    val targetTab = NebulaTab.values().getOrNull(pagerState.currentPage) ?: NebulaTab.HOME
+                    if (uiState.currentTab != targetTab) {
+                        viewModel.onTabSelected(targetTab)
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .pointerInput(uiState.currentTab) {
-                            var accumulated = 0f
-                            detectHorizontalDragGestures(
-                                onDragStart = { accumulated = 0f },
-                                onDragCancel = { accumulated = 0f },
-                                onDragEnd = {
-                                    val threshold = 56.dp.toPx()
-                                    when {
-                                        accumulated <= -threshold -> viewModel.onSwipeToAdjacentTab(forward = true)
-                                        accumulated >= threshold -> viewModel.                                    onSwipeToAdjacentTab(forward = false)
-                                    }
-                                    accumulated = 0f
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    accumulated += dragAmount
-                                }
-                            )
-                        }
+                        .fillMaxWidth()
                 ) {
-                    // The swipe and the bottom bar both move between tabs, so the
-                    // change is animated in the direction of travel instead of
-                    // snapping to a completely different screen.
-                    AnimatedContent(
-                        targetState = uiState.currentTab,
-                        transitionSpec = {
-                            val forward = targetState.ordinal > initialState.ordinal
-                            (slideInHorizontally(animationSpec = tween(260)) { width -> if (forward) width else -width } + fadeIn(animationSpec = tween(200))) togetherWith
-                                (slideOutHorizontally(animationSpec = tween(260)) { width -> if (forward) -width else width } + fadeOut(animationSpec = tween(200)))
-                        },
-                        label = "tab-transition"
-                    ) { tab ->
-                    when (tab) {
+                    androidx.compose.foundation.pager.HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                    when (NebulaTab.values()[page]) {
                         NebulaTab.HOME -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,

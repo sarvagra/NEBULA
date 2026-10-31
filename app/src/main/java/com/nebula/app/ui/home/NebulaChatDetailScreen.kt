@@ -414,27 +414,52 @@ fun NebulaChatDetailScreen(
                     return@launch
                 }
                 updateDraft(target) { it.copy(state = AttachmentUploadState.UPLOADING, progress = 0, error = null) }
-                val bytes = withContext(Dispatchers.IO) {
+                val (bytes, uploadMime) = withContext(Dispatchers.IO) {
                     runCatching {
-                        context.contentResolver.openInputStream(android.net.Uri.parse(target.localUri))
-                            ?.use { it.readBytes() }
-                    }.getOrNull() ?: ByteArray(0)
+                        val uri = android.net.Uri.parse(target.localUri)
+                        if (target.mimeType.startsWith("image/") && target.mimeType != "image/gif") {
+                            val originalBitmap = context.contentResolver.openInputStream(uri)?.use {
+                                android.graphics.BitmapFactory.decodeStream(it)
+                            }
+                            if (originalBitmap != null) {
+                                val maxDim = maxOf(originalBitmap.width, originalBitmap.height)
+                                val scaled = if (maxDim > 2048) {
+                                    val scale = 2048f / maxDim
+                                    android.graphics.Bitmap.createScaledBitmap(
+                                        originalBitmap,
+                                        (originalBitmap.width * scale).toInt().coerceAtLeast(1),
+                                        (originalBitmap.height * scale).toInt().coerceAtLeast(1),
+                                        true
+                                    )
+                                } else originalBitmap
+                                val stream = java.io.ByteArrayOutputStream()
+                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 86, stream)
+                                Pair(stream.toByteArray(), "image/jpeg")
+                            } else {
+                                val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+                                Pair(raw, target.mimeType)
+                            }
+                        } else {
+                            val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+                            Pair(raw, target.mimeType)
+                        }
+                    }.getOrNull() ?: Pair(ByteArray(0), target.mimeType)
                 }
                 if (bytes.isEmpty()) {
                     updateDraft(target) { it.copy(state = AttachmentUploadState.FAILED, error = "That file could not be read") }
                     return@launch
                 }
-                val dataUrl = "data:${target.mimeType};base64," +
+                val dataUrl = "data:$uploadMime;base64," +
                     android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                 val mediaType = when {
                     target.isVideo -> "video"
-                    target.mimeType == "image/gif" -> "gif"
+                    uploadMime == "image/gif" -> "gif"
                     else -> "image"
                 }
                 val response = try {
                     com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
                         url = dataUrl,
-                        mimeType = target.mimeType,
+                        mimeType = uploadMime,
                         mediaType = mediaType,
                         sizeBytes = bytes.size.toLong(),
                         onProgress = { percent -> updateDraft(target) { it.copy(progress = percent) } }

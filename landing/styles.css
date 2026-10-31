@@ -82,7 +82,8 @@ header {
 .nav {
   display: flex;
   align-items: center;
-  gap: 26px;
+  justify-content: space-between;
+  gap: 20px;
   height: 68px;
 }
 
@@ -94,12 +95,17 @@ header {
   letter-spacing: 0.22em;
   font-size: 14px;
 }
-.brand img { width: 28px; height: 28px; }
+.brand img {
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+}
 
 .nav-links {
   display: flex;
   gap: 22px;
   margin-left: auto;
+  margin-right: 20px;
   font-size: 14px;
   color: var(--muted);
 }
@@ -107,6 +113,7 @@ header {
 
 @media (max-width: 720px) {
   .nav-links { display: none; }
+  .nav .btn { margin-left: auto; }
 }
 
 /* ---------- buttons ---------- */

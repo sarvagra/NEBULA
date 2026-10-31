@@ -95,18 +95,8 @@ fun NebulaSettingsScreen(
 ) {
     val theme = Theme.current
     var showBlockedUsersInPlace by remember { mutableStateOf(false) }
-    var showFeatureToggles by remember { mutableStateOf(false) }
+    var showBetaProgramInPlace by remember { mutableStateOf(false) }
     var showNotificationsInPlace by remember { mutableStateOf(false) }
-
-    // Feature switches live in the same preferences file as the session, so they
-    // survive restarts without inventing a second settings store.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val sessionManager = remember { com.nebula.app.data.local.SessionManager(context) }
-    var featureCustomStatus by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_CUSTOM_STATUS)) }
-    var featureCustomBanner by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_CUSTOM_BANNER)) }
-    var featureVideoBanner by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_VIDEO_BANNER)) }
-    var featureAllTags by remember { mutableStateOf(sessionManager.isFeatureEnabled(com.nebula.app.data.local.SessionManager.FEATURE_ALL_TAGS)) }
-    // Notification switches now live on NebulaNotificationSettingsScreen.
 
     Column(
         modifier = modifier
@@ -233,102 +223,12 @@ fun NebulaSettingsScreen(
 
                     SettingsDivider()
 
-                    // 8. NEBULA PREMIUM (BETA) — everything that used to be a
-                    // purchase is a switch, and every switch lives behind this one
-                    // row instead of spilling down the settings list.
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showFeatureToggles = !showFeatureToggles }
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(theme.colors.primaryAccent.copy(alpha = 0.14f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = theme.colors.primaryAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Nebula Premium",
-                                    style = theme.typography.bodyMedium.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 15.sp
-                                    )
-                                )
-                                Text(
-                                    text = "Beta — every feature is unlocked",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                            Icon(
-                                imageVector = if (showFeatureToggles) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                tint = theme.colors.textTertiary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        if (showFeatureToggles) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-                        ) {
-                        FeatureToggleRow(
-                            title = "Custom status",
-                            subtitle = "Set a written status instead of a preset",
-                            checked = featureCustomStatus,
-                            onCheckedChange = {
-                                featureCustomStatus = it
-                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_STATUS, it)
-                            }
-                        )
-                        FeatureToggleRow(
-                            title = "Custom banner",
-                            subtitle = "Upload your own banner image",
-                            checked = featureCustomBanner,
-                            onCheckedChange = {
-                                featureCustomBanner = it
-                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_BANNER, it)
-                            }
-                        )
-                        FeatureToggleRow(
-                            title = "Video banner",
-                            subtitle = "Loop a short clip behind your profile",
-                            checked = featureVideoBanner,
-                            onCheckedChange = {
-                                featureVideoBanner = it
-                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_VIDEO_BANNER, it)
-                            }
-                        )
-                        FeatureToggleRow(
-                            title = "All profile tags",
-                            subtitle = "Show your full tag list, not the first five",
-                            checked = featureAllTags,
-                            onCheckedChange = {
-                                featureAllTags = it
-                                sessionManager.setFeatureEnabled(SessionManager.FEATURE_ALL_TAGS, it)
-                            }
-                        )
-                        }
-                        }
-                    }
+                    // 8. Beta Program (all feature toggles live on their own dedicated full-screen page)
+                    SettingNavRow(
+                        icon = Icons.Default.Star,
+                        title = "Beta Program",
+                        onClick = { showBetaProgramInPlace = true }
+                    )
                 }
             }
         }
@@ -346,6 +246,13 @@ fun NebulaSettingsScreen(
     if (showBlockedUsersInPlace) {
         NebulaBlockedUsersScreen(
             onBack = { showBlockedUsersInPlace = false },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    if (showBetaProgramInPlace) {
+        NebulaBetaProgramScreen(
+            onBack = { showBetaProgramInPlace = false },
             modifier = Modifier.fillMaxSize()
         )
     }

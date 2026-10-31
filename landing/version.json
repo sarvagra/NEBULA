@@ -1,10 +1,10 @@
 {
   "success": true,
-  "versionCode": 3,
-  "versionName": "1.1.1",
+  "versionCode": 4,
+  "versionName": "1.1.2",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• In-app self update system\n• Redesigned Profile and Settings\n• Performance and security optimizations",
+  "releaseNotes": "• Fixed photo sending in chat and optimized high-resolution camera uploads\n• Real-time swipe navigation between Home, Rooms, Chats, Friends, and Profile\n• Redesigned Profile menu (Info and Settings)\n• Dedicated full-screen Beta Program settings page\n• Branded celestial logo and splash screen animated ring completion",
   "forceUpdate": false,
-  "publishedAt": "2026-10-31T13:00:00Z"
+  "publishedAt": "2026-10-31T14:15:00Z"
 }

@@ -119,11 +119,11 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 3,
-      versionName: '1.1.1',
+      versionCode: 4,
+      versionName: '1.1.2',
       minSupportedVersionCode: 1,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• In-app self update system\n• Redesigned Profile and Settings\n• Performance and security optimizations',
+      releaseNotes: '• Fixed photo sending in chat and optimized high-resolution uploads\n• Real-time swipe navigation between tabs\n• Redesigned Profile menu\n• Full-screen Beta Program settings\n• Branded celestial logo and animated splash ring',
       forceUpdate: false,
       publishedAt: new Date().toISOString(),
     };

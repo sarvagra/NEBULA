@@ -48,20 +48,26 @@ fun SplashScreen(
 
     val scale by animateFloatAsState(
         targetValue = if (isAnimationStarted) 1f else 0.85f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
         label = "splashScale"
+    )
+
+    val ringProgress by animateFloatAsState(
+        targetValue = if (isAnimationStarted) 1f else 0f,
+        animationSpec = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+        label = "splashRingProgress"
     )
 
     val alpha by animateFloatAsState(
         targetValue = if (isAnimationStarted) 1f else 0f,
-        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
         label = "splashAlpha"
     )
 
     LaunchedEffect(Unit) {
         isAnimationStarted = true
-        // Very short duration: 800ms
-        delay(850)
+        // Allow the animated ring completion to complete cleanly
+        delay(1000)
         onSplashFinished()
     }
 
@@ -74,11 +80,12 @@ fun SplashScreen(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Central Branded Monogram
+            // Central Branded Monogram with animated completing planetary ring
             NebulaLogo(
+                ringProgress = ringProgress,
                 modifier = Modifier
                     .scale(scale)
-                    .size(80.dp)
+                    .size(92.dp)
             )
 
             Spacer(modifier = Modifier.height(20.dp))

@@ -746,40 +746,12 @@ private fun ProfileActionSheet(
                     tint = theme.colors.primaryAccent,
                     onClick = onOpenInfo
                 )
+                SettingsDivider()
                 if (isCurrentUser) {
-                    ProfileActionRow(
-                        icon = Icons.Default.Edit,
-                        title = "Edit Profile",
-                        subtitle = "Customize your avatar, banner, bio, and interests",
-                        tint = theme.colors.primaryAccent,
-                        onClick = onEditProfile
-                    )
-                    SettingsDivider()
-                    VisibilityRow(
-                        icon = Icons.Default.Public,
-                        title = "Room activity",
-                        isPublic = roomActivityPublic,
-                        onToggle = onToggleRoomActivity
-                    )
-                    SettingsDivider()
-                    VisibilityRow(
-                        icon = Icons.Default.Star,
-                        title = "Top content",
-                        isPublic = topContentPublic,
-                        onToggle = onToggleTopContent
-                    )
-                    SettingsDivider()
-                    VisibilityRow(
-                        icon = Icons.Default.PersonAdd,
-                        title = "Friend count",
-                        isPublic = friendCountPublic,
-                        onToggle = onToggleFriendCount
-                    )
-                    SettingsDivider()
                     ProfileActionRow(
                         icon = Icons.Default.Settings,
                         title = "Settings",
-                        subtitle = "Account, appearance, privacy",
+                        subtitle = "Account, appearance, privacy, preferences",
                         tint = theme.colors.primaryAccent,
                         onClick = onOpenSettings
                     )
