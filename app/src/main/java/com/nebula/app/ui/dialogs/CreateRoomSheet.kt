@@ -203,7 +203,6 @@ fun CreateRoomSheet(
     var selectedMedia by remember { mutableStateOf<SharedMediaItem?>(null) }
     var selectedMaxParticipants by remember { mutableIntStateOf(BASIC_ROOM_PARTICIPANT_CAP) }
     var selectedSource by remember { mutableStateOf(RoomMediaSource.YOUTUBE) }
-    var startWithoutVideo by remember { mutableStateOf(false) }
     var sourceUrl by remember { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var isVerifyingLink by remember { mutableStateOf(false) }
@@ -235,7 +234,6 @@ fun CreateRoomSheet(
 
     fun acceptSourceVideo(url: String) {
         selectedMedia = buildMediaItem(url, selectedSource)
-        startWithoutVideo = false
         sourceUrl = ""
         sourceError = null
     }
@@ -410,78 +408,34 @@ fun CreateRoomSheet(
                 ) {
                     Text(text = "MEDIA / ACTIVITY", style = sectionHeaderStyle)
                     Text(
-                        text = if (startWithoutVideo) "Voice + chat" else selectedSource.label,
+                        text = selectedSource.label,
                         style = hintStyle
                     )
                 }
 
-                if (startWithoutVideo) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
-                            .clickable {
-                                startWithoutVideo = false
-                                selectedSource = RoomMediaSource.YOUTUBE
-                            }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "Ambient lounge (no video)",
-                                style = theme.typography.bodySmall.copy(
-                                    color = theme.colors.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                )
-                            )
-                            Text(text = "Tap to pick a video instead", style = hintStyle)
-                        }
-                        Text(
-                            text = "Change",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp
-                            )
-                        )
-                    }
-                } else {
-                    MediaSourcePicker(
-                        selected = selectedSource,
-                        onSelect = { source ->
-                            selectedSource = source
-                            sourceUrl = ""
-                            sourceError = null
-                        },
-                        linkValue = sourceUrl,
-                        onLinkChange = {
-                            sourceUrl = it
-                            sourceError = null
-                            // Pasting a link from another host switches the tab so the
-                            // label and the verification path always agree.
-                            if (it.trim().length > 8) {
-                                val detected = RoomMediaSource.detect(it)
-                                if (detected != selectedSource && it.contains("://")) selectedSource = detected
-                            }
-                        },
-                        error = sourceError,
-                        isBusy = isVerifyingLink,
-                        onOpenYouTube = { isYouTubeBrowserOpen = true },
-                        onSubmit = { submitSourceLink() }
-                    )
-
-                    AmbientRoomRow(onClick = {
-                        startWithoutVideo = true
-                        selectedMedia = null
+                MediaSourcePicker(
+                    selected = selectedSource,
+                    onSelect = { source ->
+                        selectedSource = source
                         sourceUrl = ""
                         sourceError = null
-                    })
-                }
+                    },
+                    linkValue = sourceUrl,
+                    onLinkChange = {
+                        sourceUrl = it
+                        sourceError = null
+                        // Pasting a link from another host switches the tab so the
+                        // label and the verification path always agree.
+                        if (it.trim().length > 8) {
+                            val detected = RoomMediaSource.detect(it)
+                            if (detected != selectedSource && it.contains("://")) selectedSource = detected
+                        }
+                    },
+                    error = sourceError,
+                    isBusy = isVerifyingLink,
+                    onOpenYouTube = { isYouTubeBrowserOpen = true },
+                    onSubmit = { submitSourceLink() }
+                )
             }
 
                 // Chosen video preview card
@@ -709,7 +663,7 @@ fun CreateRoomSheet(
                         selectedPrivacy,
                         safeTags,
                         safeMaxParticipants,
-                        if (startWithoutVideo) null else selectedMedia
+                        selectedMedia
                     )
                 },
                 colors = ButtonDefaults.buttonColors(

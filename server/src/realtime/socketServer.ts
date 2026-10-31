@@ -87,10 +87,6 @@ export function notifyRoomParticipantKicked(roomId: string, userId: string): voi
   });
 }
 
-export function notifyRoomParticipantUpdated(roomId: string, participant: { userId: string; isMuted: boolean; isCameraOff: boolean }): void {
-  roomIo?.to(`room:${roomId}`).emit('participant:updated', participant);
-}
-
 export function notifyRoomsParticipantProfileUpdated(roomIds: string[], userId: string): void {
   for (const roomId of roomIds) roomIo?.to(`room:${roomId}`).emit('participant:updated', { userId, profileUpdated: true });
 }

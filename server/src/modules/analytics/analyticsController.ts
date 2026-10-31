@@ -50,8 +50,7 @@ export async function getUserAnalytics(req: Request, res: Response): Promise<voi
       timeInSyncHours: ((user.stats?.timeInSyncMinutes || 0) / 60).toFixed(1),
       activityBreakdown: [
         { category: 'Cinema', percentage: 64 },
-        { category: 'Lo-Fi', percentage: 24 },
-        { category: 'Voice', percentage: 12 },
+        { category: 'Lo-Fi', percentage: 36 },
       ],
       topContent: [
         { rank: '01', title: 'Ambient Space Odyssey', subtitle: '8 watchparties • 22.4h synced' },

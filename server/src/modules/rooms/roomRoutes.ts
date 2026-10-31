@@ -7,7 +7,6 @@ import {
   leaveRoom,
   updateMedia,
   kickParticipant,
-  moderateRoomParticipant,
   updateRoomSettings,
   transferHost,
   inviteRoomParticipant,
@@ -20,7 +19,7 @@ import {
 } from './roomController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody, validateObjectIdParam } from '../../middlewares/validation';
-import { CreateRoomSchema, InviteRoomSchema, UpdateMediaSchema, ModerateRoomParticipantSchema } from '../../utils/schemas';
+import { CreateRoomSchema, InviteRoomSchema, UpdateMediaSchema } from '../../utils/schemas';
 import { roomCreateRateLimiter, roomJoinRateLimiter } from '../../middlewares/rateLimiter';
 
 export const roomRouter = Router();
@@ -43,4 +42,3 @@ roomRouter.post('/:id/queue/:itemId/skip-vote', authMiddleware, voteSkipQueueIte
 roomRouter.delete('/:id/queue/:itemId', authMiddleware, removeRoomQueueItem);
 roomRouter.put('/:id/media', validateObjectIdParam('id'), authMiddleware, validateBody(UpdateMediaSchema), updateMedia);
 roomRouter.delete('/:id/participants/:targetUserId', validateObjectIdParam('id'), authMiddleware, kickParticipant);
-roomRouter.put('/:id/participants/:targetUserId/moderation', validateObjectIdParam('id'), authMiddleware, validateBody(ModerateRoomParticipantSchema), moderateRoomParticipant);

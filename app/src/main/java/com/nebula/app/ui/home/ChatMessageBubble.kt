@@ -80,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
@@ -184,12 +185,14 @@ internal fun ModernChatBubble(
     val density = LocalDensity.current
     var showActions by remember(message.id) { mutableStateOf(false) }
     var showPile by remember(message.id) { mutableStateOf(false) }
+    var showSingleImage by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
     // A room card also carries a mediaUrl, but it is a link to a watch party rather
     // than a file. It shares the borderless bubble treatment with media while keeping
     // its own content branch below.
     val isRoomCard = roomCardCode(message) != null
+    val mediaUrlForViewer = message.mediaUrl.orEmpty()
     val isMediaMessage = message.deletedAt == null &&
         (message.mediaUrl != null || message.messageType == "media" || message.messageType == "video")
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
@@ -201,32 +204,10 @@ internal fun ModernChatBubble(
     // Default to a landscape-ish box until the real dimensions arrive.
     val isVideoMessage = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
     var mediaAspectRatio by remember(message.id) { mutableStateOf(4f / 3f) }
-    androidx.compose.runtime.LaunchedEffect(message.id, message.mediaUrl) {
-        val url = message.mediaUrl
-        if (!url.isNullOrBlank()) {
-            val ratio = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    val source = if (url.startsWith("data:")) {
-                        val csv = url.substringAfter("base64,", "")
-                        android.util.Base64.decode(csv, android.util.Base64.DEFAULT)
-                    } else {
-                        java.net.URL(url).openStream().use { it.readBytes() }
-                    }
-                    val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    android.graphics.BitmapFactory.decodeByteArray(source, 0, source.size, options)
-                    if (options.outWidth > 0 && options.outHeight > 0) {
-                        options.outWidth.toFloat() / options.outHeight.toFloat()
-                    } else null
-                }.getOrNull()
-            }
-            if (ratio != null && ratio.isFinite() && ratio > 0f) {
-                mediaAspectRatio = ratio.coerceIn(0.5f, 2.2f)
-            } else {
-                // Fall back to a measured-but-shown image's intrinsic size.
-                mediaAspectRatio = 4f / 3f
-            }
-        }
-    }
+    // The picture is only painted once its real ratio is known. Painting it into a
+    // guessed 4:3 box first made a portrait photo sit letterboxed inside a box that
+    // then jumped to the right size underneath it.
+    var mediaRatioKnown by remember(message.id) { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -357,35 +338,59 @@ internal fun ModernChatBubble(
                         val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
                         val pile = message.mediaUrls
                         if (pile.size > 1) {
-                            // A pile is one bubble, not five: the photos sit in a small
-                            // grid and open together in the viewer, which swipes between
-                            // them and keeps a thumbnail strip underneath.
-                            Column(
+                            // One stack, not a grid: the photos sit on top of each other
+                            // with a slight lean, and the whole stack opens together in
+                            // the viewer, which swipes between them.
+                            val visible = pile.takeLast(3)
+                            Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true }
-                                    .padding(3.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
+                                    .padding(14.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                pile.chunked(2).forEach { rowUrls ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().weight(1f),
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        rowUrls.forEach { url ->
-                                            AsyncImage(
-                                                model = url,
-                                                contentDescription = "Shared photo",
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .fillMaxHeight()
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                visible.forEachIndexed { index, _ ->
+                                    val depth = visible.lastIndex - index
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .padding(start = (depth * 8).dp, bottom = (depth * 6).dp)
+                                            .rotate(if (depth % 2 == 0) -6f else 6f)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(
+                                                if (depth == 0) Color.Black.copy(alpha = 0.35f)
+                                                else if (isMe) theme.colors.primaryAccent.copy(alpha = 0.55f)
+                                                else theme.colors.surfaceElevated
                                             )
+                                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (depth == 0) {
+                                            val topUrl = pile.last()
+                                            if (topUrl.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = topUrl,
+                                                    contentDescription = "Shared photo",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                )
+                                            }
                                         }
-                                        if (rowUrls.size == 1) Spacer(Modifier.weight(1f))
                                     }
+                                }
+                                Surface(
+                                    modifier = Modifier.align(Alignment.BottomEnd),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color.Black.copy(alpha = 0.7f)
+                                ) {
+                                    Text(
+                                        text = "${pile.size}",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         } else if (isVideo && mediaUrl.isNotBlank()) {
@@ -426,8 +431,22 @@ internal fun ModernChatBubble(
                             SubcomposeAsyncImage(
                                 model = mediaUrl,
                                 contentDescription = "Shared image",
-                                modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                onSuccess = { state ->
+                                    // Coil hands back the picture's own aspect; the box is
+                                    // resized to it before any pixels are drawn.
+                                    val size = state.painter.intrinsicSize
+                                    if (size.width > 0f && size.height > 0f) {
+                                        mediaAspectRatio = (size.width / size.height).coerceIn(0.5f, 2.2f)
+                                    }
+                                    mediaRatioKnown = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable {
+                                        if (spoilerRevealed) showSingleImage = true else spoilerRevealed = true
+                                    }
+                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 loading = {
                                     // Real loading feedback: a shimmering sweep plus an
                                     // indeterminate spinner, so a slow image is visibly
@@ -470,11 +489,11 @@ internal fun ModernChatBubble(
                                         Text("Image unavailable", color = if (isMe) Color.White else theme.colors.textSecondary, fontSize = 12.sp)
                                     }
                                 },
-                                success = { SubcomposeAsyncImageContent() }
+                                success = { if (mediaRatioKnown) SubcomposeAsyncImageContent() }
                             )
                         } else {
                             Text(
-                                text = "Attachment unavailable",
+                                text = "Photo unavailable",
                                 style = theme.typography.bodyMedium.copy(
                                     color = if (isMe) Color.White else theme.colors.textPrimary,
                                     fontWeight = FontWeight.SemiBold
@@ -523,14 +542,51 @@ internal fun ModernChatBubble(
                                 color = Color.Black.copy(alpha = 0.72f)
                             ) { Text("▶", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 20.sp) }
                         }
+                        // The receipt rides on the picture itself; a caption row of
+                        // "Attachment" plus a tick underneath it was the awkward part.
+                        if (isMe && message.deletedAt == null) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.6f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                when {
+                                    message.sendState == MessageSendState.SENDING -> Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White)
+                                    )
+                                    message.sendState == MessageSendState.SENT -> {
+                                        val seen = message.readAt != null
+                                        val delivered = seen || message.deliveredAt != null
+                                        Icon(
+                                            imageVector = if (delivered) Icons.Default.DoneAll else Icons.Default.Done,
+                                            contentDescription = when {
+                                                seen -> "Seen"
+                                                delivered -> "Delivered"
+                                                else -> "Sent"
+                                            },
+                                            tint = if (seen) theme.colors.primaryAccent else Color.White,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Text(
-                        text = message.content.ifBlank { if (message.mediaUrl?.contains("gif", true) == true) "GIF" else "Attachment" },
-                        style = theme.typography.caption.copy(
-                            color = if (isMe) Color.White.copy(alpha = 0.85f) else theme.colors.textSecondary,
-                            fontSize = 11.5.sp
+                    if (message.content.isNotBlank()) {
+                        Text(
+                            text = message.content,
+                            style = theme.typography.caption.copy(
+                                color = if (isMe) Color.White.copy(alpha = 0.85f) else theme.colors.textSecondary,
+                                fontSize = 11.5.sp
+                            )
                         )
-                    )
+                    }
                 }
             } else {
                 Text(
@@ -552,7 +608,7 @@ internal fun ModernChatBubble(
             // message moves through it: dot while it is still going out, one tick once
             // the server has it, two ticks when the recipient's device has it, and two
             // accent ticks when they have opened it.
-            if (isMe && message.deletedAt == null) {
+            if (isMe && message.deletedAt == null && !isMediaMessage) {
                 val markerColor = Color.White.copy(alpha = 0.75f)
                 Row(
                     modifier = Modifier
@@ -588,6 +644,12 @@ internal fun ModernChatBubble(
             }
         }
 
+                if (showSingleImage && mediaUrlForViewer.isNotBlank()) {
+                    com.nebula.app.ui.components.NebulaImageViewer(
+                        images = listOf(mediaUrlForViewer),
+                        onDismiss = { showSingleImage = false }
+                    )
+                }
                 if (showPile) {
                     com.nebula.app.ui.components.NebulaImageViewer(
                         images = message.mediaUrls,
@@ -597,6 +659,8 @@ internal fun ModernChatBubble(
                 if (showActions) {
                     MessageActionSheet(
                         message = message,
+                        // A photo has no text to correct: its sheet is unsend and info.
+                        showEdit = !isMediaMessage,
                         onEdit = {
                             showActions = false
                             onEdit()

@@ -159,8 +159,6 @@ fun NebulaImmersiveBanner(
 @Composable
 fun NebulaProfileHeader(
     user: NebulaUser,
-    friendsCount: Int?,
-    isFriendCountPublic: Boolean,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     tierLabel: String? = null,
@@ -283,25 +281,6 @@ fun NebulaProfileHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                if (isFriendCountPublic && friendsCount != null) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = compactCount(friendsCount),
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp
-                            )
-                        )
-                    }
-                }
                 if (tierLabel != null) {
                     Spacer(modifier = Modifier.size(8.dp))
                     Box(
@@ -344,9 +323,8 @@ fun NebulaProfileHeader(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Only mutual connections sit under the handle. A "N rooms" chip here
-            // stacked a second counter directly beneath the name, which is what made
-            // the identity block read as clutter instead of a header. Friend count
-            // lives beside the name; rooms live in the room activity block.
+            // stacked a second counter directly beneath the name, and the friend-count
+            // chip beside the name read as a stray number rather than a stat.
             if (user.mutualFriendsCount > 0) {
                 CounterChip(text = "${user.mutualFriendsCount} mutual")
             }

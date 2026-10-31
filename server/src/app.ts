@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
@@ -93,6 +94,18 @@ export function createApp(): express.Application {
   });
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
+  // 3b. Marketing site. The landing page is served from this same origin so the
+  //     app's "Visit our website" link and the APK download work without a second
+  //     hosting service. It is registered before the API middlewares because a
+  //     6 MB APK download must not be cut off by the 15 second API socket timeout.
+  const landingDir = path.resolve(__dirname, '../../landing');
+  app.use(express.static(landingDir, { index: 'index.html', maxAge: '1h' }));
+  app.get('/', (_req, res) => {
+    res.sendFile(path.join(landingDir, 'index.html'), (err) => {
+      if (err && !res.headersSent) res.status(404).type('text/plain').send('Nebula');
+    });
+  });
+
   // 4. Emergency Security Circuit Breaker & Honeypot Defenses
   app.use(securityLockdownMiddleware);
 
@@ -114,11 +127,6 @@ export function createApp(): express.Application {
 
   // 6. Health, readiness, and storage routes — registered BEFORE the global rate
   //    limiter so infrastructure probes and media token checks are never throttled.
-  // Root URL is completely cloaked (returns 404 with no revealing server banner)
-  app.get('/', (req, res) => {
-    res.status(404).end();
-  });
-
   app.get('/health', (req, res) => {
     res.json({
       status: 'healthy',

@@ -196,7 +196,6 @@ class RoomRepositoryImpl(
             else -> "public"
         }
         val activityStr = when (activityType) {
-            RoomActivityType.VOICE -> "voice"
             RoomActivityType.CHAT -> "chat"
             else -> "watch"
         }
@@ -267,8 +266,6 @@ class RoomRepositoryImpl(
     override suspend fun updateRoomSettings(
         name: String?,
         maxParticipants: Int?,
-        isMicAllowed: Boolean?,
-        isVideoAllowed: Boolean?,
         tags: List<String>?
     ): NebulaRoom? {
         val current = _activeRoom.value ?: return null
@@ -276,8 +273,6 @@ class RoomRepositoryImpl(
             roomId = current.id,
             name = name,
             maxParticipants = maxParticipants,
-            isMicAllowed = isMicAllowed,
-            isVideoAllowed = isVideoAllowed,
             tags = tags
         )
         if (res !is ApiResponse.Success) return null
@@ -595,7 +590,6 @@ class RoomRepositoryImpl(
         }
         val activityStr = json.optString("activity", "watch")
         val activity = when (activityStr) {
-            "voice" -> RoomActivityType.VOICE
             "chat" -> RoomActivityType.CHAT
             else -> RoomActivityType.WATCH
         }
@@ -636,9 +630,7 @@ class RoomRepositoryImpl(
             if (participantList.none { it.user.id == pId }) participantList.add(
                 RoomParticipant(
                     user = u,
-                    isHost = isHost,
-                    isAudioActive = !p.optBoolean("isMuted", false),
-                    isVideoActive = !p.optBoolean("isCameraOff", false)
+                    isHost = isHost
                 )
             )
         }
@@ -685,8 +677,6 @@ class RoomRepositoryImpl(
             mediaItem = sharedMedia,
             participantCount = participantList.size,
             maxParticipants = json.optInt("maxParticipants", 20),
-            isMicAllowed = json.optBoolean("isMicAllowed", true),
-            isVideoAllowed = json.optBoolean("isVideoAllowed", true),
             participants = participantList,
             isPlaying = isPlaying,
             mediaEnded = false,

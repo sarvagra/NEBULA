@@ -128,7 +128,7 @@ fun NebulaPrivacyPolicyScreen(
 
             item { PolicySection("11. Location Information", "Nebula does not require precise device location for core room functionality. Precise GPS tracking is never enabled merely because you installed Nebula.") }
 
-            item { PolicySection("12. Microphone and Camera", "Used solely for active voice rooms when explicitly enabled by user permission. Continuous background recording is prohibited.") }
+            item { PolicySection("12. Microphone and Camera", "Nebula does not access your microphone or camera. Watch parties share a video link and typed chat only; no audio or video is captured from your device.") }
 
             item { PolicySection("13. Contacts", "Nebula does not require or scan your entire contact list. We do not access contacts merely to operate rooms.") }
 

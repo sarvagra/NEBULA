@@ -196,8 +196,7 @@ enum class RoomPrivacy(val label: String) {
  */
 enum class RoomActivityType(val label: String, val description: String) {
     WATCH("Watch", "Synchronized media & cinema"),
-    CHAT("Chat", "Group text discussion"),
-    VOICE("Voice", "Audio room")
+    CHAT("Chat", "Group text discussion")
 }
 
 /**
@@ -258,10 +257,7 @@ data class SharedMediaItem(
  */
 data class RoomParticipant(
     val user: NebulaUser,
-    val isHost: Boolean = false,
-    val isSpeaking: Boolean = false,
-    val isVideoActive: Boolean = true,
-    val isAudioActive: Boolean = true
+    val isHost: Boolean = false
 )
 
 /**
@@ -335,9 +331,7 @@ data class NebulaRoom(
     val serverTimestamp: Long = System.currentTimeMillis(),
     val recentMessages: List<RoomChatMessage> = emptyList(),
     val tags: List<String> = emptyList(),
-    val maxParticipants: Int = 20,
-    val isMicAllowed: Boolean = true,
-    val isVideoAllowed: Boolean = true,
+    val maxParticipants: Int = 24,
     val description: String = ""
 ) {
     companion object {

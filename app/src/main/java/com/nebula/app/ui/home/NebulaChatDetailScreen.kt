@@ -470,8 +470,9 @@ fun NebulaChatDetailScreen(
             }
         }
 
-        fun pickAttachment(uri: android.net.Uri, isVideo: Boolean) {
-            coroutineScope.launch {
+        // Runs sequentially for every URI from one picker pass: a launch per picture
+        // raced on the same `drafts` state and silently dropped all but one.
+        suspend fun pickAttachment(uri: android.net.Uri, isVideo: Boolean) {
                 val mimeType = context.contentResolver.getType(uri)?.lowercase().orEmpty()
                     .ifBlank { if (isVideo) "video/mp4" else "image/jpeg" }
                 val maxBytes = if (isVideo) 30 * 1024 * 1024L else 5 * 1024 * 1024L
@@ -486,16 +487,16 @@ fun NebulaChatDetailScreen(
                         if (isVideo) "Video must be under 30MB" else "Image must be under 5MB",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
-                    return@launch
+                    return
                 }
                 if (isVideo && mimeType !in setOf("video/mp4", "video/webm")) {
                     android.widget.Toast.makeText(context, "Choose an MP4 or WebM video", android.widget.Toast.LENGTH_LONG).show()
-                    return@launch
+                    return
                 }
                 showAttachments = false
                 if (drafts.size >= 5) {
                     android.widget.Toast.makeText(context, "Five photos at a time", android.widget.Toast.LENGTH_SHORT).show()
-                    return@launch
+                    return
                 }
                 // The local file shows immediately; the upload runs behind it.
                 val target = PendingAttachment(
@@ -506,19 +507,23 @@ fun NebulaChatDetailScreen(
                 )
                 drafts = drafts + target
                 if (isOnline) uploadDraft(target)
-            }
         }
 
+        // Up to five photos come back from one picker, so the user stacks the whole
+        // pile in a single pass instead of reopening the gallery per picture.
         val imagePickerLauncher = rememberLauncherForActivityResult(
-            contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
-        ) { uri: android.net.Uri? ->
-            uri?.let { pickAttachment(it, isVideo = false) }
+            contract = androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5)
+        ) { uris: List<android.net.Uri> ->
+            if (uris.isEmpty()) return@rememberLauncherForActivityResult
+            coroutineScope.launch {
+                uris.forEach { uri -> pickAttachment(uri, isVideo = false) }
+            }
         }
 
         val videoPickerLauncher = rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
         ) { uri: android.net.Uri? ->
-            uri?.let { pickAttachment(it, isVideo = true) }
+            uri?.let { picked -> coroutineScope.launch { pickAttachment(picked, isVideo = true) } }
         }
 
         AnimatedVisibility(

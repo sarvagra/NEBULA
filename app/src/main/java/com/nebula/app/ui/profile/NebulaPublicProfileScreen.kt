@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Tv
@@ -85,6 +87,7 @@ fun NebulaPublicProfileScreen(
     var isRequestReceived by remember(user.id, user.friendRequestReceived) { mutableStateOf(user.friendRequestReceived) }
     var showProfileMenu by remember { mutableStateOf(false) }
     var showBlockConfirmation by remember { mutableStateOf(false) }
+    var showProfileInfo by remember { mutableStateOf(false) }
 
     LaunchedEffect(user.isFriend, user.friendRequestPending, user.friendRequestReceived) {
         isFriendState = user.isFriend
@@ -92,7 +95,6 @@ fun NebulaPublicProfileScreen(
         isRequestReceived = user.friendRequestReceived
     }
 
-    val effectiveFriendCount: Int? = if (isCurrentUser) viewerFriendsCount ?: user.friendsCount else user.friendsCount
     // Removing a friend is not undoable in one tap, so it asks first.
     var confirmRemoveFriend by remember(user.id) { mutableStateOf(false) }
 
@@ -103,11 +105,8 @@ fun NebulaPublicProfileScreen(
         contentPadding = PaddingValues(bottom = 112.dp)
     ) {
         // 1. IMMERSIVE HEADER
-        item {
-            NebulaProfileHeader(
+        item {                NebulaProfileHeader(
                 user = user,
-                friendsCount = effectiveFriendCount,
-                isFriendCountPublic = effectiveFriendCount != null,
                 topBarStart = {
                     CircleGlyphButton(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
@@ -124,11 +123,38 @@ fun NebulaPublicProfileScreen(
                 },
                 actions = {
                     if (isCurrentUser) {
-                        PrimaryActionButton(
-                            text = "Edit Profile",
-                            icon = Icons.Default.Edit,
-                            onClick = onOpenEditProfile
-                        )
+                        // Your own profile as others see it: the two social buttons are
+                        // drawn but inert, and the pencil takes the invite slot.
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            PreviewActionButton(
+                                text = "Add Friend",
+                                icon = Icons.Default.PersonAdd,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PreviewActionButton(
+                                text = "Message",
+                                icon = Icons.AutoMirrored.Filled.Chat,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(theme.colors.primaryAccent)
+                                    .clickable { onOpenEditProfile() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit profile",
+                                    tint = theme.colors.onPrimaryAccent,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     } else {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -303,10 +329,22 @@ fun NebulaPublicProfileScreen(
         displayName = user.displayName,
         accountCreatedAt = user.accountCreatedAt,
         usernameChanges = user.usernameChanges,
+        onOpenInfo = { showProfileMenu = false; showProfileInfo = true },
         onEditProfile = { showProfileMenu = false; onOpenEditProfile() },
         onBlock = { showProfileMenu = false; showBlockConfirmation = true },
         onDismiss = { showProfileMenu = false }
     )
+
+    // Account details are their own page rather than a section wedged under the
+    // action that opens them.
+    if (showProfileInfo) {
+        ProfileInfoPage(
+            displayName = user.displayName,
+            accountCreatedAt = user.accountCreatedAt,
+            usernameChanges = user.usernameChanges,
+            onBack = { showProfileInfo = false }
+        )
+    }
 
     if (showBlockConfirmation) {
         AlertDialog(
@@ -426,6 +464,43 @@ private fun CircleGlyphButton(
             tint = Color.White,
             modifier = Modifier.size(21.dp)
         )
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.PreviewActionButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    val theme = Theme.current
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(theme.colors.surfaceElevated)
+            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = theme.colors.textTertiary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = text,
+                style = theme.typography.bodyMedium.copy(
+                    color = theme.colors.textTertiary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp
+                )
+            )
+        }
     }
 }
 
@@ -551,6 +626,7 @@ private fun ProfileActionSheet(
     displayName: String,
     accountCreatedAt: String?,
     usernameChanges: List<com.nebula.app.domain.model.NebulaUsernameChange>,
+    onOpenInfo: () -> Unit,
     onEditProfile: () -> Unit,
     onBlock: () -> Unit,
     onDismiss: () -> Unit
@@ -591,6 +667,13 @@ private fun ProfileActionSheet(
                     .background(theme.colors.surface)
                     .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
             ) {
+                ProfileActionRow(
+                    icon = Icons.Default.Info,
+                    title = "Profile info",
+                    subtitle = "Account age, username changes",
+                    tint = theme.colors.primaryAccent,
+                    onClick = onOpenInfo
+                )
                 if (isCurrentUser) {
                     ProfileActionRow(
                         icon = Icons.Default.Edit,
@@ -611,47 +694,111 @@ private fun ProfileActionSheet(
                 }
             }
 
-            // PROFILE INFO — account age and the username trail. Both come from the
-            // server, so "previously known as" is a record rather than a guess.
-            val memberSince = shortDate(accountCreatedAt)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "PROFILE INFO",
-                    style = theme.typography.caption.copy(
-                        color = theme.colors.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        fontSize = 11.sp
-                    )
-                )
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+    }
+}
 
-                InfoLine(label = "Member since", value = memberSince ?: "Unknown")
+/**
+ * The account record behind a profile: when the account was made, how many times the
+ * username changed and when it last changed — not the trail of old handles themselves.
+ */
+@Composable
+private fun ProfileInfoPage(
+    displayName: String,
+    accountCreatedAt: String?,
+    usernameChanges: List<com.nebula.app.domain.model.NebulaUsernameChange>,
+    onBack: () -> Unit
+) {
+    val theme = Theme.current
 
-                if (usernameChanges.isEmpty()) {
-                    InfoLine(label = "Username changes", value = "Never changed")
-                } else {
-                    InfoLine(
-                        label = if (usernameChanges.size == 1) "Changed username once" else "Changed username ${usernameChanges.size} times",
-                        value = ""
+    /** "12 Mar 2026" from an ISO timestamp; blank when the server sent nothing usable. */
+    fun shortDate(iso: String?): String? {
+        if (iso.isNullOrBlank()) return null
+        return try {
+            val normalised = iso.replace(" ", "T").substringBefore('.').removeSuffix("Z")
+            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            val date = parser.parse(normalised) ?: return null
+            val out = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US)
+            out.timeZone = java.util.TimeZone.getDefault()
+            out.format(date)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    val lastChange = usernameChanges.lastOrNull()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(theme.colors.background)
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 48.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircleGlyphButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack
                     )
-                    usernameChanges.forEach { change ->
-                        InfoLine(
-                            label = "@${change.previousUsername}",
-                            value = shortDate(change.changedAt) ?: ""
+                    Text(
+                        text = "Profile info",
+                        modifier = Modifier.padding(start = 10.dp),
+                        style = theme.typography.titleMedium.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
                         )
-                    }
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(theme.colors.surface)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = displayName,
+                        style = theme.typography.bodyMedium.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
+                        )
+                    )
+
+                    InfoLine(label = "Member since", value = shortDate(accountCreatedAt) ?: "Unknown")
+                    InfoLine(
+                        label = "Username changes",
+                        value = when (usernameChanges.size) {
+                            0 -> "Never changed"
+                            1 -> "1 time"
+                            else -> "${usernameChanges.size} times"
+                        }
+                    )
+                    InfoLine(
+                        label = "Last username change",
+                        value = shortDate(lastChange?.changedAt) ?: "Unknown"
+                    )
+                }
+            }
         }
     }
 }

@@ -277,9 +277,6 @@ fun HomeScreen(
                     onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
                     onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
                     onCancelFriendRequest = { viewModel.onCancelFriendRequest(it) },
-                    onModerateParticipant = { userId, isMuted, isCameraOff ->
-                        viewModel.onModerateRoomParticipant(userId, isMuted, isCameraOff)
-                    },
                     onKickParticipant = { viewModel.onKickRoomParticipant(it) },
                     onAddFriend = { viewModel.onAddFriend(it) },
                     onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
@@ -289,8 +286,8 @@ fun HomeScreen(
                     onHostVideoEnded = { viewModel.onHostVideoEnded(it) },
                     onRestartVideo = { viewModel.onRestartRoomVideo() },
                     onViewParticipantProfile = { viewModel.onOpenFriendProfile(it) },
-                    onUpdateRoomSettings = { name, max, mic, vid, tags ->
-                        viewModel.onUpdateRoomSettings(name, max, mic, vid, tags)
+                    onUpdateRoomSettings = { name, max, tags ->
+                        viewModel.onUpdateRoomSettings(name, max, tags)
                     },
                     onTransferHost = { newHostId, random ->
                         viewModel.onTransferHost(newHostId, random)

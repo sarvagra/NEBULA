@@ -104,6 +104,7 @@ import coil.compose.SubcomposeAsyncImageContent
 @Composable
 internal fun MessageActionSheet(
     message: ChatMessage,
+    showEdit: Boolean = true,
     onEdit: () -> Unit,
     onUnsend: () -> Unit,
     onDismiss: () -> Unit
@@ -137,14 +138,16 @@ internal fun MessageActionSheet(
                     ),
                     modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                 )
-                CountdownAction(
-                    label = "Edit",
-                    subtitle = if (remainingFraction > 0f) "Send the corrected text" else "Edit window closed",
-                    fraction = remainingFraction,
-                    accent = theme.colors.successColor,
-                    enabled = remainingFraction > 0f,
-                    onClick = onEdit
-                )
+                if (showEdit) {
+                    CountdownAction(
+                        label = "Edit",
+                        subtitle = if (remainingFraction > 0f) "Send the corrected text" else "Edit window closed",
+                        fraction = remainingFraction,
+                        accent = theme.colors.successColor,
+                        enabled = remainingFraction > 0f,
+                        onClick = onEdit
+                    )
+                }
                 CountdownAction(
                     label = "Unsend",
                     subtitle = if (remainingFraction > 0f) "Remove for everyone" else "Unsend window closed",

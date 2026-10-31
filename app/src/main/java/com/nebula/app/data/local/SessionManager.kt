@@ -251,8 +251,6 @@ class SessionManager(context: Context) {
                     put("durationLabel", room.durationLabel)
                     put("tags", JSONArray(room.tags))
                     put("maxParticipants", room.maxParticipants)
-                    put("isMicAllowed", room.isMicAllowed)
-                    put("isVideoAllowed", room.isVideoAllowed)
                     put("description", room.description)
                     if (room.mediaItem != null) {
                         put("mediaItem", JSONObject().apply {
@@ -274,8 +272,6 @@ class SessionManager(context: Context) {
                             put("avatarLetter", p.user.avatarLetter)
                             put("avatarUrl", p.user.avatarUrl ?: "")
                             put("isHost", p.isHost)
-                            put("isAudioActive", p.isAudioActive)
-                            put("isVideoActive", p.isVideoActive)
                         })
                     }
                     put("participants", parts)
@@ -331,9 +327,7 @@ class SessionManager(context: Context) {
                                     status = "In room",
                                     isOnline = true
                                 ),
-                                isHost = pObj.optBoolean("isHost", false),
-                                isAudioActive = pObj.optBoolean("isAudioActive", true),
-                                isVideoActive = pObj.optBoolean("isVideoActive", true)
+                                isHost = pObj.optBoolean("isHost", false)
                             )
                         )
                     }
@@ -355,9 +349,7 @@ class SessionManager(context: Context) {
                         playbackPositionLabel = obj.optString("playbackPositionLabel", "00:00"),
                         durationLabel = obj.optString("durationLabel", "00:00"),
                         tags = tags,
-                        maxParticipants = obj.optInt("maxParticipants", 20),
-                        isMicAllowed = obj.optBoolean("isMicAllowed", true),
-                        isVideoAllowed = obj.optBoolean("isVideoAllowed", true),
+                        maxParticipants = obj.optInt("maxParticipants", 24),
                         description = obj.optString("description", "")
                     )
                 )

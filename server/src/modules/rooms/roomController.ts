@@ -8,7 +8,7 @@ import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
 import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { NotificationModel } from '../../models/Notification';
-import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomParticipantUpdated, notifyRoomQueueChanged } from '../../realtime/socketServer';
+import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomQueueChanged } from '../../realtime/socketServer';
 import { entitlementsForTier } from '../../utils/entitlements';
 import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
 import { RoomQueueItemModel } from '../../models/RoomQueueItem';
@@ -693,19 +693,13 @@ export async function updateRoomSettings(req: Request, res: Response): Promise<v
       return;
     }
 
-    const { name, maxParticipants, isMicAllowed, isVideoAllowed, tags } = req.body;
+    const { name, maxParticipants, tags } = req.body;
 
     if (name && typeof name === 'string' && name.trim().length >= 2) {
       room.name = name.trim();
     }
     if (typeof maxParticipants === 'number' && maxParticipants > 0) {
       room.maxParticipants = maxParticipants;
-    }
-    if (typeof isMicAllowed === 'boolean') {
-      room.isMicAllowed = isMicAllowed;
-    }
-    if (typeof isVideoAllowed === 'boolean') {
-      room.isVideoAllowed = isVideoAllowed;
     }
     if (Array.isArray(tags)) {
       room.tags = tags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 5);
@@ -866,46 +860,6 @@ export async function kickParticipant(req: Request, res: Response): Promise<void
     res.json({ success: true, message: 'Participant kicked successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to kick participant' });
-  }
-}
-
-export async function moderateRoomParticipant(req: Request, res: Response): Promise<void> {
-  try {
-    if (!req.user) {
-      res.status(401).json({ success: false, error: 'Authentication required' });
-      return;
-    }
-    const { id, targetUserId } = req.params;
-    const room = await RoomModel.findById(id);
-    if (!room) {
-      res.status(404).json({ success: false, error: 'Room not found' });
-      return;
-    }
-    if (room.hostId !== req.user.id && req.user.role !== 'admin') {
-      res.status(403).json({ success: false, error: 'Only the host can moderate room participants' });
-      return;
-    }
-    if (targetUserId === room.hostId) {
-      res.status(400).json({ success: false, error: 'The host cannot moderate themselves' });
-      return;
-    }
-    const participant = room.participants.find((item) => item.userId === targetUserId);
-    if (!participant) {
-      res.status(404).json({ success: false, error: 'Participant is not in this room' });
-      return;
-    }
-    if (typeof req.body.isMuted === 'boolean') participant.isMuted = req.body.isMuted;
-    if (typeof req.body.isCameraOff === 'boolean') participant.isCameraOff = req.body.isCameraOff;
-    await room.save();
-    const updatedParticipant = {
-      userId: participant.userId,
-      isMuted: participant.isMuted ?? false,
-      isCameraOff: participant.isCameraOff ?? false,
-    };
-    notifyRoomParticipantUpdated(id, updatedParticipant);
-    res.json({ success: true, data: updatedParticipant });
-  } catch {
-    res.status(500).json({ success: false, error: 'Failed to update participant moderation' });
   }
 }
 

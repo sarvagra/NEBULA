@@ -105,18 +105,6 @@ fun PermissionsSheet(
     val permissionSpecs = remember {
         listOf(
             PermissionSpec(
-                id = "mic",
-                name = "Microphone",
-                icon = Icons.Default.Mic,
-                permissionString = Manifest.permission.RECORD_AUDIO
-            ),
-            PermissionSpec(
-                id = "camera",
-                name = "Camera",
-                icon = Icons.Default.Videocam,
-                permissionString = Manifest.permission.CAMERA
-            ),
-            PermissionSpec(
                 id = "notifications",
                 name = "Notifications",
                 icon = Icons.Default.Notifications,

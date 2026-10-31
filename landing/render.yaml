@@ -1,0 +1,19 @@
+services:
+  # Static marketing + download page. Independent of the nebula-api web service:
+  # applying this blueprint must not touch it.
+  - type: web
+    name: nebula-landing
+    runtime: static
+    rootDir: landing
+    staticPublishPath: .
+    autoDeploy: true
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=86400
+      - path: /download/*
+        name: Content-Type
+        value: application/vnd.android.package-archive

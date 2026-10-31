@@ -523,7 +523,7 @@ fun NebulaAccountDetailScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Strict Limit: Max 2 concurrent devices per account. Only 1 device may join voice/watch rooms at a time.",
+                                text = "Strict Limit: Max 2 concurrent devices per account. Only 1 device may join a watch room at a time.",
                                 style = theme.typography.caption.copy(
                                     color = theme.colors.textSecondary.copy(alpha = 0.85f),
                                     fontSize = 11.5.sp,

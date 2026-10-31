@@ -131,13 +131,12 @@ import java.util.concurrent.atomic.AtomicReference
  * - Realtime Room Chat feed
  * - Room Composer with Paperclip attachment picker
  * - Room Members Sheet with 3-dots admin mute/unmute and member public profile click
- * - Room Settings Sheet with name, max members, mic/video toggles, and tags
+ * - Room Options Sheet with invite, share, host settings and leave
  */
 data class NebulaRoomActions(
     val onAcceptFriendRequest: (String) -> Unit = {},
     val onDeclineFriendRequest: (String) -> Unit = {},
     val onCancelFriendRequest: (NebulaUser) -> Unit = {},
-    val onModerateParticipant: (String, Boolean?, Boolean?) -> Unit = { _, _, _ -> },
     val onKickParticipant: (String) -> Unit = {},
     val onAddFriend: (NebulaUser) -> Unit = {},
     val onMessageFriend: (NebulaUser) -> Unit = {},
@@ -147,7 +146,7 @@ data class NebulaRoomActions(
     val onHostVideoEnded: (Long) -> Unit = {},
     val onRestartVideo: () -> Unit = {},
     val onViewParticipantProfile: (NebulaUser) -> Unit = {},
-    val onUpdateRoomSettings: (name: String?, max: Int?, mic: Boolean?, vid: Boolean?, tags: List<String>?) -> Unit = { _, _, _, _, _ -> },
+    val onUpdateRoomSettings: (name: String?, max: Int?, tags: List<String>?) -> Unit = { _, _, _ -> },
     val onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
     val onShareRoomInChat: (NebulaUser) -> Unit = {},
     val onTogglePlayPause: () -> Unit = {},
@@ -177,7 +176,6 @@ fun NebulaRoomScreen(
     val onAcceptFriendRequest = actions.onAcceptFriendRequest
     val onDeclineFriendRequest = actions.onDeclineFriendRequest
     val onCancelFriendRequest = actions.onCancelFriendRequest
-    val onModerateParticipant = actions.onModerateParticipant
     val onKickParticipant = actions.onKickParticipant
     val onAddFriend = actions.onAddFriend
     val onMessageFriend = actions.onMessageFriend
@@ -211,8 +209,6 @@ fun NebulaRoomScreen(
     // Room local state (customizable via Admin Settings)
     var roomName by remember(room.id, room.name) { mutableStateOf(room.name) }
     var maxParticipants by remember(room.id, room.maxParticipants) { mutableIntStateOf(room.maxParticipants) }
-    var isMicAllowed by remember(room.id, room.isMicAllowed) { mutableStateOf(room.isMicAllowed) }
-    var isVideoAllowed by remember(room.id, room.isVideoAllowed) { mutableStateOf(room.isVideoAllowed) }
     var roomTags by remember(room.id, room.tags) { mutableStateOf(room.tags) }
     var showRoomQueue by remember(room.id) { mutableStateOf(false) }
 
@@ -910,8 +906,6 @@ fun NebulaRoomScreen(
             onCancelFriendRequest = onCancelFriendRequest,
             onMessageFriend = onMessageFriend,
                 onInviteFriend = onInviteFriend,
-            onToggleAudioMute = { userId, muted -> onModerateParticipant(userId, muted, null) },
-            onToggleVideoMute = { userId, cameraOff -> onModerateParticipant(userId, null, cameraOff) },
             onKickParticipant = onKickParticipant,
             canModerate = isCurrentUserAdmin,
             onSelectParticipantProfile = { memberUser ->
@@ -972,17 +966,13 @@ fun NebulaRoomScreen(
             isVisible = showRoomSettings,
             roomName = roomName,
             maxParticipants = maxParticipants,
-            isMicAllowed = isMicAllowed,
-            isVideoAllowed = isVideoAllowed,
             tags = roomTags,
-            onSaveSettings = { newName, newMax, newMic, newVideo, newTags ->
+            onSaveSettings = { newName, newMax, newTags ->
                 roomName = newName
                 maxParticipants = newMax
-                isMicAllowed = newMic
-                isVideoAllowed = newVideo
                 roomTags = newTags
                 showRoomSettings = false
-                onUpdateRoomSettings(newName, newMax, newMic, newVideo, newTags)
+                onUpdateRoomSettings(newName, newMax, newTags)
                 Toast.makeText(context, "Room settings updated successfully", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showRoomSettings = false }

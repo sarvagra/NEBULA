@@ -66,8 +66,6 @@ fun FriendProfileSheet(
         Column(modifier = Modifier.fillMaxWidth()) {
             NebulaProfileHeader(
                 user = user,
-                friendsCount = user.friendsCount,
-                isFriendCountPublic = user.friendsCount != null,
                 compact = true,
                 topBar = {
                     Box(

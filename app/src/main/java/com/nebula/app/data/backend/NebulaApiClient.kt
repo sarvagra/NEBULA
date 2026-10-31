@@ -355,15 +355,11 @@ object NebulaApiClient {
         roomId: String,
         name: String? = null,
         maxParticipants: Int? = null,
-        isMicAllowed: Boolean? = null,
-        isVideoAllowed: Boolean? = null,
         tags: List<String>? = null
     ): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             name?.let { put("name", it) }
             maxParticipants?.let { put("maxParticipants", it) }
-            isMicAllowed?.let { put("isMicAllowed", it) }
-            isVideoAllowed?.let { put("isVideoAllowed", it) }
             tags?.let { put("tags", JSONArray(it)) }
         }
         return request("/rooms/$roomId/settings", "PUT", body)
@@ -384,19 +380,6 @@ object NebulaApiClient {
 
     suspend fun kickRoomParticipant(roomId: String, userId: String): ApiResponse<JSONObject> =
         request("/rooms/$roomId/participants/$userId", "DELETE")
-
-    suspend fun moderateRoomParticipant(
-        roomId: String,
-        userId: String,
-        isMuted: Boolean? = null,
-        isCameraOff: Boolean? = null
-    ): ApiResponse<JSONObject> {
-        val body = JSONObject().apply {
-            isMuted?.let { put("isMuted", it) }
-            isCameraOff?.let { put("isCameraOff", it) }
-        }
-        return request("/rooms/$roomId/participants/$userId/moderation", "PUT", body)
-    }
 
     suspend fun updateMedia(
         roomId: String,

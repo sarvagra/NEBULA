@@ -4,6 +4,9 @@ build/
 app/build/
 *.apk
 *.aab
+# The published download is the one artifact the marketing page needs in the
+# repository: the backend serves this folder as static files.
+!landing/download/*.apk
 
 # Local Android SDK configuration
 local.properties

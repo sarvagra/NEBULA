@@ -29,8 +29,6 @@ interface IRoomRepository {
     suspend fun updateRoomSettings(
         name: String? = null,
         maxParticipants: Int? = null,
-        isMicAllowed: Boolean? = null,
-        isVideoAllowed: Boolean? = null,
         tags: List<String>? = null
     ): NebulaRoom?
     suspend fun transferHost(newHostId: String? = null, random: Boolean = false): NebulaRoom?

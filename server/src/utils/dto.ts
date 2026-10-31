@@ -177,8 +177,6 @@ export function toPublicRoomDTO(room: IRoom, currentUserId?: string) {
     },
     participantCount: room.participants.length,
     maxParticipants: room.maxParticipants,
-    isMicAllowed: (room as any).isMicAllowed ?? true,
-    isVideoAllowed: (room as any).isVideoAllowed ?? true,
     participants: room.participants.map((p) => ({
       userId: p.userId,
       username: p.username,
@@ -190,8 +188,6 @@ export function toPublicRoomDTO(room: IRoom, currentUserId?: string) {
       status: p.status,
       interests: p.interests || [],
       isHost: p.isHost,
-      isMuted: p.isMuted ?? false,
-      isCameraOff: p.isCameraOff ?? false,
     })),
     userPermissions: {
       isHost,

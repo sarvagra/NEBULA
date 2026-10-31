@@ -53,7 +53,7 @@ export const CreateAssetSchema = z.object({
 export const CreateRoomSchema = z.object({
   name: z.string().trim().min(2, 'Room name must be at least 2 characters').max(50, 'Room name cannot exceed 50 characters'),
   privacy: z.enum(['friends', 'invite_only', 'public']).default('public'),
-  activity: z.enum(['watch', 'chat', 'voice']).default('watch'),
+  activity: z.enum(['watch', 'chat']).default('watch'),
   category: z.string().trim().max(30).default('Social'),
   tags: z.array(z.string().trim().max(30)).max(3).optional().default([]),
   maxParticipants: z.number().int().min(2).max(100).optional(),
@@ -68,11 +68,6 @@ export const CreateRoomSchema = z.object({
 export const InviteRoomSchema = z.object({
   userId: z.string().trim().length(24, 'Invalid user ID format'),
 });
-
-export const ModerateRoomParticipantSchema = z.object({
-  isMuted: z.boolean().optional(),
-  isCameraOff: z.boolean().optional(),
-}).refine((value) => value.isMuted !== undefined || value.isCameraOff !== undefined);
 
 export const UpdateMediaSchema = z.object({
   title: z.string().trim().max(120).optional(),

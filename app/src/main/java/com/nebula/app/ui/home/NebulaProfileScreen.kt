@@ -20,9 +20,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -136,8 +138,6 @@ fun NebulaProfileScreen(
         item {
             NebulaProfileHeader(
                 user = user,
-                friendsCount = friendsCount,
-                isFriendCountPublic = isFriendCountPublic,
                 tierLabel = activeTier.badgeLabel,
                 presenceColor = nebulaStatusIndicatorColor(user),
                 topBar = {
@@ -158,51 +158,35 @@ fun NebulaProfileScreen(
                     }
                 },
                 actions = {
+                    // The owner's own page renders as a public preview: the same row a
+                    // visitor would see, with the two social buttons held inert, and the
+                    // pencil in the slot where another profile shows its invite button.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Button(
-                            onClick = onOpenEditProfile,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = theme.colors.primaryAccent,
-                                contentColor = theme.colors.onPrimaryAccent
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Edit Profile",
-                                    style = theme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
-                                )
-                            }
-                        }
-
+                        PreviewActionButton(
+                            text = "Add Friend",
+                            icon = Icons.Default.PersonAdd,
+                            modifier = Modifier.weight(1f)
+                        )
+                        PreviewActionButton(
+                            text = "Message",
+                            icon = Icons.AutoMirrored.Filled.Chat,
+                            modifier = Modifier.weight(1f)
+                        )
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(44.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(theme.colors.surfaceElevated)
-                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                                .clickable(onClick = onViewPublicProfile),
+                                .background(theme.colors.primaryAccent)
+                                .clickable(onClick = onOpenEditProfile),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "View public profile",
-                                tint = theme.colors.textPrimary,
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit profile",
+                                tint = theme.colors.onPrimaryAccent,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -432,6 +416,47 @@ fun NebulaProfileScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The public-preview buttons on the owner's own page: drawn exactly like the real
+ * ones a visitor sees, but held down because you cannot friend or message yourself.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.PreviewActionButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    val theme = Theme.current
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(theme.colors.surfaceElevated)
+            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = theme.colors.textTertiary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = text,
+                style = theme.typography.bodyMedium.copy(
+                    color = theme.colors.textTertiary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp
+                )
+            )
         }
     }
 }

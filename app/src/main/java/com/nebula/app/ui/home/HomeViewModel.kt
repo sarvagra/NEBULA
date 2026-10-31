@@ -720,16 +720,12 @@ class HomeViewModel(
     fun onUpdateRoomSettings(
         name: String?,
         maxParticipants: Int?,
-        isMicAllowed: Boolean?,
-        isVideoAllowed: Boolean?,
         tags: List<String>?
     ) {
         viewModelScope.launch {
             val updated = roomRepository.updateRoomSettings(
                 name = name,
                 maxParticipants = maxParticipants,
-                isMicAllowed = isMicAllowed,
-                isVideoAllowed = isVideoAllowed,
                 tags = tags
             )
             if (updated != null) {
@@ -749,18 +745,6 @@ class HomeViewModel(
                 showToast("Room host updated: ${updated.hostName}")
             } else {
                 showToast("Room host could not be changed. Check your connection and permissions.")
-            }
-        }
-    }
-
-    fun onModerateRoomParticipant(userId: String, isMuted: Boolean?, isCameraOff: Boolean?) {
-        val roomId = _uiState.value.activeRoom?.id ?: return
-        viewModelScope.launch {
-            val response = com.nebula.app.data.backend.NebulaApiClient.moderateRoomParticipant(
-                roomId, userId, isMuted, isCameraOff
-            )
-            if (response !is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success) {
-                showToast("Participant controls could not be updated.")
             }
         }
     }

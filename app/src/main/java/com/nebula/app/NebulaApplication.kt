@@ -17,9 +17,15 @@ class NebulaApplication : Application(), ImageLoaderFactory {
             val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
             val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
             if (isDebuggable) {
-                appCheck.installAppCheckProviderFactory(
-                    com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory.getInstance()
-                )
+                // The debug provider is a debugImplementation dependency, so it must be
+                // loaded reflectively: a release build has no such class on its classpath.
+                runCatching {
+                    val factory = Class
+                        .forName("com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory")
+                        .getMethod("getInstance")
+                        .invoke(null) as com.google.firebase.appcheck.AppCheckProviderFactory
+                    appCheck.installAppCheckProviderFactory(factory)
+                }
             } else {
                 appCheck.installAppCheckProviderFactory(
                     com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory.getInstance()

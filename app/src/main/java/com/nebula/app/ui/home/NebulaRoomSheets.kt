@@ -133,8 +133,8 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * RoomMembersSheet:
  * Displays all participants in the room.
- * - Each row: Avatar, name, host tag, status indicators (mic/camera)
- * - 3 dots menu beside each member: Admin toggle for audio/video mute
+ * - Each row: Avatar, name, host tag
+ * - 3 dots menu beside each member: host can remove them from the room
  * - Clicking anywhere else on row: opens member's public profile
  * - Dismiss / click outside: returns simply to the room
  */
@@ -157,8 +157,6 @@ internal fun RoomMembersSheet(
     onCancelFriendRequest: (NebulaUser) -> Unit,
     onMessageFriend: (NebulaUser) -> Unit,
     onInviteFriend: (NebulaUser) -> Unit,
-    onToggleAudioMute: (String, Boolean) -> Unit,
-    onToggleVideoMute: (String, Boolean) -> Unit,
     onKickParticipant: (String) -> Unit,
     canModerate: Boolean,
     onSelectParticipantProfile: (NebulaUser) -> Unit,
@@ -230,7 +228,7 @@ internal fun RoomMembersSheet(
                     )
                 )
                 Text(
-                    text = "Kick or mute from ⋮",
+                    text = "Remove a member from ⋮",
                     style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp)
                 )
             }
@@ -243,8 +241,6 @@ internal fun RoomMembersSheet(
             ) {
                 items(participants) { participant ->
                     val user = participant.user
-                    val isAudioMuted = !participant.isAudioActive
-                    val isVideoMuted = !participant.isVideoActive
                     val isMe = user.id.isNotBlank() && user.id == currentUserId
                     val isFriend = friends.any { it.id == user.id }
                     val outgoingRequest = suggestedPeople.any { it.id == user.id && it.friendRequestPending }
@@ -326,50 +322,6 @@ internal fun RoomMembersSheet(
                                     }
                                 }
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // Audio status indicator
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isAudioMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                                            contentDescription = null,
-                                            tint = if (isAudioMuted) Color(0xFFEF4444) else theme.colors.successColor,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isAudioMuted) "Muted" else "Mic On",
-                                            style = theme.typography.caption.copy(
-                                                color = if (isAudioMuted) Color(0xFFEF4444) else theme.colors.textSecondary,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-
-                                    // Video status indicator
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isVideoMuted) Icons.Default.VideocamOff else Icons.Default.Videocam,
-                                            contentDescription = null,
-                                            tint = if (isVideoMuted) Color(0xFFEF4444) else theme.colors.successColor,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = if (isVideoMuted) "Camera Off" else "Camera On",
-                                            style = theme.typography.caption.copy(
-                                                color = if (isVideoMuted) Color(0xFFEF4444) else theme.colors.textSecondary,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
                             }
                         }
 
@@ -456,46 +408,6 @@ internal fun RoomMembersSheet(
                                     onDismissRequest = { menuOpenUserId = null },
                                     modifier = Modifier.background(theme.colors.surfaceElevated)
                                 ) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = if (isAudioMuted) "Unmute Audio" else "Mute Audio",
-                                                style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary)
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isAudioMuted) Icons.Default.Mic else Icons.Default.MicOff,
-                                                contentDescription = null,
-                                                tint = if (isAudioMuted) theme.colors.successColor else Color(0xFFEF4444)
-                                            )
-                                        },
-                                        onClick = {
-                                            onToggleAudioMute(user.id, !isAudioMuted)
-                                            menuOpenUserId = null
-                                        }
-                                    )
-
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = if (isVideoMuted) "Turn On Video" else "Turn Off Video",
-                                                style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary)
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isVideoMuted) Icons.Default.Videocam else Icons.Default.VideocamOff,
-                                                contentDescription = null,
-                                                tint = if (isVideoMuted) theme.colors.successColor else Color(0xFFEF4444)
-                                            )
-                                        },
-                                        onClick = {
-                                            onToggleVideoMute(user.id, !isVideoMuted)
-                                            menuOpenUserId = null
-                                        }
-                                    )
-
                                     DropdownMenuItem(
                                         text = { Text("Remove from room", color = Color(0xFFEF4444)) },
                                         onClick = {
@@ -588,8 +500,6 @@ internal fun RoomInviteFriendsSheet(
  * Admin controls for the active room:
  * - Room Name
  * - Max participants count
- * - Mic permissions toggle
- * - Video permissions toggle
  * - Room tags selector
  */
 /** One fixed action in the room options header. */
@@ -638,17 +548,13 @@ internal fun RoomSettingsSheet(
     isVisible: Boolean,
     roomName: String,
     maxParticipants: Int,
-    isMicAllowed: Boolean,
-    isVideoAllowed: Boolean,
     tags: List<String>,
-    onSaveSettings: (String, Int, Boolean, Boolean, List<String>) -> Unit,
+    onSaveSettings: (String, Int, List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
     var nameState by remember(roomName, isVisible) { mutableStateOf(roomName) }
     var maxState by remember(maxParticipants, isVisible) { mutableIntStateOf(maxParticipants) }
-    var micState by remember(isMicAllowed, isVisible) { mutableStateOf(isMicAllowed) }
-    var videoState by remember(isVideoAllowed, isVisible) { mutableStateOf(isVideoAllowed) }
     var tagsState by remember(tags, isVisible) { mutableStateOf(tags.toSet()) }
 
     val availableTags = listOf("Cinema", "Music", "WatchParty", "Chill", "Study", "Anime", "Gaming", "Lounge")
@@ -740,87 +646,6 @@ internal fun RoomSettingsSheet(
                 }
             }
 
-            // Permissions Toggles
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Mic Allowed Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Microphone Allowed",
-                            style = theme.typography.bodyMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        )
-                        Text(
-                            text = "Allow members to speak and voice chat",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-
-                    Switch(
-                        checked = micState,
-                        onCheckedChange = { micState = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = theme.colors.primaryAccent,
-                            uncheckedThumbColor = theme.colors.textTertiary,
-                            uncheckedTrackColor = theme.colors.surfaceElevated
-                        )
-                    )
-                }
-
-                // Video Allowed Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Video Cameras Allowed",
-                            style = theme.typography.bodyMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        )
-                        Text(
-                            text = "Allow members to stream camera video",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-
-                    Switch(
-                        checked = videoState,
-                        onCheckedChange = { videoState = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = theme.colors.primaryAccent,
-                            uncheckedThumbColor = theme.colors.textTertiary,
-                            uncheckedTrackColor = theme.colors.surfaceElevated
-                        )
-                    )
-                }
-            }
-
             // Room Tags
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -880,8 +705,6 @@ internal fun RoomSettingsSheet(
                         onSaveSettings(
                             nameState.ifBlank { "Watch Lounge" },
                             maxState,
-                            micState,
-                            videoState,
                             tagsState.toList()
                         )
                     },

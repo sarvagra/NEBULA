@@ -437,22 +437,6 @@ async function runMultiClientSyncTest() {
     clientSocketC.emit('room:join', { roomId: roomC.id });
     await new Promise((resolve) => setTimeout(resolve, 250));
 
-    const moderationRes = await apiFetch(`/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
-      body: JSON.stringify({ isMuted: true, isCameraOff: true }),
-    });
-    if (!moderationRes.ok) throw new Error(`Host could not mute participant: ${await moderationRes.text()}`);
-    const moderatedRoom = await (await apiFetch(`/api/v1/rooms/${room.id}`, { headers: { Authorization: `Bearer ${clientA.token}` } })).json() as any;
-    const moderatedParticipant = moderatedRoom.data.participants.find((p: any) => p.userId === clientB.user.id);
-    if (!moderatedParticipant?.isMuted || !moderatedParticipant?.isCameraOff) throw new Error('Mute/camera-off state was not persisted');
-    const unmuteRes = await apiFetch(`/api/v1/rooms/${room.id}/participants/${clientB.user.id}/moderation`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clientA.token}` },
-      body: JSON.stringify({ isMuted: false, isCameraOff: false }),
-    });
-    if (!unmuteRes.ok) throw new Error('Host could not unmute participant');
-    console.log('  ✅ PASS: Host mute, camera-off, unmute, and camera-on state persists');
-    passedTests++;
-
     // Brief disconnects must preserve membership when the same user reconnects within grace.
     clientSocketB.disconnect();
     await new Promise((resolve) => setTimeout(resolve, 1000));
