@@ -12,8 +12,8 @@ export const NEBULA_APP_CLIENT_SECRET = config.clientAttestation.secret;
  * app signature is rejected immediately with 403 Forbidden.
  */
 export function clientAttestationMiddleware(req: Request, res: Response, next: NextFunction): void {
-  // Allow health check probes for Render platform uptime monitoring
-  if (req.path === '/health' || req.path === '/ready') {
+  // Allow health check probes and public app update manifest checks
+  if (req.path === '/health' || req.path === '/ready' || req.path === '/app/version' || req.path === '/version.json') {
     next();
     return;
   }

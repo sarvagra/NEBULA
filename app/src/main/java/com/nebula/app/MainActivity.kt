@@ -213,6 +213,11 @@ class MainActivity : ComponentActivity() {
         }?.takeIf { it.isNotBlank() } ?: return null
         return type to id
     }
+
+    override fun onResume() {
+        super.onResume()
+        com.nebula.app.update.UpdateManager.resumePendingInstallIfAllowed(this)
+    }
 }
 
 @androidx.compose.runtime.Composable

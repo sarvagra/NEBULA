@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
@@ -104,6 +105,48 @@ export function createApp(): express.Application {
     res.sendFile(path.join(landingDir, 'index.html'), (err) => {
       if (err && !res.headersSent) res.status(404).type('text/plain').send('Nebula');
     });
+  });
+
+  // App version manifest for self-updating mobile clients
+  const getAppVersionManifest = () => {
+    const manifestPath = path.join(landingDir, 'version.json');
+    if (fs.existsSync(manifestPath)) {
+      try {
+        return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      } catch {
+        // Fallback to default
+      }
+    }
+    return {
+      success: true,
+      versionCode: 3,
+      versionName: '1.1.1',
+      minSupportedVersionCode: 1,
+      apkUrl: '/download/nebula-latest.apk',
+      releaseNotes: '• In-app self update system\n• Redesigned Profile and Settings\n• Performance and security optimizations',
+      forceUpdate: false,
+      publishedAt: new Date().toISOString(),
+    };
+  };
+
+  app.get(['/api/v1/app/version', '/version.json'], (_req, res) => {
+    res.json(getAppVersionManifest());
+  });
+
+  // Serve latest APK download dynamically
+  app.get(['/download/nebula-latest.apk', '/download/latest'], (_req, res) => {
+    const downloadDir = path.join(landingDir, 'download');
+    const specificLatest = path.join(downloadDir, 'nebula-latest.apk');
+    if (fs.existsSync(specificLatest)) {
+      return res.sendFile(specificLatest);
+    }
+    if (fs.existsSync(downloadDir)) {
+      const apks = fs.readdirSync(downloadDir).filter((f) => f.endsWith('.apk')).sort();
+      if (apks.length > 0) {
+        return res.sendFile(path.join(downloadDir, apks[apks.length - 1]));
+      }
+    }
+    res.status(404).type('text/plain').send('Nebula APK not found');
   });
 
   // 4. Emergency Security Circuit Breaker & Honeypot Defenses

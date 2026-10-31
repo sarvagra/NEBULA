@@ -599,11 +599,23 @@ fun NebulaChatDetailScreen(
             isOnline = isOnline,
             onToggleSpoiler = { attachmentIsSpoiler = it },
             onSend = {
-                val ready = drafts.mapNotNull { it.remoteUrl?.takeIf { url -> url.isNotBlank() } }
-                if (ready.isNotEmpty() && ready.size == drafts.size) {
-                    onSendAttachments("", ready, drafts.first().messageType, attachmentIsSpoiler, drafts.first().mimeType)
-                    drafts = emptyList()
-                    attachmentIsSpoiler = false
+                // Everything that finished uploading goes out together as one message.
+                // Files still uploading or failed stay in the pile instead of being
+                // dropped on the floor, so a flaky photo never eats the whole batch.
+                val sentDrafts = drafts.filter { it.canSend }
+                val ready = sentDrafts.mapNotNull { it.remoteUrl?.takeIf { url -> url.isNotBlank() } }
+                if (ready.isNotEmpty()) {
+                    val allImages = sentDrafts.none { it.isVideo }
+                    onSendAttachments(
+                        "",
+                        ready,
+                        if (allImages) "image" else "media",
+                        attachmentIsSpoiler,
+                        sentDrafts.first().mimeType
+                    )
+                    val sentUris = sentDrafts.map { it.localUri }.toSet()
+                    drafts = drafts.filterNot { it.localUri in sentUris }
+                    if (drafts.isEmpty()) attachmentIsSpoiler = false
                 }
             },
             onRetry = { uploadDraft(it) },

@@ -25,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -33,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.nebula.app.domain.model.NebulaPresenceStatus
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.theme.Theme
@@ -62,18 +60,10 @@ private val COMPACT_AVATAR_SIZE = 74.dp
 private val AVATAR_OVERLAP = 46.dp
 private val COMPACT_AVATAR_OVERLAP = 37.dp
 
-private fun isStaticImage(url: String?): Boolean {
-    if (url.isNullOrBlank()) return false
-    if (url.startsWith("data:video")) return false
-    val lower = url.lowercase()
-    if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov")) return false
-    return true
-}
-
 /**
- * Full-bleed banner with the top scrim and a real blurred band behind the
- * system-bar row. The blurred band is only drawn for still images: duplicating a
- * looping video would mean decoding it twice on every profile open.
+ * Full-bleed banner with the top scrim. There is deliberately no frosted band: a
+ * blurred copy of the artwork behind the system-bar row read as a smudge rather
+ * than depth, and it cut the banner in half at the top edge.
  */
 @Composable
 fun NebulaImmersiveBanner(
@@ -81,8 +71,7 @@ fun NebulaImmersiveBanner(
     bannerIndex: Int,
     modifier: Modifier = Modifier,
     height: androidx.compose.ui.unit.Dp = BANNER_HEIGHT,
-    cornerRadius: androidx.compose.ui.unit.Dp = 26.dp,
-    showBlurBand: Boolean = true
+    cornerRadius: androidx.compose.ui.unit.Dp = 26.dp
 ) {
     val theme = Theme.current
     // Sharp bottom edge: a rounded banner read as a card, not a header.
@@ -95,32 +84,6 @@ fun NebulaImmersiveBanner(
             modifier = Modifier.fillMaxSize(),
             shape = bottomShape
         )
-
-        // Frosted band: a blurred copy of the same still image clipped to the top
-        // third of the banner. The copy is drawn at the banner's full height and
-        // then cropped by its container, so it stays pixel-aligned with the sharp
-        // artwork underneath instead of being scaled into a different framing.
-        // The frosted band only works over a dark background; in light themes it
-        // washed the banner out, so it is skipped there.
-        if (showBlurBand && theme.colors.isDark && isStaticImage(bannerUrl)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(height * 0.38f)
-                    .clipToBounds()
-            ) {
-                AsyncImage(
-                    model = bannerUrl,
-                    contentDescription = null,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(height)
-                        .blur(28.dp, edgeTreatment = androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
-                        .alpha(0.55f)
-                )
-            }
-        }
 
         // Top scrim: dark at the very top, gone by 60% down the banner.
         Box(

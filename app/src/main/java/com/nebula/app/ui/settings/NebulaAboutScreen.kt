@@ -27,7 +27,19 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import android.widget.Toast
+import com.nebula.app.BuildConfig
+import com.nebula.app.ui.dialogs.UpdateDialog
+import com.nebula.app.update.UpdateManager
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -51,6 +63,22 @@ fun NebulaAboutScreen(
 ) {
     val theme = Theme.current
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val updateState by UpdateManager.updateState.collectAsState()
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+
+    UpdateDialog(
+        state = updateState,
+        onDismiss = { UpdateManager.dismissUpdate() },
+        onStartDownload = { info ->
+            coroutineScope.launch {
+                UpdateManager.downloadAndInstall(context, info)
+            }
+        },
+        onInstall = { file ->
+            UpdateManager.promptInstall(context, file)
+        }
+    )
 
     Column(
         modifier = modifier
@@ -131,19 +159,71 @@ fun NebulaAboutScreen(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(theme.colors.surfaceElevated)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "Version 1.1.0 • Build 2",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontSize = 11.5.sp
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(theme.colors.surfaceElevated)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Version ${BuildConfig.VERSION_NAME} • Build ${BuildConfig.VERSION_CODE}",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
                             )
-                        )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(theme.colors.primaryAccent.copy(alpha = 0.12f))
+                                .clickable {
+                                    if (!isCheckingUpdate) {
+                                        isCheckingUpdate = true
+                                        Toast.makeText(context, "Checking for updates...", Toast.LENGTH_SHORT).show()
+                                        coroutineScope.launch {
+                                            UpdateManager.checkForUpdate(
+                                                context = context,
+                                                isManual = true,
+                                                onUpToDate = {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Nebula is up to date (v${BuildConfig.VERSION_NAME})",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            )
+                                            isCheckingUpdate = false
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = theme.colors.primaryAccent,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (isCheckingUpdate) "Checking..." else "Check for Updates",
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.primaryAccent,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.5.sp
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }

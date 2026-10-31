@@ -1134,7 +1134,7 @@ fun NebulaEditProfileScreen(
                                 fontSize = 10.5.sp
                             )
                         )
-                        if (isPremiumPlus) Text("${customStatusText.length}/80", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
+                        Text("${customStatusText.length}/80", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
                     }
 
                     // Default presets (Online, Offline)
@@ -1181,8 +1181,10 @@ fun NebulaEditProfileScreen(
                         }
                     }
 
-                    // Custom status input (up to 8 chars)
-                    if (isPremiumPlus && statusText == "custom") {
+                    // Custom status input. Every account can type their own status:
+                    // the old premium-plus gate left the field invisible, so tapping
+                    // "Custom" looked like it did nothing at all.
+                    if (statusText.equals("custom", ignoreCase = true)) {
                         BasicTextField(
                             value = customStatusText,
                             onValueChange = {
@@ -1209,14 +1211,6 @@ fun NebulaEditProfileScreen(
                                     innerTextField()
                                 }
                             }
-                        )
-                    } else if (!isPremiumPlus) {
-                        Text(
-                            text = "Offline status is Premium. Custom status is Premium Plus.",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textTertiary,
-                                fontSize = 11.sp
-                            )
                         )
                     }
                 }

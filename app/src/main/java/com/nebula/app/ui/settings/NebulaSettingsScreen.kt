@@ -23,6 +23,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NotificationsNone
@@ -93,6 +95,7 @@ fun NebulaSettingsScreen(
 ) {
     val theme = Theme.current
     var showBlockedUsersInPlace by remember { mutableStateOf(false) }
+    var showFeatureToggles by remember { mutableStateOf(false) }
     var showNotificationsInPlace by remember { mutableStateOf(false) }
 
     // Feature switches live in the same preferences file as the session, so they
@@ -230,24 +233,63 @@ fun NebulaSettingsScreen(
 
                     SettingsDivider()
 
-                    // 8. FEATURES — everything that used to be a purchase is now a switch.
-                    // There is no store, no plan picker and no receipt: each capability
-                    // simply belongs to the account and can be switched off here.
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "FEATURES",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp,
-                                fontSize = 11.sp
+                    // 8. NEBULA PREMIUM (BETA) — everything that used to be a
+                    // purchase is a switch, and every switch lives behind this one
+                    // row instead of spilling down the settings list.
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showFeatureToggles = !showFeatureToggles }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(theme.colors.primaryAccent.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = theme.colors.primaryAccent,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Nebula Premium",
+                                    style = theme.typography.bodyMedium.copy(
+                                        color = theme.colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 15.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Beta — every feature is unlocked",
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.textSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                )
+                            }
+                            Icon(
+                                imageVector = if (showFeatureToggles) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = theme.colors.textTertiary,
+                                modifier = Modifier.size(20.dp)
                             )
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        if (showFeatureToggles) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                        ) {
                         FeatureToggleRow(
                             title = "Custom status",
                             subtitle = "Set a written status instead of a preset",
@@ -284,6 +326,8 @@ fun NebulaSettingsScreen(
                                 sessionManager.setFeatureEnabled(SessionManager.FEATURE_ALL_TAGS, it)
                             }
                         )
+                        }
+                        }
                     }
                 }
             }

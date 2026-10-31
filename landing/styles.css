@@ -406,6 +406,9 @@ h1 .grad {
 
 /* ---------- sections ---------- */
 section.band { padding-top: 84px; padding-bottom: 84px; }
+/* The nav is sticky, so anchored sections need to stop below it instead of
+   sliding underneath the logo. */
+section[id] { scroll-margin-top: 88px; }
 .section-head { max-width: 620px; margin-bottom: 44px; }
 .section-head h2 {
   font-size: clamp(28px, 3.6vw, 40px);
@@ -451,19 +454,49 @@ section.band { padding-top: 84px; padding-bottom: 84px; }
 /* ---------- screenshots ---------- */
 .shots {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 26px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
   align-items: start;
 }
-.shots figure { margin: 0; }
-.shots .phone { max-width: 300px; border-radius: 30px; }
+.shots figure {
+  margin: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.shots .phone {
+  max-width: 270px;
+  border-radius: 32px;
+  margin: 0 auto;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 0 50px rgba(109, 40, 217, 0.18);
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease;
+}
+.shots .phone:hover {
+  transform: translateY(-6px);
+  box-shadow:
+    0 32px 80px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(167, 139, 250, 0.25) inset,
+    0 0 70px rgba(109, 40, 217, 0.35);
+}
 .shots figcaption {
   text-align: center;
   color: var(--muted);
   font-size: 13px;
-  margin-top: 14px;
+  margin-top: 16px;
+  padding: 0 6px;
+  line-height: 1.5;
 }
-.shots figure:nth-child(2) { transform: translateY(-26px); }
+.shots figcaption strong {
+  display: block;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
 
 /* ---------- install ---------- */
 .install {
@@ -598,17 +631,37 @@ footer {
   .features { grid-template-columns: repeat(2, 1fr); }
   .install { grid-template-columns: 1fr; }
   .shots { grid-template-columns: repeat(2, 1fr); }
-  .shots figure:nth-child(2) { transform: none; }
-  .shots figure:nth-child(3) { display: none; }
 }
 @media (max-width: 620px) {
   .features { grid-template-columns: 1fr; }
-  .shots { grid-template-columns: 1fr; }
-  .shots figure:nth-child(3) { display: block; }
-  section.band { padding-top: 60px; padding-bottom: 60px; }
-  .hero { padding-top: 44px; padding-bottom: 40px; }
+  /* Phones get one card at a time in a swipeable row: stacked mockups made the
+     page three screens long for no extra information. */
+  .shots {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+    margin: 0 -20px;
+    padding-left: 20px;
+    padding-right: 20px;
+    scrollbar-width: none;
+  }
+  .shots::-webkit-scrollbar { display: none; }
+  .shots figure { flex: 0 0 78%; max-width: 260px; scroll-snap-align: center; }
+  .shots .phone { max-width: 240px; }
+  .shots figcaption { font-size: 12px; margin-top: 10px; }
+  .section-head { margin-bottom: 26px; }
+  .section-head p { font-size: 14.5px; }
+  section.band { padding-top: 52px; padding-bottom: 52px; }
+  .hero { padding-top: 34px; padding-bottom: 30px; gap: 28px; }
   .hero .phone { max-width: 235px; }
-  .shots .phone { max-width: 280px; }
+  .hero-copy p { font-size: 15px; }
+  .features { gap: 12px; }
+  .feature { padding: 16px; }
+  .faq details { padding: 14px 16px; }
+  .foot { padding: 26px 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

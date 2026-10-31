@@ -285,7 +285,11 @@ internal fun AttachmentPile(
 ) {
     if (drafts.isEmpty()) return
     val theme = Theme.current
-    val allReady = drafts.all { it.canSend }
+    // Send is offered as soon as one file has landed on the server. Waiting for the
+    // whole pile made a single failed upload disable Send with no explanation, which
+    // read as "sending more than one photo is broken".
+    val readyCount = drafts.count { it.canSend }
+    val failedCount = drafts.count { it.state == AttachmentUploadState.FAILED || it.state == AttachmentUploadState.OFFLINE }
 
     Column(
         modifier = Modifier
@@ -411,17 +415,27 @@ internal fun AttachmentPile(
                     text = "Offline — will send when connected",
                     style = theme.typography.caption.copy(color = theme.colors.errorColor, fontSize = 10.5.sp)
                 )
+            } else if (failedCount > 0) {
+                Text(
+                    text = if (failedCount == 1) "1 failed — tap it to retry" else "$failedCount failed — tap to retry",
+                    style = theme.typography.caption.copy(color = theme.colors.errorColor, fontSize = 10.5.sp)
+                )
+            } else if (readyCount < drafts.size) {
+                Text(
+                    text = "Uploading ${drafts.size - readyCount}…",
+                    style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 10.5.sp)
+                )
             }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (allReady) theme.colors.primaryAccent else theme.colors.surfaceElevated)
-                    .clickable(enabled = allReady, onClick = onSend)
+                    .background(if (readyCount > 0) theme.colors.primaryAccent else theme.colors.surfaceElevated)
+                    .clickable(enabled = readyCount > 0, onClick = onSend)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
-                    text = "Send ${drafts.size}",
-                    color = if (allReady) Color.White else theme.colors.textTertiary,
+                    text = if (readyCount > 1) "Send $readyCount" else "Send",
+                    color = if (readyCount > 0) Color.White else theme.colors.textTertiary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )

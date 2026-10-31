@@ -2,9 +2,14 @@ package com.nebula.app.ui.home
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -80,6 +85,10 @@ import com.nebula.app.ui.profile.NebulaEditProfileScreen
 import com.nebula.app.ui.profile.NebulaPublicProfileScreen
 import com.nebula.app.ui.settings.NebulaAboutScreen
 import com.nebula.app.ui.settings.NebulaPrivacyPolicyScreen
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.nebula.app.ui.dialogs.UpdateDialog
+import com.nebula.app.update.UpdateManager
 import com.nebula.app.ui.settings.NebulaSettingsScreen
 
 /**
@@ -102,6 +111,27 @@ fun HomeScreen(
     // picker over the people you are connected to, and starting a conversation
     // goes through the same path as messaging from a profile or a room.
     var showNewChatSheet by remember { mutableStateOf(false) }
+
+    // In-App Self-Updater
+    val coroutineScope = rememberCoroutineScope()
+    val updateState by UpdateManager.updateState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        UpdateManager.checkForUpdate(context)
+    }
+
+    UpdateDialog(
+        state = updateState,
+        onDismiss = { UpdateManager.dismissUpdate() },
+        onStartDownload = { info ->
+            coroutineScope.launch {
+                UpdateManager.downloadAndInstall(context, info)
+            }
+        },
+        onInstall = { file ->
+            UpdateManager.promptInstall(context, file)
+        }
+    )
 
     // Quick Toast feedback
     LaunchedEffect(uiState.quickToastMessage) {
@@ -364,7 +394,7 @@ fun HomeScreen(
                                     .clip(CircleShape)
                                     .background(theme.colors.surfaceElevated)
                                     .border(1.5.dp, theme.colors.surfaceBorder, CircleShape)
-                                    .clickable { viewModel.onOpenSidebar() },
+                                    .clickable { viewModel.onTabSelected(NebulaTab.PROFILE) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 com.nebula.app.ui.components.NebulaAvatarImage(
@@ -472,7 +502,7 @@ fun HomeScreen(
                                     val threshold = 56.dp.toPx()
                                     when {
                                         accumulated <= -threshold -> viewModel.onSwipeToAdjacentTab(forward = true)
-                                        accumulated >= threshold -> viewModel.onSwipeToAdjacentTab(forward = false)
+                                        accumulated >= threshold -> viewModel.                                    onSwipeToAdjacentTab(forward = false)
                                     }
                                     accumulated = 0f
                                 },
@@ -483,7 +513,19 @@ fun HomeScreen(
                             )
                         }
                 ) {
-                    when (uiState.currentTab) {
+                    // The swipe and the bottom bar both move between tabs, so the
+                    // change is animated in the direction of travel instead of
+                    // snapping to a completely different screen.
+                    AnimatedContent(
+                        targetState = uiState.currentTab,
+                        transitionSpec = {
+                            val forward = targetState.ordinal > initialState.ordinal
+                            (slideInHorizontally(animationSpec = tween(260)) { width -> if (forward) width else -width } + fadeIn(animationSpec = tween(200))) togetherWith
+                                (slideOutHorizontally(animationSpec = tween(260)) { width -> if (forward) -width else width } + fadeOut(animationSpec = tween(200)))
+                        },
+                        label = "tab-transition"
+                    ) { tab ->
+                    when (tab) {
                         NebulaTab.HOME -> {
                             NebulaPullRefresh(
                                 isRefreshing = uiState.isRefreshing,
@@ -567,64 +609,45 @@ fun HomeScreen(
                                 isRefreshing = uiState.isRefreshing,
                                 onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
-                            NebulaProfileScreen(
+                            // The owner's tab renders the same screen a visitor sees, so
+                            // the two profiles can no longer drift apart. The only
+                            // difference is the pencil that replaces the invite button.
+                            NebulaPublicProfileScreen(
                                 user = NebulaUser.CurrentUser.copy(
                                     id = uiState.userProfile.id,
-                                    username = uiState.userProfile.username ?: "@nebula_user",
+                                    username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
                                     displayName = uiState.userProfile.displayName,
                                     email = uiState.userProfile.email,
                                     avatarLetter = uiState.userProfile.avatarFallbackLetter,
                                     avatarUrl = uiState.userProfile.avatarUri,
+                                    bannerUrl = uiState.userProfile.bannerUrl,
+                                    bannerIndex = uiState.userProfile.bannerIndex,
                                     bio = uiState.userProfile.bio,
                                     status = uiState.userProfile.status,
-                                    bannerIndex = uiState.userProfile.bannerIndex,
                                     interests = uiState.userProfile.interests,
-                                    bannerUrl = uiState.userProfile.bannerUrl,
                                     friendsCount = uiState.friends.size,
-                                    tier = uiState.userProfile.subscriptionTier.name.lowercase(),
+                                    isRoomActivityPublic = uiState.isRoomActivityPublic,
+                                    isTopContentPublic = uiState.isTopContentPublic,
+                                    topTags = uiState.myTopTags,
                                     roomsHostedCount = uiState.userProfile.roomsHostedCount,
-                                    roomsJoinedCount = uiState.userProfile.roomsJoinedCount,
-                                    timeInSyncHours = uiState.userProfile.timeInSyncHours
+                                    roomsJoinedCount = uiState.userProfile.roomsJoinedCount
                                 ),
-                                friendsCount = uiState.friends.size,
-                                isFriendCountPublic = uiState.isFriendCountPublic,
-                                isRoomActivityPublic = uiState.isRoomActivityPublic,
-                                isTopContentPublic = uiState.isTopContentPublic,
-                                topTags = uiState.myTopTags,
-                                onToggleRoomActivityPrivacy = { viewModel.onToggleRoomActivityPrivacy() },
-                                onToggleTopContentPrivacy = { viewModel.onToggleTopContentPrivacy() },
-                                onToggleFriendPrivacy = { viewModel.onToggleFriendCountPrivacy() },
-                                onNavigateFriends = { viewModel.onTabSelected(NebulaTab.FRIENDS) },
+                                isCurrentUser = true,
+                                onBack = { viewModel.onTabSelected(NebulaTab.HOME) },
+                                onMessage = {},
                                 onOpenEditProfile = { viewModel.onOpenEditProfile() },
                                 onOpenSettings = { viewModel.onOpenSettings() },
-                                onOpenPremiumPlans = { viewModel.onOpenMembership() },
-                                onViewPublicProfile = {
-                                    viewModel.onOpenPublicProfile(
-                                        NebulaUser.CurrentUser.copy(
-                                            id = uiState.userProfile.id,
-                                            username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
-                                            displayName = uiState.userProfile.displayName,
-                                            email = uiState.userProfile.email,
-                                            avatarLetter = uiState.userProfile.avatarFallbackLetter,
-                                            avatarUrl = uiState.userProfile.avatarUri,
-                                            bannerUrl = uiState.userProfile.bannerUrl,
-                                            bannerIndex = uiState.userProfile.bannerIndex,
-                                            bio = uiState.userProfile.bio,
-                                            status = uiState.userProfile.status,
-                                            interests = uiState.userProfile.interests,
-                                            friendsCount = uiState.friends.size,
-                                            roomsHostedCount = uiState.userProfile.roomsHostedCount,
-                                            roomsJoinedCount = uiState.userProfile.roomsJoinedCount
-                                        )
-                                    )
-                                },
-                                onSignInWithGoogle = { viewModel.signInWithGoogle(context) },
-                                onSignOutGoogle = { viewModel.signOutGoogle() },
-                                isAuthLoading = uiState.isAuthLoading,
-                                activeTier = uiState.activeSubscriptionTier
+                                roomActivityPublic = uiState.isRoomActivityPublic,
+                                topContentPublic = uiState.isTopContentPublic,
+                                friendCountPublic = uiState.isFriendCountPublic,
+                                onToggleRoomActivity = { viewModel.onToggleRoomActivityPrivacy() },
+                                onToggleTopContent = { viewModel.onToggleTopContentPrivacy() },
+                                onToggleFriendCount = { viewModel.onToggleFriendCountPrivacy() },
+                                viewerFriendsCount = uiState.friends.size
                             )
                             }
                         }
+                    }
                     }
                 }
             }

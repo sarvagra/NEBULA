@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -79,9 +82,24 @@ fun NebulaPublicProfileScreen(
     onOpenEditProfile: () -> Unit = {},
     /** Friend count of the signed-in viewer, used when this is their own profile. */
     viewerFriendsCount: Int? = null,
+    /** Settings entry, only reachable from your own profile. */
+    onOpenSettings: () -> Unit = {},
+    // Visibility switches. They live in the options sheet because the owner's page
+    // is otherwise a pixel-for-pixel copy of what a visitor sees, and inline
+    // switches are the one thing a visitor's page does not have.
+    roomActivityPublic: Boolean = true,
+    topContentPublic: Boolean = true,
+    friendCountPublic: Boolean = true,
+    onToggleRoomActivity: () -> Unit = {},
+    onToggleTopContent: () -> Unit = {},
+    onToggleFriendCount: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
+    // The owner's page keeps the same blocks a visitor sees; these switches decide
+    // whether a block is shown to visitors, and stay visible to the owner either way.
+    val showsRoomActivity = if (isCurrentUser) true else user.isRoomActivityPublic
+    val showsTopContent = if (isCurrentUser) true else user.isTopContentPublic
     var isFriendState by remember(user.id, user.isFriend) { mutableStateOf(user.isFriend) }
     var isRequestPending by remember(user.id, user.friendRequestPending) { mutableStateOf(user.friendRequestPending) }
     var isRequestReceived by remember(user.id, user.friendRequestReceived) { mutableStateOf(user.friendRequestReceived) }
@@ -221,7 +239,7 @@ fun NebulaPublicProfileScreen(
         // the name in the header, and the hours tile is gone from the product.
         // A private switch does not render an empty card: the whole block drops out
         // and top content, if it is public, moves up into its place.
-        if (user.isRoomActivityPublic) {
+        if (showsRoomActivity) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 18.dp).padding(top = 18.dp)) {
                     Text(
@@ -278,12 +296,12 @@ fun NebulaPublicProfileScreen(
         // 3. TOP CONTENT — the tags of the rooms this person actually takes part in,
         // drawn as a scribble: the most-visited tag is the largest word and the least
         // is the smallest. Tags with no participation never appear at all.
-        if (user.isTopContentPublic) {
+        if (showsTopContent) {
             item {
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
-                        .padding(top = if (user.isRoomActivityPublic) 14.dp else 18.dp)
+                        .padding(top = if (showsRoomActivity) 14.dp else 18.dp)
                 ) {
                     Text(
                         text = "TOP CONTENT",
@@ -329,6 +347,13 @@ fun NebulaPublicProfileScreen(
         displayName = user.displayName,
         accountCreatedAt = user.accountCreatedAt,
         usernameChanges = user.usernameChanges,
+        roomActivityPublic = roomActivityPublic,
+        topContentPublic = topContentPublic,
+        friendCountPublic = friendCountPublic,
+        onToggleRoomActivity = onToggleRoomActivity,
+        onToggleTopContent = onToggleTopContent,
+        onToggleFriendCount = onToggleFriendCount,
+        onOpenSettings = onOpenSettings,
         onOpenInfo = { showProfileMenu = false; showProfileInfo = true },
         onEditProfile = { showProfileMenu = false; onOpenEditProfile() },
         onBlock = { showProfileMenu = false; showBlockConfirmation = true },
@@ -413,10 +438,51 @@ fun NebulaPublicProfileScreen(
     }
 
     if (confirmRemoveFriend) {
-        androidx.compose.material3.AlertDialog(
+        // Same shape, colours and icon treatment as the block confirmation above:
+        // the previous dialog used stock Material defaults and a sentence long
+        // enough to wrap four lines on a phone.
+        AlertDialog(
             onDismissRequest = { confirmRemoveFriend = false },
-            title = { Text("Remove ${user.displayName} from friends?") },
-            text = { Text("You will stop sharing rooms and messages until you add each other again.") },
+            containerColor = theme.colors.surfaceElevated,
+            titleContentColor = theme.colors.textPrimary,
+            textContentColor = theme.colors.textSecondary,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(theme.colors.errorColor.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        tint = theme.colors.errorColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            },
+            title = {
+                Text(
+                    text = "Remove friend?",
+                    style = theme.typography.titleMedium.copy(
+                        color = theme.colors.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                )
+            },
+            text = {
+                Text(
+                    text = "${user.displayName} will be removed from your friends.",
+                    style = theme.typography.bodySmall.copy(
+                        color = theme.colors.textSecondary,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -435,10 +501,9 @@ fun NebulaPublicProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmRemoveFriend = false }) {
-                    Text("Keep friend", color = theme.colors.textSecondary)
+                    Text("Cancel", color = theme.colors.textSecondary)
                 }
-            },
-            containerColor = theme.colors.surfaceElevated
+            }
         )
     }
 }
@@ -626,6 +691,13 @@ private fun ProfileActionSheet(
     displayName: String,
     accountCreatedAt: String?,
     usernameChanges: List<com.nebula.app.domain.model.NebulaUsernameChange>,
+    roomActivityPublic: Boolean,
+    topContentPublic: Boolean,
+    friendCountPublic: Boolean,
+    onToggleRoomActivity: () -> Unit,
+    onToggleTopContent: () -> Unit,
+    onToggleFriendCount: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenInfo: () -> Unit,
     onEditProfile: () -> Unit,
     onBlock: () -> Unit,
@@ -681,6 +753,35 @@ private fun ProfileActionSheet(
                         subtitle = "Customize your avatar, banner, bio, and interests",
                         tint = theme.colors.primaryAccent,
                         onClick = onEditProfile
+                    )
+                    SettingsDivider()
+                    VisibilityRow(
+                        icon = Icons.Default.Public,
+                        title = "Room activity",
+                        isPublic = roomActivityPublic,
+                        onToggle = onToggleRoomActivity
+                    )
+                    SettingsDivider()
+                    VisibilityRow(
+                        icon = Icons.Default.Star,
+                        title = "Top content",
+                        isPublic = topContentPublic,
+                        onToggle = onToggleTopContent
+                    )
+                    SettingsDivider()
+                    VisibilityRow(
+                        icon = Icons.Default.PersonAdd,
+                        title = "Friend count",
+                        isPublic = friendCountPublic,
+                        onToggle = onToggleFriendCount
+                    )
+                    SettingsDivider()
+                    ProfileActionRow(
+                        icon = Icons.Default.Settings,
+                        title = "Settings",
+                        subtitle = "Account, appearance, privacy",
+                        tint = theme.colors.primaryAccent,
+                        onClick = onOpenSettings
                     )
                 } else {
                     ProfileActionRow(
@@ -825,6 +926,76 @@ private fun InfoLine(label: String, value: String) {
                 )
             )
         }
+    }
+}
+
+/** Hairline between the rows of one of the action cards. */
+@Composable
+private fun SettingsDivider() {
+    val theme = Theme.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(theme.colors.surfaceBorder.copy(alpha = 0.6f))
+    )
+}
+
+/** One privacy switch, drawn like the navigation rows beside it. */
+@Composable
+private fun VisibilityRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    isPublic: Boolean,
+    onToggle: () -> Unit
+) {
+    val theme = Theme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.colors.surfaceElevated),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = theme.colors.primaryAccent,
+                modifier = Modifier.size(19.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = theme.typography.bodyMedium.copy(
+                    color = theme.colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
+                )
+            )
+            Text(
+                text = if (isPublic) "Visible to everyone" else "Only you",
+                style = theme.typography.caption.copy(color = theme.colors.textSecondary, fontSize = 12.sp)
+            )
+        }
+        androidx.compose.material3.Switch(
+            checked = isPublic,
+            onCheckedChange = { onToggle() },
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedThumbColor = theme.colors.onPrimaryAccent,
+                checkedTrackColor = theme.colors.primaryAccent,
+                uncheckedThumbColor = theme.colors.textTertiary,
+                uncheckedTrackColor = theme.colors.surfaceElevated
+            )
+        )
     }
 }
 

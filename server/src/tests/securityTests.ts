@@ -2068,9 +2068,18 @@ async function runSecurityTests() {
     }
   });
 
-  await assertTest('Endpoint cloaking: root endpoint returns 404 without server disclosure', async () => {
-    const res = await makeRequest('/', { method: 'GET' });
+  await assertTest('Endpoint cloaking: unmapped endpoint returns 404 without server disclosure', async () => {
+    const res = await makeRequest('/cloaked-check-' + Date.now(), { method: 'GET' });
     if (res.status !== 404) throw new Error(`Expected 404, got ${res.status}`);
+  });
+
+  await assertTest('In-app self-updater: GET /api/v1/app/version returns valid update manifest', async () => {
+    const res = await makeRequest('/api/v1/app/version', { skipAttestation: true });
+    if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+    const data: any = await res.json();
+    if (!data.versionCode || !data.versionName) {
+      throw new Error(`Invalid version manifest payload`);
+    }
   });
 
   await assertTest('App Attestation Shield: direct request without app signature blocked with 403 APP_CLIENT_REQUIRED', async () => {
