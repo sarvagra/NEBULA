@@ -100,8 +100,28 @@ export function createApp(): express.Application {
   //     hosting service. It is registered before the API middlewares because a
   //     6 MB APK download must not be cut off by the 15 second API socket timeout.
   const landingDir = path.resolve(__dirname, '../../landing');
-  app.use(express.static(landingDir, { index: 'index.html', maxAge: '1h' }));
+  app.use(
+    express.static(landingDir, {
+      index: 'index.html',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('.json')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else if (filePath.endsWith('.apk')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=86400, must-revalidate');
+        }
+      },
+    })
+  );
+
   app.get('/', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(landingDir, 'index.html'), (err) => {
       if (err && !res.headersSent) res.status(404).type('text/plain').send('Nebula');
     });
@@ -119,22 +139,27 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 4,
-      versionName: '1.1.2',
+      versionCode: 5,
+      versionName: '1.1.3',
       minSupportedVersionCode: 1,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• Fixed photo sending in chat and optimized high-resolution uploads\n• Real-time swipe navigation between tabs\n• Redesigned Profile menu\n• Full-screen Beta Program settings\n• Branded celestial logo and animated splash ring',
+      releaseNotes: '• Real-time animated download progress & automatic installer\n• High-resolution launcher icon for APK files and system launcher\n• Live update delivery & instantaneous website synchronization\n• Performance optimizations and bug fixes',
       forceUpdate: false,
       publishedAt: new Date().toISOString(),
     };
   };
 
   app.get(['/api/v1/app/version', '/version.json'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json(getAppVersionManifest());
   });
 
   // Serve latest APK download dynamically
   app.get(['/download/nebula-latest.apk', '/download/latest'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     const downloadDir = path.join(landingDir, 'download');
     const specificLatest = path.join(downloadDir, 'nebula-latest.apk');
     if (fs.existsSync(specificLatest)) {

@@ -35,6 +35,7 @@ sealed interface UpdateState {
         val progress: Float,
         val bytesDownloaded: Long,
         val totalBytes: Long,
+        val speedBytesPerSec: Long = 0L,
         val info: AppUpdateInfo
     ) : UpdateState
     data class ReadyToInstall(val apkFile: File, val info: AppUpdateInfo) : UpdateState
@@ -43,14 +44,14 @@ sealed interface UpdateState {
 
 /**
  * UpdateManager:
- * Manages checking, downloading, and triggering installation of in-app updates
- * for direct APK distribution outside Google Play.
+ * Manages checking, downloading with real-time progress, and triggering installation
+ * of in-app updates for direct APK distribution outside Google Play.
  */
 object UpdateManager {
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
 
-    private var hasCheckedOnLaunch = false
+    private var lastCheckTimestampMs: Long = 0L
     private var pendingInstallFile: File? = null
 
     fun dismissUpdate() {
@@ -62,8 +63,12 @@ object UpdateManager {
         isManual: Boolean = false,
         onUpToDate: (() -> Unit)? = null
     ): AppUpdateInfo? = withContext(Dispatchers.IO) {
-        if (!isManual && hasCheckedOnLaunch) return@withContext null
-        hasCheckedOnLaunch = true
+        val now = System.currentTimeMillis()
+        // Throttle automatic checks by 15 seconds to avoid spamming
+        if (!isManual && (now - lastCheckTimestampMs < 15_000L)) {
+            return@withContext null
+        }
+        lastCheckTimestampMs = now
 
         if (isManual) {
             _updateState.value = UpdateState.Checking
@@ -71,20 +76,25 @@ object UpdateManager {
 
         try {
             val baseUrl = NebulaApiClient.socketBaseUrl()
-            val candidateUrls = listOf(
+            val candidateEndpoints = listOf(
                 "$baseUrl/api/v1/app/version",
-                "$baseUrl/version.json"
-            )
+                "$baseUrl/version.json",
+                "https://nebula-73kb.onrender.com/api/v1/app/version",
+                "https://nebula-73kb.onrender.com/version.json"
+            ).distinct()
 
             var responseJson: JSONObject? = null
-            for (endpoint in candidateUrls) {
+            for (endpoint in candidateEndpoints) {
                 try {
-                    val url = URL(endpoint)
+                    val bustUrl = if (endpoint.contains("?")) "$endpoint&_t=$now" else "$endpoint?_t=$now"
+                    val url = URL(bustUrl)
                     val conn = (url.openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
-                        connectTimeout = 7000
-                        readTimeout = 7000
+                        connectTimeout = 8000
+                        readTimeout = 8000
                         setRequestProperty("Accept", "application/json")
+                        setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+                        setRequestProperty("Pragma", "no-cache")
                     }
                     if (conn.responseCode in 200..299) {
                         val body = conn.inputStream.bufferedReader().use { it.readText() }
@@ -149,13 +159,18 @@ object UpdateManager {
             val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
             val destinationFile = File(updatesDir, "nebula-v${info.versionCode}.apk")
 
-            // Fast-path: If already fully downloaded
-            if (destinationFile.exists() && destinationFile.length() > 1_000_000) {
-                _updateState.value = UpdateState.ReadyToInstall(destinationFile, info)
-                withContext(Dispatchers.Main) {
-                    promptInstall(context, destinationFile)
+            // Fast-path: If already fully downloaded and valid APK
+            if (destinationFile.exists() && destinationFile.length() > 500_000) {
+                val archiveInfo = context.packageManager.getPackageArchiveInfo(destinationFile.absolutePath, 0)
+                if (archiveInfo != null) {
+                    _updateState.value = UpdateState.ReadyToInstall(destinationFile, info)
+                    withContext(Dispatchers.Main) {
+                        promptInstall(context, destinationFile)
+                    }
+                    return@withContext
+                } else {
+                    destinationFile.delete()
                 }
-                return@withContext
             }
 
             val tempFile = File(updatesDir, "nebula-v${info.versionCode}.tmp")
@@ -165,14 +180,18 @@ object UpdateManager {
                 progress = 0f,
                 bytesDownloaded = 0L,
                 totalBytes = -1L,
+                speedBytesPerSec = 0L,
                 info = info
             )
 
-            val url = URL(info.apkUrl)
+            val bustApkUrl = if (info.apkUrl.contains("?")) "${info.apkUrl}&_t=${System.currentTimeMillis()}" else "${info.apkUrl}?_t=${System.currentTimeMillis()}"
+            val url = URL(bustApkUrl)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
                 readTimeout = 60000
                 instanceFollowRedirects = true
+                setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+                setRequestProperty("Pragma", "no-cache")
             }
 
             val totalBytes = conn.contentLengthLong
@@ -180,30 +199,45 @@ object UpdateManager {
 
             conn.inputStream.use { input ->
                 tempFile.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(16384)
                     var read: Int
-                    var lastEmittedPercent = -1
+                    var lastEmitTime = 0L
+                    val startTime = System.currentTimeMillis()
 
                     while (input.read(buffer).also { read = it } != -1) {
                         output.write(buffer, 0, read)
                         bytesDownloaded += read
 
-                        val progress = if (totalBytes > 0) {
-                            bytesDownloaded.toFloat() / totalBytes.toFloat()
-                        } else 0f
+                        val now = System.currentTimeMillis()
+                        if (now - lastEmitTime >= 50L || (totalBytes > 0 && bytesDownloaded == totalBytes)) {
+                            val elapsedSec = (now - startTime).coerceAtLeast(1) / 1000f
+                            val speed = if (elapsedSec > 0) (bytesDownloaded / elapsedSec).toLong() else 0L
 
-                        val percent = (progress * 100).toInt()
-                        if (percent != lastEmittedPercent) {
-                            lastEmittedPercent = percent
+                            val progress = if (totalBytes > 0) {
+                                (bytesDownloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            }
+
+                            lastEmitTime = now
                             _updateState.value = UpdateState.Downloading(
                                 progress = progress,
                                 bytesDownloaded = bytesDownloaded,
                                 totalBytes = totalBytes,
+                                speedBytesPerSec = speed,
                                 info = info
                             )
                         }
                     }
                 }
+            }
+
+            // Verify integrity of downloaded APK before launching installer
+            val pkgInfo = context.packageManager.getPackageArchiveInfo(tempFile.absolutePath, 0)
+            if (pkgInfo == null) {
+                tempFile.delete()
+                _updateState.value = UpdateState.Error("Downloaded update is corrupted. Please try again.")
+                return@withContext
             }
 
             if (destinationFile.exists()) destinationFile.delete()

@@ -1,5 +1,7 @@
 package com.nebula.app.ui.dialogs
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -18,8 +20,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -28,18 +33,24 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.nebula.app.theme.Theme
+import com.nebula.app.ui.components.NebulaLogo
 import com.nebula.app.update.AppUpdateInfo
 import com.nebula.app.update.UpdateState
 import java.io.File
+import java.util.Locale
 
 @Composable
 fun UpdateDialog(
@@ -66,95 +77,129 @@ fun UpdateDialog(
         )
     ) {
         val theme = Theme.current
+        val borderGradient = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF8B5CF6).copy(alpha = 0.6f),
+                Color(0xFF06B6D4).copy(alpha = 0.5f),
+                Color(0xFF3B82F6).copy(alpha = 0.3f)
+            )
+        )
 
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(theme.colors.surface)
-                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
-                .padding(24.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0E1120))
+                .border(1.2.dp, borderGradient, RoundedCornerShape(24.dp))
+                .padding(horizontal = 24.dp, vertical = 28.dp)
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Header Icon
+                // Header Logo
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(60.dp)
                         .clip(CircleShape)
-                        .background(theme.colors.primaryAccent.copy(alpha = 0.15f)),
+                        .background(Color(0xFF161B30)),
                     contentAlignment = Alignment.Center
                 ) {
-                    val icon = when (state) {
-                        is UpdateState.Error -> Icons.Default.ErrorOutline
-                        is UpdateState.Downloading -> Icons.Default.CloudDownload
-                        else -> Icons.Default.SystemUpdate
+                    when (state) {
+                        is UpdateState.Error -> {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = Color(0xFFF43F5E),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        is UpdateState.ReadyToInstall -> {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        is UpdateState.Downloading -> {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = Color(0xFF22D3EE),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        else -> {
+                            NebulaLogo(Modifier.size(46.dp))
+                        }
                     }
-                    val tint = when (state) {
-                        is UpdateState.Error -> theme.colors.errorColor
-                        else -> theme.colors.primaryAccent
-                    }
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = tint,
-                        modifier = Modifier.size(28.dp)
-                    )
                 }
 
                 when (state) {
                     is UpdateState.Available -> {
-                        Text(
-                            text = "New Update Available",
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(theme.colors.surfaceElevated)
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "Version ${state.info.versionName} • Build ${state.info.versionCode}",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.primaryAccent,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                text = "New Update Available",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                textAlign = TextAlign.Center
                             )
+                            Spacer(Modifier.height(6.dp))
+                            // Version Pill
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1E243E))
+                                    .border(0.8.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF34D399))
+                                    )
+                                    Text(
+                                        text = "v${state.info.versionName} • Build ${state.info.versionCode}",
+                                        color = Color(0xFFE2E8F0),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
 
                         if (state.info.releaseNotes.isNotBlank()) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(theme.colors.surfaceElevated)
-                                    .padding(12.dp)
-                                    .heightIn(max = 140.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF141829))
+                                    .border(0.8.dp, Color(0xFF262E4D), RoundedCornerShape(14.dp))
+                                    .padding(14.dp)
+                                    .heightIn(max = 160.dp)
                                     .verticalScroll(rememberScrollState())
                             ) {
                                 Text(
-                                    text = "What's New:",
-                                    style = theme.typography.caption.copy(
-                                        color = theme.colors.textSecondary,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    text = "WHAT'S NEW",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = state.info.releaseNotes,
-                                    style = theme.typography.bodySmall.copy(
-                                        color = theme.colors.textPrimary,
-                                        fontSize = 13.sp
-                                    )
+                                    color = Color(0xFFF1F5F9),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
                                 )
                             }
                         }
@@ -166,106 +211,195 @@ fun UpdateDialog(
                             if (!isForced) {
                                 OutlinedButton(
                                     onClick = onDismiss,
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(12.dp)
+                                    modifier = Modifier.weight(1f).height(46.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
                                 ) {
-                                    Text("Later", color = theme.colors.textSecondary)
+                                    Text("Later", color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
                                 }
                             }
 
                             Button(
                                 onClick = { onStartDownload(state.info) },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).height(46.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = theme.colors.primaryAccent
+                                    containerColor = Color(0xFF7C3AED)
                                 )
                             ) {
-                                Text("Update Now", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RocketLaunch,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = Color.White
+                                    )
+                                    Text("Update", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
 
                     is UpdateState.Downloading -> {
-                        Text(
-                            text = "Downloading Update...",
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
+                        val animatedProgress by animateFloatAsState(
+                            targetValue = state.progress.coerceIn(0f, 1f),
+                            animationSpec = tween(120),
+                            label = "download_progress"
+                        )
+                        val percent = (animatedProgress * 100).toInt()
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Downloading Update",
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 19.sp,
+                                textAlign = TextAlign.Center
                             )
-                        )
-
-                        val percent = (state.progress * 100).toInt()
-                        LinearProgressIndicator(
-                            progress = { state.progress.coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            color = theme.colors.primaryAccent,
-                            trackColor = theme.colors.surfaceBorder,
-                        )
-
-                        val downloadedMb = state.bytesDownloaded / 1024f / 1024f
-                        val totalMb = if (state.totalBytes > 0) state.totalBytes / 1024f / 1024f else 0f
-                        val progressLabel = if (totalMb > 0) {
-                            "$percent% (%.1f MB / %.1f MB)".format(downloadedMb, totalMb)
-                        } else {
-                            "%.1f MB downloaded".format(downloadedMb)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Nebula v${state.info.versionName}",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 12.sp
+                            )
                         }
 
+                        // Big percentage display
                         Text(
-                            text = progressLabel,
-                            style = theme.typography.caption.copy(color = theme.colors.textSecondary)
+                            text = "$percent%",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.5).sp
                         )
+
+                        // Real-time Progress bar
+                        LinearProgressIndicator(
+                            progress = { animatedProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(5.dp)),
+                            color = Color(0xFF06B6D4),
+                            trackColor = Color(0xFF1E293B)
+                        )
+
+                        // Real-time MB stats and speed
+                        val downloadedMb = state.bytesDownloaded / 1024f / 1024f
+                        val totalMb = if (state.totalBytes > 0) state.totalBytes / 1024f / 1024f else 0f
+
+                        val speedStr = if (state.speedBytesPerSec > 1_000_000) {
+                            String.format(Locale.US, "%.1f MB/s", state.speedBytesPerSec / 1024f / 1024f)
+                        } else if (state.speedBytesPerSec > 0) {
+                            String.format(Locale.US, "%d KB/s", state.speedBytesPerSec / 1024)
+                        } else {
+                            ""
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val progressText = if (totalMb > 0) {
+                                String.format(Locale.US, "%.1f / %.1f MB", downloadedMb, totalMb)
+                            } else {
+                                String.format(Locale.US, "%.1f MB", downloadedMb)
+                            }
+                            Text(
+                                text = progressText,
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (speedStr.isNotBlank()) {
+                                Text(
+                                    text = speedStr,
+                                    color = Color(0xFF34D399),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
 
                     is UpdateState.ReadyToInstall -> {
-                        Text(
-                            text = "Update Ready to Install",
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Ready to Install",
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 20.sp,
+                                textAlign = TextAlign.Center
                             )
-                        )
-
-                        Text(
-                            text = "The latest Nebula update has been downloaded and is ready to install.",
-                            style = theme.typography.bodySmall.copy(
-                                color = theme.colors.textSecondary
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Nebula v${state.info.versionName} has downloaded successfully. Proceed to install.",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
                             )
-                        )
+                        }
 
                         Button(
                             onClick = { onInstall(state.apkFile) },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = theme.colors.primaryAccent
+                                containerColor = Color(0xFF10B981)
                             )
                         ) {
-                            Text("Install Now", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Install Update",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                            }
                         }
+
+                        Text(
+                            text = "If installation doesn't prompt automatically, tap the button above.",
+                            color = Color(0xFF64748B),
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center
+                        )
                     }
 
                     is UpdateState.Error -> {
-                        Text(
-                            text = "Update Failed",
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Update Error",
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 19.sp,
+                                textAlign = TextAlign.Center
                             )
-                        )
-
-                        Text(
-                            text = state.message,
-                            style = theme.typography.bodySmall.copy(
-                                color = theme.colors.textSecondary
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = state.message,
+                                color = Color(0xFFFCA5A5),
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
                             )
-                        )
+                        }
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -273,10 +407,11 @@ fun UpdateDialog(
                         ) {
                             OutlinedButton(
                                 onClick = onDismiss,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
                             ) {
-                                Text("Dismiss", color = theme.colors.textSecondary)
+                                Text("Dismiss", color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
