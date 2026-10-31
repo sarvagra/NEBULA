@@ -363,241 +363,165 @@ fun HomeScreen(
             )
         } else {
             // STANDARD TAB SHELL
-            // Profile owns the full screen: its header banner runs under the status
-            // bar and insets only its own floating controls, so the shell must not
-            // add a second top inset for that tab.
-            Column(
+            // Real-time interactive pager with beyondBoundsPageCount = 1 so adjacent tabs
+            // (especially Profile) stay pre-composed and warm for 60/120fps stutter-free swiping.
+            val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+                initialPage = uiState.currentTab.ordinal,
+                pageCount = { NebulaTab.values().size }
+            )
+
+            // Sync tab changes from navigation to pager
+            androidx.compose.runtime.LaunchedEffect(uiState.currentTab) {
+                if (pagerState.currentPage != uiState.currentTab.ordinal) {
+                    pagerState.animateScrollToPage(uiState.currentTab.ordinal)
+                }
+            }
+
+            // Sync tab changes from interactive swipe to ViewModel
+            androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
+                val targetTab = NebulaTab.values().getOrNull(pagerState.currentPage) ?: NebulaTab.HOME
+                if (uiState.currentTab != targetTab) {
+                    viewModel.onTabSelected(targetTab)
+                }
+            }
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (uiState.currentTab == NebulaTab.PROFILE) Modifier
-                        else Modifier.statusBarsPadding()
-                    )
             ) {
-                // TOP BAR: Avatar (opens overlay), Wordmark "NEBULA", Notifications banner, Quick Room
-                // Hide on Profile tab because Profile has its own dedicated header with Settings gear only (no redundant bell)
-                if (uiState.currentTab != NebulaTab.PROFILE) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                    // Left: Avatar button with status badge (taps open profile sidebar drawer)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.BottomEnd) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(theme.colors.surfaceElevated)
-                                    .border(1.5.dp, theme.colors.surfaceBorder, CircleShape)
-                                    .clickable { viewModel.onTabSelected(NebulaTab.PROFILE) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                com.nebula.app.ui.components.NebulaAvatarImage(
-                                    avatarUrl = uiState.userProfile.avatarUri,
-                                    fallbackLetter = uiState.userProfile.avatarFallbackLetter,
-                                    contentDescription = uiState.userProfile.displayName,
-                                    modifier = Modifier.fillMaxSize(),
-                                    fallbackTextSize = 14.sp
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(theme.colors.successColor)
-                                    .border(1.5.dp, theme.colors.background, CircleShape)
-                            )
-                        }
-
-                        // Top heading for Home, Rooms, Chats, Friends: @actual_username
-                        val currentHandle = uiState.userProfile.username?.let {
-                            if (it.startsWith("@")) it else "@$it"
-                        } ?: "@nebula_user"
-
-                        Text(
-                            text = currentHandle,
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp,
-                                fontSize = 16.sp
-                            )
-                        )
-                    }
-
-                    // Right Actions: Quick Room TV icon first, then Notification bell icon
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // 1. Quick Room icon (TV)
-                        IconButton(
-                            onClick = { viewModel.onCreateRoomClick() },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tv,
-                                contentDescription = "Quick Room",
-                                tint = theme.colors.primaryAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // 2. Notifications Banner Icon Button with dynamic unread indicator
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            IconButton(
-                                onClick = { viewModel.onOpenNotifications() },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.NotificationsNone,
-                                    contentDescription = "Notifications",
-                                    tint = theme.colors.textPrimary,
-                                    modifier = Modifier.size(21.dp)
-                                )
-                            }
-
-                            val hasPendingNotices = uiState.notifications.any { !it.isRead } || uiState.friendRequests.isNotEmpty()
-                            if (hasPendingNotices) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(top = 4.dp, end = 4.dp)
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(theme.colors.primaryAccent)
-                                        .align(Alignment.TopEnd)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-                }
-
-                // TAB CONTENT
-                //
-                // Each tab owns its own pull-to-refresh container so the gesture
-                // works from the top of every tab's list, not only outside a list.
-                //
-                // A horizontal swipe moves to the neighbouring tab in bottom-bar order,
-                // which is the gesture people already expect from a feed app. The
-                // detector only claims the pointer once a horizontal drag passes touch
-                // slop, so vertical list scrolling inside each tab is untouched.
-                // Real-time interactive pager: swiping between tabs slides smoothly in real time
-                val pagerState = androidx.compose.foundation.pager.rememberPagerState(
-                    initialPage = uiState.currentTab.ordinal,
-                    pageCount = { NebulaTab.values().size }
-                )
-
-                // Sync tab changes from navigation to pager
-                androidx.compose.runtime.LaunchedEffect(uiState.currentTab) {
-                    if (pagerState.currentPage != uiState.currentTab.ordinal) {
-                        pagerState.animateScrollToPage(uiState.currentTab.ordinal)
-                    }
-                }
-
-                // Sync tab changes from interactive swipe to ViewModel
-                androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
-                    val targetTab = NebulaTab.values().getOrNull(pagerState.currentPage) ?: NebulaTab.HOME
-                    if (uiState.currentTab != targetTab) {
-                        viewModel.onTabSelected(targetTab)
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    androidx.compose.foundation.pager.HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxSize()
-                    ) { page ->
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    beyondBoundsPageCount = 1,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
                     when (NebulaTab.values()[page]) {
                         NebulaTab.HOME -> {
-                            NebulaPullRefresh(
-                                isRefreshing = uiState.isRefreshing,
-                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
-                            ) {
-                                NebulaHomeScreen(
-                                    friends = uiState.friends,
-                                    rooms = uiState.rooms,
-                                    conversations = uiState.socialConversations,
-                                    onJoinRoom = { viewModel.onJoinRoom(it) },
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                NebulaHomeTopBar(
+                                    userProfile = uiState.userProfile,
+                                    notifications = uiState.notifications,
+                                    friendRequests = uiState.friendRequests,
+                                    onAvatarClick = { viewModel.onTabSelected(NebulaTab.PROFILE) },
                                     onCreateRoomClick = { viewModel.onCreateRoomClick() },
-                                    onOpenConversation = { viewModel.onSelectSocialConversation(it) },
-                                    onFriendClick = { viewModel.onOpenFriendProfile(it) }
+                                    onOpenNotifications = { viewModel.onOpenNotifications() },
+                                    modifier = Modifier.statusBarsPadding()
                                 )
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    NebulaPullRefresh(
+                                        isRefreshing = uiState.isRefreshing,
+                                        onRefresh = { viewModel.refreshAll(showIndicator = true) }
+                                    ) {
+                                        NebulaHomeScreen(
+                                            friends = uiState.friends,
+                                            rooms = uiState.rooms,
+                                            conversations = uiState.socialConversations,
+                                            onJoinRoom = { viewModel.onJoinRoom(it) },
+                                            onCreateRoomClick = { viewModel.onCreateRoomClick() },
+                                            onOpenConversation = { viewModel.onSelectSocialConversation(it) },
+                                            onFriendClick = { viewModel.onOpenFriendProfile(it) }
+                                        )
+                                    }
+                                }
                             }
                         }
 
                         NebulaTab.ROOMS -> {
-                            NebulaPullRefresh(
-                                isRefreshing = uiState.isRefreshing,
-                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
-                            ) {
-                                NebulaRoomsScreen(
-                                    rooms = uiState.rooms,
-                                    onJoinRoom = { viewModel.onJoinRoom(it) },
-                                    onCreateRoomClick = { viewModel.onCreateRoomClick() }
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                NebulaHomeTopBar(
+                                    userProfile = uiState.userProfile,
+                                    notifications = uiState.notifications,
+                                    friendRequests = uiState.friendRequests,
+                                    onAvatarClick = { viewModel.onTabSelected(NebulaTab.PROFILE) },
+                                    onCreateRoomClick = { viewModel.onCreateRoomClick() },
+                                    onOpenNotifications = { viewModel.onOpenNotifications() },
+                                    modifier = Modifier.statusBarsPadding()
                                 )
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    NebulaPullRefresh(
+                                        isRefreshing = uiState.isRefreshing,
+                                        onRefresh = { viewModel.refreshAll(showIndicator = true) }
+                                    ) {
+                                        NebulaRoomsScreen(
+                                            rooms = uiState.rooms,
+                                            onJoinRoom = { viewModel.onJoinRoom(it) },
+                                            onCreateRoomClick = { viewModel.onCreateRoomClick() }
+                                        )
+                                    }
+                                }
                             }
                         }
 
                         NebulaTab.CHATS -> {
-                            NebulaPullRefresh(
-                                isRefreshing = uiState.isRefreshing,
-                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
-                            ) {
-                                NebulaChatsScreen(
-                                    conversations = uiState.socialConversations,
-                                    onSelectConversation = { viewModel.onSelectSocialConversation(it) },
-                                    onStartNewChat = { showNewChatSheet = true }
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                NebulaHomeTopBar(
+                                    userProfile = uiState.userProfile,
+                                    notifications = uiState.notifications,
+                                    friendRequests = uiState.friendRequests,
+                                    onAvatarClick = { viewModel.onTabSelected(NebulaTab.PROFILE) },
+                                    onCreateRoomClick = { viewModel.onCreateRoomClick() },
+                                    onOpenNotifications = { viewModel.onOpenNotifications() },
+                                    modifier = Modifier.statusBarsPadding()
                                 )
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    NebulaPullRefresh(
+                                        isRefreshing = uiState.isRefreshing,
+                                        onRefresh = { viewModel.refreshAll(showIndicator = true) }
+                                    ) {
+                                        NebulaChatsScreen(
+                                            conversations = uiState.socialConversations,
+                                            onSelectConversation = { viewModel.onSelectSocialConversation(it) },
+                                            onStartNewChat = { showNewChatSheet = true }
+                                        )
+                                    }
+                                }
                             }
                         }
 
                         NebulaTab.FRIENDS -> {
-                            NebulaPullRefresh(
-                                isRefreshing = uiState.isRefreshing,
-                                onRefresh = { viewModel.refreshAll(showIndicator = true) }
-                            ) {
-                                NebulaFriendsScreen(
-                                    friends = uiState.friends,
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                NebulaHomeTopBar(
+                                    userProfile = uiState.userProfile,
+                                    notifications = uiState.notifications,
                                     friendRequests = uiState.friendRequests,
-                                    suggestedPeople = uiState.suggestedPeople,
-                                    searchResults = uiState.searchResults,
-                                    onSearchQuery = { viewModel.onSearchPeople(it) },
-                                    onRefreshSuggestions = { viewModel.onRefreshSuggestions() },
-                                    onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
-                                    onInviteToRoom = { friend ->
-                                        viewModel.onInviteFriendToActiveRoom(friend)
-                                    },
-                                    onFriendClick = { friend ->
-                                        viewModel.onOpenFriendProfile(friend)
-                                    },
-                                    onAcceptRequest = { reqId ->
-                                        viewModel.onAcceptFriendRequest(reqId)
-                                    },
-                                    onDeclineRequest = { reqId ->
-                                        viewModel.onDeclineFriendRequest(reqId)
-                                    },
-                                    onAddSuggested = { user ->
-                                        viewModel.onAddSuggestedFriend(user)
-                                    },
-                                    onWithdrawRequest = { user ->
-                                        viewModel.onCancelFriendRequest(user)
-                                    }
+                                    onAvatarClick = { viewModel.onTabSelected(NebulaTab.PROFILE) },
+                                    onCreateRoomClick = { viewModel.onCreateRoomClick() },
+                                    onOpenNotifications = { viewModel.onOpenNotifications() },
+                                    modifier = Modifier.statusBarsPadding()
                                 )
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    NebulaPullRefresh(
+                                        isRefreshing = uiState.isRefreshing,
+                                        onRefresh = { viewModel.refreshAll(showIndicator = true) }
+                                    ) {
+                                        NebulaFriendsScreen(
+                                            friends = uiState.friends,
+                                            friendRequests = uiState.friendRequests,
+                                            suggestedPeople = uiState.suggestedPeople,
+                                            searchResults = uiState.searchResults,
+                                            onSearchQuery = { viewModel.onSearchPeople(it) },
+                                            onRefreshSuggestions = { viewModel.onRefreshSuggestions() },
+                                            onMessageFriend = { friend -> viewModel.onMessageFriend(friend) },
+                                            onInviteToRoom = { friend ->
+                                                viewModel.onInviteFriendToActiveRoom(friend)
+                                            },
+                                            onFriendClick = { friend ->
+                                                viewModel.onOpenFriendProfile(friend)
+                                            },
+                                            onAcceptRequest = { reqId ->
+                                                viewModel.onAcceptFriendRequest(reqId)
+                                            },
+                                            onDeclineRequest = { reqId ->
+                                                viewModel.onDeclineFriendRequest(reqId)
+                                            },
+                                            onAddSuggested = { user ->
+                                                viewModel.onAddSuggestedFriend(user)
+                                            },
+                                            onWithdrawRequest = { user ->
+                                                viewModel.onCancelFriendRequest(user)
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -606,45 +530,44 @@ fun HomeScreen(
                                 isRefreshing = uiState.isRefreshing,
                                 onRefresh = { viewModel.refreshAll(showIndicator = true) }
                             ) {
-                            // The owner's tab renders the same screen a visitor sees, so
-                            // the two profiles can no longer drift apart. The only
-                            // difference is the pencil that replaces the invite button.
-                            NebulaPublicProfileScreen(
-                                user = NebulaUser.CurrentUser.copy(
-                                    id = uiState.userProfile.id,
-                                    username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
-                                    displayName = uiState.userProfile.displayName,
-                                    email = uiState.userProfile.email,
-                                    avatarLetter = uiState.userProfile.avatarFallbackLetter,
-                                    avatarUrl = uiState.userProfile.avatarUri,
-                                    bannerUrl = uiState.userProfile.bannerUrl,
-                                    bannerIndex = uiState.userProfile.bannerIndex,
-                                    bio = uiState.userProfile.bio,
-                                    status = uiState.userProfile.status,
-                                    interests = uiState.userProfile.interests,
-                                    friendsCount = uiState.friends.size,
-                                    isRoomActivityPublic = uiState.isRoomActivityPublic,
-                                    isTopContentPublic = uiState.isTopContentPublic,
-                                    topTags = uiState.myTopTags,
-                                    roomsHostedCount = uiState.userProfile.roomsHostedCount,
-                                    roomsJoinedCount = uiState.userProfile.roomsJoinedCount
-                                ),
-                                isCurrentUser = true,
-                                onBack = { viewModel.onTabSelected(NebulaTab.HOME) },
-                                onMessage = {},
-                                onOpenEditProfile = { viewModel.onOpenEditProfile() },
-                                onOpenSettings = { viewModel.onOpenSettings() },
-                                roomActivityPublic = uiState.isRoomActivityPublic,
-                                topContentPublic = uiState.isTopContentPublic,
-                                friendCountPublic = uiState.isFriendCountPublic,
-                                onToggleRoomActivity = { viewModel.onToggleRoomActivityPrivacy() },
-                                onToggleTopContent = { viewModel.onToggleTopContentPrivacy() },
-                                onToggleFriendCount = { viewModel.onToggleFriendCountPrivacy() },
-                                viewerFriendsCount = uiState.friends.size
-                            )
+                                // The owner's tab renders the same screen a visitor sees, so
+                                // the two profiles can no longer drift apart. The only
+                                // difference is the pencil that replaces the invite button.
+                                NebulaPublicProfileScreen(
+                                    user = NebulaUser.CurrentUser.copy(
+                                        id = uiState.userProfile.id,
+                                        username = uiState.userProfile.username?.let { if (it.startsWith("@")) it else "@$it" } ?: "@nebula_user",
+                                        displayName = uiState.userProfile.displayName,
+                                        email = uiState.userProfile.email,
+                                        avatarLetter = uiState.userProfile.avatarFallbackLetter,
+                                        avatarUrl = uiState.userProfile.avatarUri,
+                                        bannerUrl = uiState.userProfile.bannerUrl,
+                                        bannerIndex = uiState.userProfile.bannerIndex,
+                                        bio = uiState.userProfile.bio,
+                                        status = uiState.userProfile.status,
+                                        interests = uiState.userProfile.interests,
+                                        friendsCount = uiState.friends.size,
+                                        isRoomActivityPublic = uiState.isRoomActivityPublic,
+                                        isTopContentPublic = uiState.isTopContentPublic,
+                                        topTags = uiState.myTopTags,
+                                        roomsHostedCount = uiState.userProfile.roomsHostedCount,
+                                        roomsJoinedCount = uiState.userProfile.roomsJoinedCount
+                                    ),
+                                    isCurrentUser = true,
+                                    onBack = { viewModel.onTabSelected(NebulaTab.HOME) },
+                                    onMessage = {},
+                                    onOpenEditProfile = { viewModel.onOpenEditProfile() },
+                                    onOpenSettings = { viewModel.onOpenSettings() },
+                                    roomActivityPublic = uiState.isRoomActivityPublic,
+                                    topContentPublic = uiState.isTopContentPublic,
+                                    friendCountPublic = uiState.isFriendCountPublic,
+                                    onToggleRoomActivity = { viewModel.onToggleRoomActivityPrivacy() },
+                                    onToggleTopContent = { viewModel.onToggleTopContentPrivacy() },
+                                    onToggleFriendCount = { viewModel.onToggleFriendCountPrivacy() },
+                                    viewerFriendsCount = uiState.friends.size
+                                )
                             }
                         }
-                    }
                     }
                 }
             }
@@ -1035,6 +958,121 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NebulaHomeTopBar(
+    userProfile: com.nebula.app.domain.model.UserProfile,
+    notifications: List<com.nebula.app.domain.model.NebulaNotification>,
+    friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest>,
+    onAvatarClick: () -> Unit,
+    onCreateRoomClick: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val theme = Theme.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Left: Avatar button with status badge (taps open profile)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(contentAlignment = Alignment.BottomEnd) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(theme.colors.surfaceElevated)
+                        .border(1.5.dp, theme.colors.surfaceBorder, CircleShape)
+                        .clickable { onAvatarClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    com.nebula.app.ui.components.NebulaAvatarImage(
+                        avatarUrl = userProfile.avatarUri,
+                        fallbackLetter = userProfile.avatarFallbackLetter,
+                        contentDescription = userProfile.displayName,
+                        modifier = Modifier.fillMaxSize(),
+                        fallbackTextSize = 14.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(theme.colors.successColor)
+                        .border(1.5.dp, theme.colors.background, CircleShape)
+                )
+            }
+
+            // Top heading for Home, Rooms, Chats, Friends: @actual_username
+            val currentHandle = userProfile.username?.let {
+                if (it.startsWith("@")) it else "@$it"
+            } ?: "@nebula_user"
+
+            Text(
+                text = currentHandle,
+                style = theme.typography.titleMedium.copy(
+                    color = theme.colors.textPrimary,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 16.sp
+                )
+            )
+        }
+
+        // Right Actions: Quick Room TV icon first, then Notification bell icon
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // 1. Quick Room icon (TV)
+            IconButton(
+                onClick = onCreateRoomClick,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = "Quick Room",
+                    tint = theme.colors.primaryAccent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // 2. Notifications Banner Icon Button with dynamic unread indicator
+            Box(contentAlignment = Alignment.TopEnd) {
+                IconButton(
+                    onClick = onOpenNotifications,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationsNone,
+                        contentDescription = "Notifications",
+                        tint = theme.colors.textPrimary,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+
+                val hasPendingNotices = notifications.any { !it.isRead } || friendRequests.isNotEmpty()
+                if (hasPendingNotices) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 4.dp, end = 4.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(theme.colors.primaryAccent)
+                            .align(Alignment.TopEnd)
+                    )
                 }
             }
         }

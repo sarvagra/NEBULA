@@ -93,28 +93,35 @@ fun NebulaBannerView(
                 )
             } else {
                 // Image or GIF Banner
-                val base64Bitmap = remember(nonNullUrl) {
+                val base64Bitmap by androidx.compose.runtime.produceState<Bitmap?>(initialValue = null, key1 = nonNullUrl) {
                     if (nonNullUrl.startsWith("data:image")) {
-                        try {
-                            val data = nonNullUrl.substringAfter("base64,")
-                            val decoded = Base64.decode(data, Base64.DEFAULT)
-                            BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
-                        } catch (_: Exception) {
-                            null
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val data = nonNullUrl.substringAfter("base64,")
+                                val decoded = Base64.decode(data, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                            } catch (_: Exception) {
+                                null
+                            }
                         }
-                    } else null
+                    } else {
+                        value = null
+                    }
                 }
 
                 if (base64Bitmap != null) {
                     Image(
-                        bitmap = base64Bitmap.asImageBitmap(),
+                        bitmap = base64Bitmap!!.asImageBitmap(),
                         contentDescription = "Profile Banner",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     AsyncImage(
-                        model = bannerUrl,
+                        model = coil.request.ImageRequest.Builder(context)
+                            .data(nonNullUrl)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = "Profile Banner",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -144,32 +151,13 @@ fun isVideoBanner(url: String?, context: Context? = null): Boolean {
                 if (type?.startsWith("video") == true) return true
                 if (type?.startsWith("image") == true) return false
             } catch (_: Exception) {}
-            try {
-                context.contentResolver.openFileDescriptor(Uri.parse(url), "r")?.use { pfd ->
-                    val mmr = MediaMetadataRetriever()
-                    mmr.setDataSource(pfd.fileDescriptor)
-                    val hasVideo = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
-                    mmr.release()
-                    if (hasVideo == "yes") return true
-                }
-            } catch (_: Exception) {}
         }
         return false
     }
 
     if (url.startsWith("file://")) {
         val path = url.removePrefix("file://").lowercase()
-        if (path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".mov") || path.endsWith(".mkv")) return true
-        if (context != null) {
-            try {
-                val mmr = MediaMetadataRetriever()
-                mmr.setDataSource(url.removePrefix("file://"))
-                val hasVideo = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
-                mmr.release()
-                if (hasVideo == "yes") return true
-            } catch (_: Exception) {}
-        }
-        return false
+        return path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".mov") || path.endsWith(".mkv")
     }
 
     if (url.contains("/storage/")) {

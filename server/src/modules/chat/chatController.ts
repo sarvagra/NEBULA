@@ -364,7 +364,10 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
           lowerUrl.includes('format=jpg') ||
           lowerUrl.includes('format=png') ||
           lowerUrl.includes('giphy.com') ||
-          lowerUrl.includes('tenor.com');
+          lowerUrl.includes('tenor.com') ||
+          lowerUrl.includes('/storage/') ||
+          lowerUrl.startsWith('data:image/') ||
+          messageType === 'image';
 
         const isForbiddenVideo =
           lowerUrl.endsWith('.mp4') ||

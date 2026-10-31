@@ -418,23 +418,51 @@ fun NebulaChatDetailScreen(
                     runCatching {
                         val uri = android.net.Uri.parse(target.localUri)
                         if (target.mimeType.startsWith("image/") && target.mimeType != "image/gif") {
-                            val originalBitmap = context.contentResolver.openInputStream(uri)?.use {
-                                android.graphics.BitmapFactory.decodeStream(it)
+                            // Step 1: Decode image dimensions without loading full bitmap into memory
+                            val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+                                inJustDecodeBounds = true
                             }
-                            if (originalBitmap != null) {
-                                val maxDim = maxOf(originalBitmap.width, originalBitmap.height)
-                                val scaled = if (maxDim > 2048) {
-                                    val scale = 2048f / maxDim
-                                    android.graphics.Bitmap.createScaledBitmap(
-                                        originalBitmap,
-                                        (originalBitmap.width * scale).toInt().coerceAtLeast(1),
-                                        (originalBitmap.height * scale).toInt().coerceAtLeast(1),
-                                        true
-                                    )
-                                } else originalBitmap
+                            context.contentResolver.openInputStream(uri)?.use { stream ->
+                                android.graphics.BitmapFactory.decodeStream(stream, null, boundsOptions)
+                            }
+
+                            val origW = boundsOptions.outWidth
+                            val origH = boundsOptions.outHeight
+                            val maxDim = maxOf(origW, origH)
+
+                            // Step 2: Compute power-of-two inSampleSize to avoid OOM on 48MP+ camera shots
+                            var inSampleSize = 1
+                            while (maxDim / (inSampleSize * 2) >= 2048) {
+                                inSampleSize *= 2
+                            }
+
+                            val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+                                this.inSampleSize = inSampleSize
+                            }
+                            val sampledBitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                                android.graphics.BitmapFactory.decodeStream(stream, null, decodeOptions)
+                            }
+
+                            if (sampledBitmap != null) {
+                                val sMax = maxOf(sampledBitmap.width, sampledBitmap.height)
+                                val finalBitmap = if (sMax > 2048) {
+                                    val scale = 2048f / sMax
+                                    val targetW = (sampledBitmap.width * scale).toInt().coerceAtLeast(1)
+                                    val targetH = (sampledBitmap.height * scale).toInt().coerceAtLeast(1)
+                                    android.graphics.Bitmap.createScaledBitmap(sampledBitmap, targetW, targetH, true)
+                                } else sampledBitmap
+
                                 val stream = java.io.ByteArrayOutputStream()
-                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 86, stream)
-                                Pair(stream.toByteArray(), "image/jpeg")
+                                finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, stream)
+                                var compressedBytes = stream.toByteArray()
+
+                                // If still over 4MB, re-compress slightly to stay safely under server 5MB limit
+                                if (compressedBytes.size > 4 * 1024 * 1024) {
+                                    val secondPass = java.io.ByteArrayOutputStream()
+                                    finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, secondPass)
+                                    compressedBytes = secondPass.toByteArray()
+                                }
+                                Pair(compressedBytes, "image/jpeg")
                             } else {
                                 val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
                                 Pair(raw, target.mimeType)
@@ -495,43 +523,42 @@ fun NebulaChatDetailScreen(
             }
         }
 
-        // Runs sequentially for every URI from one picker pass: a launch per picture
-        // raced on the same `drafts` state and silently dropped all but one.
+        // Runs sequentially for every URI from one picker pass
         suspend fun pickAttachment(uri: android.net.Uri, isVideo: Boolean) {
-                val mimeType = context.contentResolver.getType(uri)?.lowercase().orEmpty()
-                    .ifBlank { if (isVideo) "video/mp4" else "image/jpeg" }
-                val maxBytes = if (isVideo) 30 * 1024 * 1024L else 5 * 1024 * 1024L
-                val size = withContext(Dispatchers.IO) {
-                    runCatching {
-                        context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
-                    }.getOrNull() ?: 0L
-                }
-                if (size > maxBytes) {
-                    android.widget.Toast.makeText(
-                        context,
-                        if (isVideo) "Video must be under 30MB" else "Image must be under 5MB",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    return
-                }
-                if (isVideo && mimeType !in setOf("video/mp4", "video/webm")) {
-                    android.widget.Toast.makeText(context, "Choose an MP4 or WebM video", android.widget.Toast.LENGTH_LONG).show()
-                    return
-                }
-                showAttachments = false
-                if (drafts.size >= 5) {
-                    android.widget.Toast.makeText(context, "Five photos at a time", android.widget.Toast.LENGTH_SHORT).show()
-                    return
-                }
-                // The local file shows immediately; the upload runs behind it.
-                val target = PendingAttachment(
-                    localUri = uri.toString(),
-                    mimeType = if (isVideo) mimeType else mimeType.ifBlank { "image/jpeg" },
-                    isVideo = isVideo,
-                    state = if (isOnline) AttachmentUploadState.UPLOADING else AttachmentUploadState.OFFLINE
-                )
-                drafts = drafts + target
-                if (isOnline) uploadDraft(target)
+            val mimeType = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+                .ifBlank { if (isVideo) "video/mp4" else "image/jpeg" }
+            val maxBytes = if (isVideo) 30 * 1024 * 1024L else 40 * 1024 * 1024L
+            val size = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+                }.getOrNull() ?: 0L
+            }
+            if (size > maxBytes) {
+                android.widget.Toast.makeText(
+                    context,
+                    if (isVideo) "Video must be under 30MB" else "Photo must be under 40MB",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            if (isVideo && mimeType !in setOf("video/mp4", "video/webm")) {
+                android.widget.Toast.makeText(context, "Choose an MP4 or WebM video", android.widget.Toast.LENGTH_LONG).show()
+                return
+            }
+            showAttachments = false
+            if (drafts.size >= 5) {
+                android.widget.Toast.makeText(context, "Five photos at a time", android.widget.Toast.LENGTH_SHORT).show()
+                return
+            }
+            // The local file shows immediately; the upload runs behind it.
+            val target = PendingAttachment(
+                localUri = uri.toString(),
+                mimeType = if (isVideo) mimeType else mimeType.ifBlank { "image/jpeg" },
+                isVideo = isVideo,
+                state = if (isOnline) AttachmentUploadState.UPLOADING else AttachmentUploadState.OFFLINE
+            )
+            drafts = drafts + target
+            if (isOnline) uploadDraft(target)
         }
 
         // Up to five photos come back from one picker, so the user stacks the whole

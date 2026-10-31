@@ -31,12 +31,12 @@ fun NebulaLogo(
             val center = Offset(cx, cy)
             val orbRadius = size.minDimension * 0.25f
 
-            // 1. Ambient Cosmic Glow behind the orb
+            // 1. Ambient Cosmic Glow behind Jupiter
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF8B5CF6).copy(alpha = 0.45f),
-                        Color(0xFF6D28D9).copy(alpha = 0.20f),
+                        Color(0xFFF59E0B).copy(alpha = 0.45f),
+                        Color(0xFFB45309).copy(alpha = 0.22f),
                         Color.Transparent
                     ),
                     center = center,
@@ -55,9 +55,9 @@ fun NebulaLogo(
             rotate(degrees = -24f, pivot = center) {
                 val ringBrush = Brush.linearGradient(
                     colors = listOf(
-                        Color(0xFF22D3EE),
-                        Color(0xFFA78BFA),
-                        Color(0xFFF472B6)
+                        Color(0xFFFDE68A),
+                        Color(0xFFF59E0B),
+                        Color(0xFFEA580C)
                     ),
                     start = Offset(cx - rx, cy - ry),
                     end = Offset(cx + rx, cy + ry)
@@ -77,15 +77,16 @@ fun NebulaLogo(
                 }
             }
 
-            // 3. Central Celestial Sphere
+            // 3. Central Jupiter Celestial Sphere
             val highlightCenter = Offset(cx - orbRadius * 0.28f, cy - orbRadius * 0.32f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFFFFFFFF),
-                        Color(0xFFC4B5FD),
-                        Color(0xFF6D28D9),
-                        Color(0xFF4C1D95)
+                        Color(0xFFFFFBEB),
+                        Color(0xFFFDE68A),
+                        Color(0xFFD97706),
+                        Color(0xFFB45309),
+                        Color(0xFF78350F)
                     ),
                     center = highlightCenter,
                     radius = orbRadius * 1.35f
@@ -94,9 +95,9 @@ fun NebulaLogo(
                 center = center
             )
 
-            // 4. Subtle inner rim reflection
+            // 4. Subtle Jupiter atmospheric band lines & rim reflection
             drawCircle(
-                color = Color.White.copy(alpha = 0.38f),
+                color = Color(0xFFFEF3C7).copy(alpha = 0.35f),
                 radius = orbRadius,
                 center = center,
                 style = Stroke(width = size.minDimension * 0.016f)
@@ -107,9 +108,9 @@ fun NebulaLogo(
                 rotate(degrees = -24f, pivot = center) {
                     val ringBrush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFF22D3EE),
-                            Color(0xFFA78BFA),
-                            Color(0xFFF472B6)
+                            Color(0xFFFDE68A),
+                            Color(0xFFF59E0B),
+                            Color(0xFFEA580C)
                         ),
                         start = Offset(cx - rx, cy - ry),
                         end = Offset(cx + rx, cy + ry)

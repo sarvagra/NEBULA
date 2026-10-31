@@ -139,11 +139,11 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 5,
-      versionName: '1.1.3',
+      versionCode: 6,
+      versionName: '1.1.4',
       minSupportedVersionCode: 1,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• Real-time animated download progress & automatic installer\n• High-resolution launcher icon for APK files and system launcher\n• Live update delivery & instantaneous website synchronization\n• Performance optimizations and bug fixes',
+      releaseNotes: '• Fixed photo sending with memory-safe downsampling and expanded 40MB pick limit\n• Authentic 3D banded Jupiter app icon and warm in-app branding\n• Silky smooth profile swiping with pre-warmed tabs and cached banner canvas\n• Quick settings gear on profile replacing the options menu',
       forceUpdate: false,
       publishedAt: new Date().toISOString(),
     };

@@ -103,7 +103,6 @@ fun NebulaPublicProfileScreen(
     var isFriendState by remember(user.id, user.isFriend) { mutableStateOf(user.isFriend) }
     var isRequestPending by remember(user.id, user.friendRequestPending) { mutableStateOf(user.friendRequestPending) }
     var isRequestReceived by remember(user.id, user.friendRequestReceived) { mutableStateOf(user.friendRequestReceived) }
-    var showProfileMenu by remember { mutableStateOf(false) }
     var showBlockConfirmation by remember { mutableStateOf(false) }
     var showProfileInfo by remember { mutableStateOf(false) }
 
@@ -123,7 +122,8 @@ fun NebulaPublicProfileScreen(
         contentPadding = PaddingValues(bottom = 112.dp)
     ) {
         // 1. IMMERSIVE HEADER
-        item {                NebulaProfileHeader(
+        item {
+            NebulaProfileHeader(
                 user = user,
                 topBarStart = {
                     CircleGlyphButton(
@@ -133,11 +133,19 @@ fun NebulaPublicProfileScreen(
                     )
                 },
                 topBar = {
-                    CircleGlyphButton(
-                        icon = Icons.Default.MoreHoriz,
-                        contentDescription = "Profile options",
-                        onClick = { showProfileMenu = true }
-                    )
+                    if (isCurrentUser) {
+                        CircleGlyphButton(
+                            icon = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            onClick = onOpenSettings
+                        )
+                    } else {
+                        CircleGlyphButton(
+                            icon = Icons.Default.Info,
+                            contentDescription = "Profile info",
+                            onClick = { showProfileInfo = true }
+                        )
+                    }
                 },
                 actions = {
                     if (isCurrentUser) {
@@ -340,25 +348,6 @@ fun NebulaPublicProfileScreen(
 
         item { Spacer(modifier = Modifier.height(8.dp).navigationBarsPadding()) }
     }
-
-    ProfileActionSheet(
-        isVisible = showProfileMenu,
-        isCurrentUser = isCurrentUser,
-        displayName = user.displayName,
-        accountCreatedAt = user.accountCreatedAt,
-        usernameChanges = user.usernameChanges,
-        roomActivityPublic = roomActivityPublic,
-        topContentPublic = topContentPublic,
-        friendCountPublic = friendCountPublic,
-        onToggleRoomActivity = onToggleRoomActivity,
-        onToggleTopContent = onToggleTopContent,
-        onToggleFriendCount = onToggleFriendCount,
-        onOpenSettings = onOpenSettings,
-        onOpenInfo = { showProfileMenu = false; showProfileInfo = true },
-        onEditProfile = { showProfileMenu = false; onOpenEditProfile() },
-        onBlock = { showProfileMenu = false; showBlockConfirmation = true },
-        onDismiss = { showProfileMenu = false }
-    )
 
     // Account details are their own page rather than a section wedged under the
     // action that opens them.
@@ -680,97 +669,7 @@ private fun androidx.compose.foundation.layout.RowScope.StatCard(label: String, 
     }
 }
 
-/**
- * Profile options sheet, rendering through Nebula's unified PABottomSheet
- * matching all other action sheets across the application.
- */
-@Composable
-private fun ProfileActionSheet(
-    isVisible: Boolean,
-    isCurrentUser: Boolean,
-    displayName: String,
-    accountCreatedAt: String?,
-    usernameChanges: List<com.nebula.app.domain.model.NebulaUsernameChange>,
-    roomActivityPublic: Boolean,
-    topContentPublic: Boolean,
-    friendCountPublic: Boolean,
-    onToggleRoomActivity: () -> Unit,
-    onToggleTopContent: () -> Unit,
-    onToggleFriendCount: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenInfo: () -> Unit,
-    onEditProfile: () -> Unit,
-    onBlock: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val theme = Theme.current
 
-    /** "12 Mar 2026" from an ISO timestamp; blank when the server sent nothing usable. */
-    fun shortDate(iso: String?): String? {
-        if (iso.isNullOrBlank()) return null
-        return try {
-            val normalised = iso.replace(" ", "T").substringBefore('.').removeSuffix("Z")
-            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
-            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
-            val date = parser.parse(normalised) ?: return null
-            val out = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US)
-            out.timeZone = java.util.TimeZone.getDefault()
-            out.format(date)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    PABottomSheet(
-        isVisible = isVisible,
-        onDismissRequest = onDismiss,
-        title = if (isCurrentUser) "Profile Options" else "User Options"
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
-            ) {
-                ProfileActionRow(
-                    icon = Icons.Default.Info,
-                    title = "Profile info",
-                    subtitle = "Account age, username changes",
-                    tint = theme.colors.primaryAccent,
-                    onClick = onOpenInfo
-                )
-                SettingsDivider()
-                if (isCurrentUser) {
-                    ProfileActionRow(
-                        icon = Icons.Default.Settings,
-                        title = "Settings",
-                        subtitle = "Account, appearance, privacy, preferences",
-                        tint = theme.colors.primaryAccent,
-                        onClick = onOpenSettings
-                    )
-                } else {
-                    ProfileActionRow(
-                        icon = Icons.Default.Block,
-                        title = "Block ${displayName.substringBefore(' ')}",
-                        subtitle = "They won't be able to message you or invite you to rooms",
-                        tint = theme.colors.errorColor,
-                        titleColor = theme.colors.errorColor,
-                        onClick = onBlock
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-        }
-    }
-}
 
 /**
  * The account record behind a profile: when the account was made, how many times the
