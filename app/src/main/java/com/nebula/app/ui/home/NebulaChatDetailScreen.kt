@@ -114,6 +114,7 @@ fun NebulaChatDetailScreen(
     onEditMessage: (messageId: String, text: String) -> Unit,
     onUnsendMessage: (messageId: String) -> Unit,
     onRetryMessage: (clientKey: String) -> Unit = {},
+    onDeleteFailedMessage: (clientKey: String) -> Unit = {},
     onOpenProfile: () -> Unit,
     onInviteToRoom: (String) -> Unit,
     /** Opens a room from a shared invite card or the pinned banner. */
@@ -355,7 +356,7 @@ fun NebulaChatDetailScreen(
                             },
                             onHorizontalDrag = { _, delta ->
                                 scope.launch {
-                                    val next = (dragOffsetAnimatable.value + delta).coerceIn(-maxDragPx, 0f)
+                                    val next = (dragOffsetAnimatable.value + delta).coerceIn(-maxDragPx, maxDragPx)
                                     dragOffsetAnimatable.snapTo(next)
                                 }
                             }
@@ -391,6 +392,7 @@ fun NebulaChatDetailScreen(
                             onEdit = { editingMessage = message },
                             onUnsend = { onUnsendMessage(message.id) },
                             onRetry = { message.clientKey?.let(onRetryMessage) },
+                            onDelete = { message.clientKey?.let(onDeleteFailedMessage) },
                             onJoinRoomByCode = onJoinRoomByCode
                         )
                     }
@@ -541,8 +543,8 @@ fun NebulaChatDetailScreen(
                 ).show()
                 return
             }
-            if (isVideo && mimeType !in setOf("video/mp4", "video/webm")) {
-                android.widget.Toast.makeText(context, "Choose an MP4 or WebM video", android.widget.Toast.LENGTH_LONG).show()
+            if (isVideo && !mimeType.startsWith("video/")) {
+                android.widget.Toast.makeText(context, "Choose a valid video file", android.widget.Toast.LENGTH_LONG).show()
                 return
             }
             showAttachments = false

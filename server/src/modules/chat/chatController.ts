@@ -282,7 +282,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     // an http(s) upload URL; the first doubles as mediaUrl for older clients.
     const mediaUrls: string[] = Array.isArray(req.body.mediaUrls)
       ? req.body.mediaUrls
-          .filter((url: any) => typeof url === 'string' && /^https?:\/\//i.test(url.trim()))
+          .filter((url: any) => typeof url === 'string' && (url.trim().startsWith('/storage/') || /^https?:\/\//i.test(url.trim())))
           .map((url: string) => url.trim().slice(0, 1000))
           .slice(0, 5)
       : [];
@@ -352,35 +352,36 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
           return;
         }
 
-        // Strict file format check (Images & GIFs only, rejecting video & documents)
+        // Allowed media format check (Images, GIFs, and Videos)
         const lowerUrl = (mediaUrl || '').toLowerCase();
-        const isAllowedImage =
+        const isAllowedMedia =
           lowerUrl.endsWith('.jpg') ||
           lowerUrl.endsWith('.jpeg') ||
           lowerUrl.endsWith('.png') ||
           lowerUrl.endsWith('.gif') ||
           lowerUrl.endsWith('.webp') ||
+          lowerUrl.endsWith('.mp4') ||
+          lowerUrl.endsWith('.webm') ||
+          lowerUrl.endsWith('.mov') ||
+          lowerUrl.endsWith('.3gp') ||
+          lowerUrl.endsWith('.mkv') ||
           lowerUrl.includes('image/') ||
+          lowerUrl.includes('video/') ||
+          lowerUrl.includes('/storage/') ||
           lowerUrl.includes('format=jpg') ||
           lowerUrl.includes('format=png') ||
           lowerUrl.includes('giphy.com') ||
           lowerUrl.includes('tenor.com') ||
-          lowerUrl.includes('/storage/') ||
           lowerUrl.startsWith('data:image/') ||
-          messageType === 'image';
+          lowerUrl.startsWith('data:video/') ||
+          messageType === 'image' ||
+          messageType === 'video' ||
+          messageType === 'media';
 
-        const isForbiddenVideo =
-          lowerUrl.endsWith('.mp4') ||
-          lowerUrl.endsWith('.mov') ||
-          lowerUrl.endsWith('.avi') ||
-          lowerUrl.endsWith('.mkv') ||
-          lowerUrl.endsWith('.webm') ||
-          lowerUrl.includes('video/');
-
-        if (isForbiddenVideo || (!isAllowedImage && lowerUrl.length > 0)) {
+        if (!isAllowedMedia && lowerUrl.length > 0) {
           res.status(400).json({
             success: false,
-            error: 'Invalid media format: Only images and GIFs are permitted in room chats',
+            error: 'Invalid media format: Only standard images, GIFs and videos are permitted in room chats',
           });
           return;
         }
@@ -562,11 +563,16 @@ export async function addReaction(req: Request, res: Response): Promise<void> {
 
 const ALLOWED_CHAT_MIMES = [
   'image/jpeg',
+  'image/jpg',
   'image/png',
   'image/webp',
   'image/gif',
   'video/mp4',
   'video/webm',
+  'video/quicktime',
+  'video/3gpp',
+  'video/x-matroska',
+  'video/mpeg',
 ];
 
 export async function uploadMedia(req: Request, res: Response): Promise<void> {
@@ -578,34 +584,36 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
 
     const { url, mimeType, sizeBytes, mediaType } = req.body;
 
-    if (!url || typeof url !== 'string') {
-      res.status(400).json({ success: false, error: 'Valid media URL or data is required' });
+    if (!url || typeof url !== 'string' || !url.startsWith('data:')) {
+      res.status(400).json({ success: false, error: 'Valid base64 data URL is required' });
       return;
     }
 
-    const resolvedMime = (mimeType || 'image/jpeg').toLowerCase();
-    if (!ALLOWED_CHAT_MIMES.includes(resolvedMime)) {
+    const commaIndex = url.indexOf(',');
+    if (commaIndex === -1) {
+      res.status(400).json({ success: false, error: 'Invalid data URL format: missing comma separator' });
+      return;
+    }
+
+    const header = url.slice(5, commaIndex);
+    const parsedMime = header.split(';')[0]?.trim().toLowerCase();
+    const resolvedMime = (mimeType || parsedMime || 'image/jpeg').toLowerCase();
+
+    if (!ALLOWED_CHAT_MIMES.includes(resolvedMime) && !ALLOWED_CHAT_MIMES.includes(parsedMime)) {
       res.status(400).json({
         success: false,
-        error: 'Unsupported media format. Only standard images (JPEG, PNG, WEBP, GIF) and videos (MP4, WEBM) are supported.',
+        error: 'Unsupported media format. Only standard images (JPEG, PNG, WEBP, GIF) and videos (MP4, WEBM, MOV) are supported.',
       });
       return;
     }
 
-    const dataUrlMatch = url.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/s);
-    if (!dataUrlMatch) {
-      res.status(400).json({ success: false, error: 'Media must be uploaded as a base64 data URL' });
-      return;
-    }
-    if (dataUrlMatch[1].toLowerCase() !== resolvedMime) {
-      res.status(400).json({ success: false, error: 'Media MIME type does not match the uploaded file' });
-      return;
-    }
-
-    const maxSize = resolvedMime.startsWith('video/') ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
-    const declaredSize = Number(sizeBytes);
-    const imageBuffer = Buffer.from(dataUrlMatch[2], 'base64');
+    const isVideo = resolvedMime.startsWith('video/') || parsedMime.startsWith('video/');
+    const maxSize = isVideo ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
+    const base64Data = url.slice(commaIndex + 1);
+    const imageBuffer = Buffer.from(base64Data, 'base64');
     const actualSize = imageBuffer.byteLength;
+    const declaredSize = Number(sizeBytes);
+
     if ((Number.isFinite(declaredSize) && declaredSize > maxSize) || actualSize > maxSize) {
       res.status(413).json({
         success: false,
@@ -614,7 +622,7 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (!resolvedMime.startsWith('video/')) {
+    if (!isVideo) {
       const resolutionCheck = validateImageResolution(imageBuffer);
       if (!resolutionCheck.valid) {
         res.status(400).json({
@@ -625,10 +633,11 @@ export async function uploadMedia(req: Request, res: Response): Promise<void> {
       }
     }
 
-    const type = mediaType || (resolvedMime.startsWith('video/') ? 'video' : resolvedMime.includes('gif') ? 'gif' : 'image');
+    const type = mediaType || (isVideo ? 'video' : resolvedMime.includes('gif') ? 'gif' : 'image');
+    const ext = resolvedMime.includes('quicktime') ? 'mov' : (resolvedMime.split('/')[1]?.split(';')[0] || 'bin');
     const mediaUrl = await uploadObject(
       url,
-      `users/${req.user.id}/chat/${Date.now()}_${type}.${resolvedMime.split('/')[1]}`,
+      `users/${req.user.id}/chat/${Date.now()}_${type}.${ext}`,
       resolvedMime
     );
 

@@ -1,10 +1,11 @@
 {
   "success": true,
-  "versionCode": 6,
-  "versionName": "1.1.4",
+  "versionCode": 7,
+  "versionName": "1.1.5",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Fixed photo sending with memory-safe downsampling and expanded 40MB pick limit\n• Authentic 3D banded Jupiter app icon and warm in-app branding\n• Silky smooth profile swiping with pre-warmed tabs and cached banner canvas\n• Quick settings gear on profile replacing the options menu",
+  "releaseNotes": "• Authentic celestial purple & cyan logo matched across app icon, splash screen, and website\n• Completely rewired image & video sending in DMs and Live Chat with 50MB pipeline\n• Clean minimalist message bubbles: dots and ticks removed; swipe sideways to reveal time & delivery info\n• Red ! failure indicator with instant Resend or Delete (purges unsent message permanently)",
   "forceUpdate": false,
-  "publishedAt": "2026-10-31T16:20:00Z"
+  "publishedAt": "2026-10-31T17:45:00Z"
 }
+

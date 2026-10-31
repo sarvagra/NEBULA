@@ -519,6 +519,18 @@ class SocialRepositoryImpl(
         ).asBoolean()
     }
 
+    override suspend fun deletePendingMessage(clientKey: String): Boolean {
+        permanentlyFailedKeys.remove(clientKey)
+        val candidates = listOfNotNull(_activeConversation.value) + _conversations.value
+        val conversation = candidates.firstOrNull { conv -> conv.messages.any { it.clientKey == clientKey } }
+            ?: return false
+        updateConversation(conversation.id) { conv ->
+            conv.copy(messages = conv.messages.filterNot { it.clientKey == clientKey })
+        }
+        persistPendingQueue()
+        return true
+    }
+
     override suspend fun flushPendingNow() {
         flushUnsent(null)
     }

@@ -180,12 +180,14 @@ internal fun ModernChatBubble(
     onEdit: () -> Unit,
     onUnsend: () -> Unit,
     onRetry: () -> Unit = {},
+    onDelete: () -> Unit = {},
     onJoinRoomByCode: (String) -> Unit = {}
 ) {
     val density = LocalDensity.current
     var showActions by remember(message.id) { mutableStateOf(false) }
     var showPile by remember(message.id) { mutableStateOf(false) }
     var showSingleImage by remember(message.id) { mutableStateOf(false) }
+    var showFailedOptionsDialog by remember(message.id) { mutableStateOf(false) }
     val theme = Theme.current
     val isMe = message.role == MessageRole.USER
     // A room card also carries a mediaUrl, but it is a link to a watch party rather
@@ -228,9 +230,8 @@ internal fun ModernChatBubble(
         }
         Spacer(Modifier.width(if (isMe) 0.dp else 7.dp))
 
-        // A failed send gets the same treatment every messenger uses: a red mark beside
-        // the bubble, tappable, rather than a caption the user has to read and decode.
-        // It sits outside the bubble so it stays visible on image messages too.
+        // A failed send gets a clean red circle with an exclamation mark.
+        // Tapping it presents Resend or Delete options.
         val failedToSend = isMe && message.deletedAt == null && message.sendState == MessageSendState.FAILED
         if (failedToSend) {
             Box(
@@ -239,8 +240,8 @@ internal fun ModernChatBubble(
                     .size(20.dp)
                     .clip(CircleShape)
                     .background(theme.colors.errorColor)
-                    .clickable(onClick = onRetry)
-                    .semantics { contentDescription = "Not sent. Tap to retry" },
+                    .clickable { showFailedOptionsDialog = true }
+                    .semantics { contentDescription = "Message not sent. Tap for options" },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -259,10 +260,10 @@ internal fun ModernChatBubble(
             modifier = Modifier
                 .widthIn(max = 280.dp)
                 .combinedClickable(
-                    // Tapping a message that did not send retries it. Everything else
-                    // stays inert so the thread is not full of buttons.
                     onClick = {
-                        if (isMe && message.sendState == MessageSendState.FAILED) onRetry()
+                        if (isMe && message.sendState == MessageSendState.FAILED) {
+                            showFailedOptionsDialog = true
+                        }
                     },
                     onLongClick = {
                         // Edit and unsend address a server message by id. A message that
@@ -542,41 +543,6 @@ internal fun ModernChatBubble(
                                 color = Color.Black.copy(alpha = 0.72f)
                             ) { Text("▶", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 20.sp) }
                         }
-                        // The receipt rides on the picture itself; a caption row of
-                        // "Attachment" plus a tick underneath it was the awkward part.
-                        if (isMe && message.deletedAt == null) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(6.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.Black.copy(alpha = 0.6f))
-                                    .padding(horizontal = 5.dp, vertical = 2.dp)
-                            ) {
-                                when {
-                                    message.sendState == MessageSendState.SENDING -> Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White)
-                                    )
-                                    message.sendState == MessageSendState.SENT -> {
-                                        val seen = message.readAt != null
-                                        val delivered = seen || message.deliveredAt != null
-                                        Icon(
-                                            imageVector = if (delivered) Icons.Default.DoneAll else Icons.Default.Done,
-                                            contentDescription = when {
-                                                seen -> "Seen"
-                                                delivered -> "Delivered"
-                                                else -> "Sent"
-                                            },
-                                            tint = if (seen) theme.colors.primaryAccent else Color.White,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
                     if (message.content.isNotBlank()) {
                         Text(
@@ -597,49 +563,6 @@ internal fun ModernChatBubble(
                         lineHeight = 19.sp
                     )
                 )
-            }
-
-            // Delivery state for messages this device sent. Only a server-confirmed
-            // message is shown without a marker, so a lost connection can never look
-            // like a delivered message.
-            // Only the transient state needs words; failure is the red badge beside the
-            // bubble. A failed message stays tappable as a whole, not just on the icon.
-            // One marker for every state this device knows about, in the order a
-            // message moves through it: dot while it is still going out, one tick once
-            // the server has it, two ticks when the recipient's device has it, and two
-            // accent ticks when they have opened it.
-            if (isMe && message.deletedAt == null && !isMediaMessage) {
-                val markerColor = Color.White.copy(alpha = 0.75f)
-                Row(
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    when {
-                        message.sendState == MessageSendState.SENDING -> Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(markerColor)
-                        )
-                        message.sendState == MessageSendState.SENT -> {
-                            val seen = message.readAt != null
-                            val delivered = seen || message.deliveredAt != null
-                            Icon(
-                                imageVector = if (delivered) Icons.Default.DoneAll else Icons.Default.Done,
-                                contentDescription = when {
-                                    seen -> "Seen"
-                                    delivered -> "Delivered"
-                                    else -> "Sent"
-                                },
-                                tint = if (seen) theme.colors.primaryAccent else markerColor,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                    }
-                }
             }
             }
         }
@@ -672,20 +595,67 @@ internal fun ModernChatBubble(
                         onDismiss = { showActions = false }
                     )
                 }
+
+                if (showFailedOptionsDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showFailedOptionsDialog = false },
+                        title = {
+                            Text(
+                                text = "Message not sent",
+                                style = theme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.colors.textPrimary
+                                )
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = "Would you like to resend this message or delete it?",
+                                style = theme.typography.bodyMedium.copy(color = theme.colors.textSecondary)
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showFailedOptionsDialog = false
+                                    onRetry()
+                                }
+                            ) {
+                                Text("Resend", color = theme.colors.primaryAccent, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = {
+                                    showFailedOptionsDialog = false
+                                    onDelete()
+                                }
+                            ) {
+                                Text("Delete", color = theme.colors.errorColor, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        containerColor = theme.colors.surfaceElevated
+                    )
+                }
             }
         }
 
-        // Instagram-style timestamp & tick mark revealed on the far right when sliding left
-        val revealAlpha = (kotlin.math.abs(dragOffset) / with(density) { 35.dp.toPx() }).coerceIn(0f, 1f)
+        // Timestamp & status revealed when sliding finger (supports sliding to the right or left)
+        val revealAlpha = (kotlin.math.abs(dragOffset) / with(density) { 30.dp.toPx() }).coerceIn(0f, 1f)
         if (revealAlpha > 0.02f) {
+            val isSlidingRight = dragOffset > 0
             Row(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
+                    .align(if (isSlidingRight) Alignment.CenterStart else Alignment.CenterEnd)
                     .graphicsLayer {
-                        translationX = with(density) { 72.dp.toPx() } + dragOffset
+                        translationX = if (isSlidingRight) {
+                            -with(density) { 70.dp.toPx() } + dragOffset
+                        } else {
+                            with(density) { 72.dp.toPx() } + dragOffset
+                        }
                         alpha = revealAlpha
                     }
-                    .padding(end = 4.dp),
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -696,16 +666,26 @@ internal fun ModernChatBubble(
                         fontSize = 11.sp
                     )
                 )
-                // A message that never reached the server cannot be "delivered"; showing
-                // a tick there would contradict the red mark.
-                if (isMe && message.deletedAt == null && message.sendState == MessageSendState.SENT) {
-                    val isRead = message.readAt != null
-                    Icon(
-                        imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Done,
-                        contentDescription = if (isRead) "Read" else "Delivered",
-                        tint = if (isRead) theme.colors.primaryAccent else theme.colors.textTertiary,
-                        modifier = Modifier.size(13.dp)
-                    )
+                if (isMe && message.deletedAt == null) {
+                    when {
+                        message.sendState == MessageSendState.SENDING -> {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.colors.textTertiary)
+                            )
+                        }
+                        message.sendState == MessageSendState.SENT -> {
+                            val isRead = message.readAt != null
+                            Icon(
+                                imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Done,
+                                contentDescription = if (isRead) "Read" else "Delivered",
+                                tint = if (isRead) theme.colors.primaryAccent else theme.colors.textTertiary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

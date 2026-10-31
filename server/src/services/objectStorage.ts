@@ -14,11 +14,17 @@ const client = new S3Client({
 });
 
 function decodeDataUrl(value: string): { body: Buffer; contentType: string } {
-  const match = value.match(/^data:([^;,]+);base64,(.+)$/s);
-  if (!match) {
+  if (!value || typeof value !== 'string' || !value.startsWith('data:')) {
     throw new Error('Only base64 data URLs are accepted for media upload');
   }
-  return { contentType: match[1], body: Buffer.from(match[2], 'base64') };
+  const commaIndex = value.indexOf(',');
+  if (commaIndex === -1) {
+    throw new Error('Invalid data URL format: missing comma separator');
+  }
+  const meta = value.slice(5, commaIndex);
+  const contentType = meta.split(';')[0]?.trim() || 'application/octet-stream';
+  const base64Data = value.slice(commaIndex + 1);
+  return { contentType, body: Buffer.from(base64Data, 'base64') };
 }
 
 export async function uploadObject(

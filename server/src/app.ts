@@ -87,11 +87,12 @@ export function createApp(): express.Application {
   // endpoints to accept their documented data URL payloads.
   app.use((req, res, next) => {
     const isMediaUpload =
-      req.path === '/api/v1/chat/upload' ||
-      req.path === '/api/v1/users/me/assets' ||
-      req.path === '/api/v1/users/profile';
-    // A 30 MiB binary video grows to roughly 40 MiB as a JSON base64 data URL.
-    express.json({ limit: isMediaUpload ? '45mb' : '100kb' })(req, res, next);
+      req.path.startsWith('/api/v1/chat/upload') ||
+      req.path.startsWith('/api/v1/chat/message') ||
+      req.path.startsWith('/api/v1/users/me/assets') ||
+      req.path.startsWith('/api/v1/users/profile');
+    // A 35 MiB binary video grows to roughly 48 MiB as a JSON base64 data URL.
+    express.json({ limit: isMediaUpload ? '50mb' : '100kb' })(req, res, next);
   });
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 

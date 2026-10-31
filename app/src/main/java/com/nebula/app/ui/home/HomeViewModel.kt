@@ -1018,6 +1018,12 @@ class HomeViewModel(
         }
     }
 
+    fun onDeleteFailedMessage(clientKey: String) {
+        viewModelScope.launch {
+            socialRepository.deletePendingMessage(clientKey)
+        }
+    }
+
     fun onSendDirectAttachment(text: String, mediaUrl: String, messageType: String, isSpoiler: Boolean, mediaMimeType: String) {
         val conversationId = _uiState.value.activeSocialConversation?.id ?: return
         viewModelScope.launch {

@@ -349,6 +349,7 @@ fun HomeScreen(
                 onEditMessage = { id, text -> viewModel.onEditDirectMessage(id, text) },
                 onUnsendMessage = { id -> viewModel.onUnsendDirectMessage(id) },
                 onRetryMessage = { clientKey -> viewModel.onRetryDirectMessage(clientKey) },
+                onDeleteFailedMessage = { clientKey -> viewModel.onDeleteFailedMessage(clientKey) },
                 onOpenProfile = { uiState.activeSocialConversation?.partnerUser?.let { viewModel.onOpenFriendProfile(it) } },
                 onInviteToRoom = {
                     val partner = uiState.activeSocialConversation?.partnerUser

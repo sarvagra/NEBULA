@@ -57,8 +57,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.app.Activity
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -162,6 +165,14 @@ data class NebulaRoomActions(
     val onRemoveQueueItem: (String) -> Unit = {}
 )
 
+data class PendingRoomShareMedia(
+    val uri: android.net.Uri,
+    val isVideo: Boolean,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val previewBitmap: android.graphics.Bitmap? = null
+)
+
 @Composable
 fun NebulaRoomScreen(
     room: NebulaRoom,
@@ -242,10 +253,11 @@ fun NebulaRoomScreen(
     var showLeaveConfirmation by remember { mutableStateOf(false) }
     var showInviteFriends by remember { mutableStateOf(false) }
 
-    // Image/GIF Sharing Cooldown State
+    // Image/Video/GIF Sharing State
     var mediaSendTimestamps by remember { mutableStateOf(listOf<Long>()) }
     var cooldownSecondsRemaining by remember { mutableIntStateOf(0) }
-    var pendingImageData by remember { mutableStateOf<String?>(null) }
+    var pendingRoomMedia by remember { mutableStateOf<PendingRoomShareMedia?>(null) }
+    var isUploadingRoomMedia by remember { mutableStateOf(false) }
 
     LaunchedEffect(cooldownSecondsRemaining) {
         if (cooldownSecondsRemaining > 0) {
@@ -254,27 +266,26 @@ fun NebulaRoomScreen(
         }
     }
 
-    // Photo/GIF Picker Launcher with strict format check
+    // Photo/Video Picker Launcher with support for Images, GIFs, and Videos
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            val mimeType = context.contentResolver.getType(uri)?.lowercase() ?: ""
-            val isVideo = mimeType.startsWith("video/") || mimeType.contains("video") || mimeType.contains("mp4")
-            val isImageOrGif = mimeType.startsWith("image/") || mimeType.contains("gif")
-
-            if (isVideo || !isImageOrGif) {
-                Toast.makeText(context, "Blocked: Videos are not allowed. Only images and GIFs are permitted.", Toast.LENGTH_LONG).show()
-                return@rememberLauncherForActivityResult
+            val rawMime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+            val isVideo = rawMime.startsWith("video/") || rawMime.contains("mp4") || rawMime.contains("webm")
+            val mimeType = if (isVideo) {
+                if (rawMime.isNotBlank()) rawMime else "video/mp4"
+            } else {
+                if (rawMime.isNotBlank()) rawMime else "image/jpeg"
             }
 
-            // Strict 5MB size limit
             val sizeBytes = try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
             } catch (e: Exception) { 0L }
 
-            if (sizeBytes > 5 * 1024 * 1024L) {
-                Toast.makeText(context, "Image exceeds 5MB limit. Please select an image under 5MB.", Toast.LENGTH_LONG).show()
+            val maxAllowed = if (isVideo) 30 * 1024 * 1024L else 15 * 1024 * 1024L
+            if (sizeBytes > maxAllowed) {
+                Toast.makeText(context, if (isVideo) "Video exceeds 30MB limit" else "Image exceeds 15MB limit", Toast.LENGTH_LONG).show()
                 return@rememberLauncherForActivityResult
             }
 
@@ -283,42 +294,46 @@ fun NebulaRoomScreen(
             val recent = mediaSendTimestamps.filter { now - it < 8000L }
             if (recent.size >= 2) {
                 cooldownSecondsRemaining = 6
-                Toast.makeText(context, "Please wait a moment before sending another image", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Please wait a moment before sending another file", Toast.LENGTH_SHORT).show()
                 return@rememberLauncherForActivityResult
             }
 
             mediaSendTimestamps = recent + now
 
             scope.launch {
-                try {
-                    val inputStream = context.contentResolver.openInputStream(uri)
-                    val bytes = inputStream?.use { it.readBytes() }
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (bitmap != null) {
-                            val maxDim = maxOf(bitmap.width, bitmap.height)
-                            val scaled = if (maxDim > 1024) {
-                                val scale = 1024f / maxDim
-                                android.graphics.Bitmap.createScaledBitmap(
-                                    bitmap,
-                                    (bitmap.width * scale).toInt(),
-                                    (bitmap.height * scale).toInt(),
-                                    true
-                                )
-                            } else bitmap
-
-                            val baos = java.io.ByteArrayOutputStream()
-                            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, baos)
-                            val compressed = baos.toByteArray()
-                            val base64 = android.util.Base64.encodeToString(compressed, android.util.Base64.NO_WRAP)
-                            val dataUrl = "data:image/jpeg;base64,$base64"
-
-                            pendingImageData = dataUrl
-                        }
+                val previewBmp: android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+                    if (isVideo) {
+                        try {
+                            val retriever = android.media.MediaMetadataRetriever()
+                            retriever.setDataSource(context, uri)
+                            val frame = retriever.getFrameAtTime(1000000)
+                            retriever.release()
+                            frame
+                        } catch (e: Exception) { null }
+                    } else {
+                        try {
+                            val stream = context.contentResolver.openInputStream(uri)
+                            val bytes = stream?.use { it.readBytes() }
+                            if (bytes != null && bytes.isNotEmpty()) {
+                                val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                if (bmp != null) {
+                                    val maxDim = maxOf(bmp.width, bmp.height)
+                                    if (maxDim > 1280) {
+                                        val scale = 1280f / maxDim
+                                        android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+                                    } else bmp
+                                } else null
+                            } else null
+                        } catch (e: Exception) { null }
                     }
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to send image: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                 }
+                pendingRoomMedia = PendingRoomShareMedia(
+                    uri = uri,
+                    isVideo = isVideo,
+                    mimeType = mimeType,
+                    sizeBytes = sizeBytes,
+                    previewBitmap = previewBmp
+                )
             }
         }
     }
@@ -979,54 +994,145 @@ fun NebulaRoomScreen(
         )
     }
 
-    pendingImageData?.let { imageData ->
-        val previewBitmap = remember(imageData) {
-            runCatching {
-                val bytes = android.util.Base64.decode(imageData.substringAfter("base64,"), android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }.getOrNull()
-        }
-        androidx.compose.ui.window.Dialog(onDismissRequest = { pendingImageData = null }) {
+    pendingRoomMedia?.let { media ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = {
+            if (!isUploadingRoomMedia) pendingRoomMedia = null
+        }) {
             androidx.compose.material3.Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 color = theme.colors.surfaceElevated
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
-                    Text("Share in this room", color = theme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (media.isVideo) "Share video in room" else "Share photo in room",
+                        color = theme.colors.textPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     Spacer(Modifier.height(14.dp))
                     Box(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 380.dp)
-                            .clip(RoundedCornerShape(16.dp)).background(Color.Black),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 220.dp, max = 340.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (previewBitmap != null) {
+                        if (media.previewBitmap != null) {
                             androidx.compose.foundation.Image(
-                                bitmap = previewBitmap.asImageBitmap(),
-                                contentDescription = "Image preview before sending",
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                                bitmap = media.previewBitmap.asImageBitmap(),
+                                contentDescription = "Media preview",
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Fit
                             )
+                            if (media.isVideo) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(54.dp)
+                                )
+                            }
                         } else {
-                            Text("Image preview unavailable", color = Color.White)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (media.isVideo) Icons.Default.Videocam else Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(if (media.isVideo) "Video ready to send" else "Photo ready to send", color = Color.White)
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("Everyone in the room can see this image.", color = theme.colors.textSecondary, fontSize = 13.sp)
+                    Text(
+                        if (media.isVideo) "Everyone in the room can watch this video." else "Everyone in the room can see this photo.",
+                        color = theme.colors.textSecondary,
+                        fontSize = 13.sp
+                    )
                     Spacer(Modifier.height(18.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         androidx.compose.material3.OutlinedButton(
-                            onClick = { pendingImageData = null }, modifier = Modifier.weight(1f)
+                            onClick = { pendingRoomMedia = null },
+                            enabled = !isUploadingRoomMedia,
+                            modifier = Modifier.weight(1f)
                         ) { Text("Cancel") }
                         Button(
                             onClick = {
-                                onSendRoomMessage("[IMG:$imageData]")
-                                pendingImageData = null
-                                Toast.makeText(context, "Photo sent", Toast.LENGTH_SHORT).show()
+                                isUploadingRoomMedia = true
+                                scope.launch {
+                                    try {
+                                        val (payloadBytes, uploadMime) = withContext(Dispatchers.IO) {
+                                            if (media.isVideo) {
+                                                val raw = context.contentResolver.openInputStream(media.uri)?.use { it.readBytes() } ?: ByteArray(0)
+                                                Pair(raw, media.mimeType)
+                                            } else {
+                                                if (media.previewBitmap != null) {
+                                                    val baos = java.io.ByteArrayOutputStream()
+                                                    media.previewBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 84, baos)
+                                                    Pair(baos.toByteArray(), "image/jpeg")
+                                                } else {
+                                                    val raw = context.contentResolver.openInputStream(media.uri)?.use { it.readBytes() } ?: ByteArray(0)
+                                                    Pair(raw, media.mimeType)
+                                                }
+                                            }
+                                        }
+                                        if (payloadBytes.isEmpty()) {
+                                            Toast.makeText(context, "Unable to read file", Toast.LENGTH_SHORT).show()
+                                            isUploadingRoomMedia = false
+                                            return@launch
+                                        }
+                                        val dataUrl = "data:$uploadMime;base64," +
+                                            android.util.Base64.encodeToString(payloadBytes, android.util.Base64.NO_WRAP)
+                                        val mediaType = if (media.isVideo) "video" else if (uploadMime == "image/gif") "gif" else "image"
+                                        val response = com.nebula.app.data.backend.NebulaApiClient.uploadChatMedia(
+                                            url = dataUrl,
+                                            mimeType = uploadMime,
+                                            mediaType = mediaType,
+                                            sizeBytes = payloadBytes.size.toLong()
+                                        )
+                                        when (response) {
+                                            is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Success -> {
+                                                val remoteUrl = response.data.optJSONObject("data")?.optString("mediaUrl").orEmpty()
+                                                    .ifBlank { response.data.optString("mediaUrl") }
+                                                if (remoteUrl.isNotBlank()) {
+                                                    val tag = if (media.isVideo) "[VIDEO:$remoteUrl]" else "[IMG:$remoteUrl]"
+                                                    onSendRoomMessage(tag)
+                                                    Toast.makeText(context, if (media.isVideo) "Video sent" else "Photo sent", Toast.LENGTH_SHORT).show()
+                                                    pendingRoomMedia = null
+                                                } else {
+                                                    Toast.makeText(context, "Upload failed: Server returned no URL", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                            is com.nebula.app.data.backend.NebulaApiClient.ApiResponse.Error -> {
+                                                Toast.makeText(context, response.message.ifBlank { "Upload failed" }, Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Upload failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        isUploadingRoomMedia = false
+                                    }
+                                }
                             },
-                            enabled = previewBitmap != null,
+                            enabled = !isUploadingRoomMedia,
                             modifier = Modifier.weight(1f)
-                        ) { Text("Send image") }
+                        ) {
+                            if (isUploadingRoomMedia) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(if (media.isVideo) "Send video" else "Send photo")
+                            }
+                        }
                     }
                 }
             }
@@ -1119,19 +1225,53 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            val isImageMessage = (message.content.startsWith("[IMG:") && message.content.contains("]")) ||
+            var showFullVideo by remember { mutableStateOf(false) }
+            val isVideoMessage = message.content.startsWith("[VIDEO:") && message.content.contains("]")
+            val isImageMessage = !isVideoMessage && ((message.content.startsWith("[IMG:") && message.content.contains("]")) ||
                 message.content.startsWith("data:image/") ||
-                message.content.contains("Shared Photo")
+                message.content.contains("Shared Photo"))
             val rawUrl = when {
+                isVideoMessage -> message.content.substringAfter("[VIDEO:").substringBefore("]")
                 message.content.startsWith("[IMG:") -> message.content.substringAfter("[IMG:").substringBefore("]")
                 message.content.startsWith("data:image/") -> message.content
                 else -> ""
             }
-            if (isImageMessage) {
-                val caption = if (message.content.startsWith("[IMG:")) {
-                    message.content.substringAfter("]", "").trim()
-                } else ""
+            val caption = when {
+                isVideoMessage -> message.content.substringAfter("]", "").trim()
+                message.content.startsWith("[IMG:") -> message.content.substringAfter("]", "").trim()
+                else -> ""
+            }
 
+            if (isVideoMessage) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                        .aspectRatio(16f / 9f)
+                        .clickable { showFullVideo = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play video",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Text("Play video", color = Color.White, fontSize = 12.sp)
+                    }
+                }
+                if (caption.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = caption, style = theme.typography.bodySmall.copy(color = theme.colors.textPrimary, fontSize = 13.sp))
+                }
+            } else if (isImageMessage) {
                 val decodedBitmap = remember(rawUrl) {
                     if (rawUrl.startsWith("data:image/") && rawUrl.contains("base64,")) {
                         try {
@@ -1212,11 +1352,43 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
                 )
             }
 
-            if (showFullImage) {
+            if (showFullImage && rawUrl.isNotBlank()) {
                 com.nebula.app.ui.components.NebulaImageViewer(
                     images = listOf(rawUrl),
                     onDismiss = { showFullImage = false }
                 )
+            }
+
+            if (showFullVideo && rawUrl.isNotBlank()) {
+                androidx.compose.ui.window.Dialog(onDismissRequest = { showFullVideo = false }) {
+                    androidx.compose.material3.Surface(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+                        color = Color.Black
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                IconButton(onClick = { showFullVideo = false }) {
+                                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                                }
+                            }
+                            AndroidView(
+                                factory = { ctx ->
+                                    android.widget.VideoView(ctx).apply {
+                                        setVideoURI(android.net.Uri.parse(rawUrl))
+                                        val mediaController = android.widget.MediaController(ctx)
+                                        mediaController.setAnchorView(this)
+                                        setMediaController(mediaController)
+                                        setOnPreparedListener { it.start() }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            )
+                        }
+                    }
+                }
             }
         }
     }

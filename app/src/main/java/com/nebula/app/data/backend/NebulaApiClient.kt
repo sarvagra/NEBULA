@@ -101,6 +101,10 @@ object NebulaApiClient {
                 if (jsonBody != null && (method == "POST" || method == "PUT" || method == "PATCH")) {
                     doOutput = true
                     val bytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
+                    setFixedLengthStreamingMode(bytes.size)
+                    if (bytes.size > 1024 * 1024) {
+                        readTimeout = 120000
+                    }
                     if (uploadProgress == null) {
                         outputStream.use { it.write(bytes) }
                     } else {

@@ -28,6 +28,8 @@ interface ISocialRepository {
     suspend fun sendMessage(conversationId: String, content: String, mediaUrl: String? = null, messageType: String = "text", isSpoiler: Boolean = false, mediaMimeType: String? = null, mediaUrls: List<String> = emptyList()): Boolean
     /** Re-sends a message that failed to persist, reusing its idempotency key. */
     suspend fun retryMessage(clientKey: String): Boolean
+    /** Deletes an unsent/failed message completely so it is never sent. */
+    suspend fun deletePendingMessage(clientKey: String): Boolean
     /**
      * Attempts every unsent message. Called when connectivity returns, so a message
      * typed in a tunnel goes out on its own instead of waiting for a tap.

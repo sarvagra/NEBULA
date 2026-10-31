@@ -157,6 +157,15 @@ class RoomRepositoryImpl(
             if (id.isBlank()) continue
             val createdAt = json.optString("createdAt")
             if (createdAt.isNotBlank() && (cursor == null || createdAt > cursor!!)) cursor = createdAt
+            val text = json.optString("text", "")
+            val mediaUrl = json.optString("mediaUrl", "")
+            val finalContent = when {
+                mediaUrl.isNotBlank() && (mediaUrl.contains(".mp4") || mediaUrl.contains(".webm") || mediaUrl.contains("video")) ->
+                    if (text.isNotBlank()) "[VIDEO:$mediaUrl] $text" else "[VIDEO:$mediaUrl]"
+                mediaUrl.isNotBlank() ->
+                    if (text.isNotBlank()) "[IMG:$mediaUrl] $text" else "[IMG:$mediaUrl]"
+                else -> text
+            }
             messages += RoomChatMessage(
                 id = id,
                 roomId = json.optString("roomId", roomId),
@@ -164,7 +173,7 @@ class RoomRepositoryImpl(
                 senderName = json.optString("senderName", "Nebula User"),
                 senderAvatar = json.optString("senderAvatarLetter", "U"),
                 senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
-                content = json.optString("text", ""),
+                content = finalContent,
                 timeLabel = formatRoomMessageTime(createdAt),
                 isSystemMessage = json.optString("messageType") == "system"
             )
@@ -529,6 +538,15 @@ class RoomRepositoryImpl(
         val messageId = json.optString("id").ifBlank { json.optString("_id") }
         if (messageId.isBlank() || current.recentMessages.any { it.id == messageId }) return
         val createdAt = json.optString("createdAt")
+        val text = json.optString("text", "")
+        val mediaUrl = json.optString("mediaUrl", "")
+        val finalContent = when {
+            mediaUrl.isNotBlank() && (mediaUrl.contains(".mp4") || mediaUrl.contains(".webm") || mediaUrl.contains("video")) ->
+                if (text.isNotBlank()) "[VIDEO:$mediaUrl] $text" else "[VIDEO:$mediaUrl]"
+            mediaUrl.isNotBlank() ->
+                if (text.isNotBlank()) "[IMG:$mediaUrl] $text" else "[IMG:$mediaUrl]"
+            else -> text
+        }
         val message = RoomChatMessage(
             id = messageId,
             roomId = json.optString("roomId", current.id),
@@ -536,7 +554,7 @@ class RoomRepositoryImpl(
             senderName = json.optString("senderName", "Nebula User"),
             senderAvatar = json.optString("senderAvatarLetter", "U"),
             senderAvatarUrl = json.optString("senderAvatarUrl").ifBlank { null },
-            content = json.optString("text", ""),
+            content = finalContent,
             timeLabel = formatRoomMessageTime(createdAt),
             isSystemMessage = json.optString("messageType") == "system"
         )
