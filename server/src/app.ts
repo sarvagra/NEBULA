@@ -140,11 +140,11 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 6,
-      versionName: '1.1.4',
+      versionCode: 11,
+      versionName: '1.1.9',
       minSupportedVersionCode: 1,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• Fixed photo sending with memory-safe downsampling and expanded 40MB pick limit\n• Authentic 3D banded Jupiter app icon and warm in-app branding\n• Silky smooth profile swiping with pre-warmed tabs and cached banner canvas\n• Quick settings gear on profile replacing the options menu',
+      releaseNotes: '• Conspicuous multi-photo stack pile with prominent fan-out depth, layer rims, and glassmorphic photo count badge\n• Restored authentic 3D ringed Nebula planet launcher icon on dark cosmos background in app drawer\n• Perfectly aligned website mark with seamless orbital ring and celestial sphere\n• Butter-smooth, instantaneous tab switching and sliding across Home, Rooms, Chats, Friends, and Profile',
       forceUpdate: false,
       publishedAt: new Date().toISOString(),
     };
