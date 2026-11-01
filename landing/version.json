@@ -1,10 +1,10 @@
 {
   "success": true,
-  "versionCode": 11,
-  "versionName": "1.1.9",
+  "versionCode": 12,
+  "versionName": "1.1.10",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Distinct multi-photo stack pile with prominent fan-out depth, crisp layer rims, and glassmorphic photo count badge\n• Restored authentic 3D ringed Nebula planet launcher icon on pitch-black background in app drawer\n• Perfectly aligned website mark with seamless orbital ring and celestial sphere\n• Butter-smooth, instantaneous tab switching and sliding across Home, Rooms, Chats, Friends, and Profile",
+  "releaseNotes": "• Chat [ Video ] bubble: clean preview-less video capsule with tap-to-play popup viewer\n• Rewired custom status & presence pipeline with green/grey online dots, dynamic active presence, and profile status bar & friend count\n• Rooms discovery: streamlined filter & tag bar (Filters | recently used tags) with search pipeline removed\n• Beta Program: simplified to dual Premium and Premium Plus toggles\n• Universal theme blur fix: pristine frosted surfaces across dark & light themes\n• Active friends quick popup card with PFP, friend count, bio, and Follow/Invite to Room actions",
   "forceUpdate": false,
-  "publishedAt": "2026-11-01T07:20:00Z"
+  "publishedAt": "2026-11-01T08:30:00Z"
 }

@@ -61,6 +61,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -201,12 +203,7 @@ internal fun ModernChatBubble(
     val isMediaMessage = message.deletedAt == null && !isRoomCard &&
         (!message.mediaUrl.isNullOrBlank() || message.mediaUrls.isNotEmpty() || message.messageType in listOf("media", "image", "video"))
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
-    var videoStarted by remember(message.id) { mutableStateOf(false) }
-    var videoPrepared by remember(message.id) { mutableStateOf(false) }
-    var videoBuffering by remember(message.id) { mutableStateOf(false) }
-    var videoBufferPercent by remember(message.id) { mutableIntStateOf(0) }
-    var videoFailed by remember(message.id) { mutableStateOf(false) }
-    // Default to a landscape-ish box until the real dimensions arrive.
+    var showVideoPlayer by remember(message.id) { mutableStateOf(false) }
     val isVideoMessage = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
     var mediaAspectRatio by remember(message.id) { mutableStateOf(4f / 3f) }
 
@@ -281,11 +278,11 @@ internal fun ModernChatBubble(
                     )
                 )
                 .then(
-                    if (isMediaMessage) Modifier
+                    if (isMediaMessage && !isVideoMessage) Modifier
                     else Modifier.background(if (isMe) theme.colors.primaryAccent else theme.colors.surface)
                 )
                 .then(
-                    if (isMediaMessage) Modifier
+                    if (isMediaMessage && !isVideoMessage) Modifier
                     else Modifier.border(
                         width = 1.dp,
                         color = if (isMe) Color.Transparent else theme.colors.surfaceBorder,
@@ -298,8 +295,8 @@ internal fun ModernChatBubble(
                     )
                 )
                 .padding(
-                    horizontal = if (isMediaMessage) 0.dp else 14.dp,
-                    vertical = if (isMediaMessage) 0.dp else 10.dp
+                    horizontal = if (isMediaMessage && !isVideoMessage) 0.dp else 14.dp,
+                    vertical = if (isMediaMessage && !isVideoMessage) 0.dp else 10.dp
                 )
         ) {
             val isMedia = isMediaMessage
@@ -313,9 +310,74 @@ internal fun ModernChatBubble(
                     isMine = isMe,
                     onJoin = onJoinRoomByCode
                 )
+            } else if (isVideoMessage) {
+                val mediaUrl = message.mediaUrl.orEmpty().ifBlank { message.mediaUrls.firstOrNull().orEmpty() }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isMe) Color.White.copy(alpha = 0.16f)
+                                else theme.colors.surfaceElevated
+                            )
+                            .border(
+                                1.dp,
+                                if (isMe) Color.White.copy(alpha = 0.25f)
+                                else theme.colors.surfaceBorder,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                if (!spoilerRevealed) spoilerRevealed = true
+                                else if (mediaUrl.isNotBlank()) showVideoPlayer = true
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(if (isMe) Color.White else theme.colors.primaryAccent),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (!spoilerRevealed) Icons.Default.Visibility else Icons.Default.PlayArrow,
+                                contentDescription = "Play Video",
+                                tint = if (isMe) theme.colors.primaryAccent else Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = if (!spoilerRevealed) "Spoiler [ Video ]" else "[ Video ]",
+                                style = theme.typography.bodyMedium.copy(
+                                    color = if (isMe) Color.White else theme.colors.textPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp
+                                )
+                            )
+                            Text(
+                                text = if (!spoilerRevealed) "Tap to reveal & play" else "Tap to play",
+                                style = theme.typography.caption.copy(
+                                    color = if (isMe) Color.White.copy(alpha = 0.8f) else theme.colors.textSecondary,
+                                    fontSize = 10.5.sp
+                                )
+                            )
+                        }
+                    }
+                    if (message.content.isNotBlank()) {
+                        Text(
+                            text = message.content,
+                            style = theme.typography.bodyMedium.copy(
+                                color = if (isMe) Color.White else theme.colors.textPrimary,
+                                fontSize = 13.5.sp
+                            )
+                        )
+                    }
+                }
             } else if (isMedia) {
                 val mediaUrl = message.mediaUrl.orEmpty().ifBlank { message.mediaUrls.firstOrNull().orEmpty() }
-                val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
                 val pile = if (message.mediaUrls.isNotEmpty()) {
                     message.mediaUrls.filter { it.isNotBlank() }
                 } else if (mediaUrl.isNotBlank()) {
@@ -326,10 +388,7 @@ internal fun ModernChatBubble(
                 val isPile = pile.size > 1
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Border-less media surface.
-                    val mediaBoxModifier = if (isVideoMessage) {
-                        Modifier.fillMaxWidth().height(180.dp)
-                    } else if (isPile) {
+                    val mediaBoxModifier = if (isPile) {
                         Modifier
                             .fillMaxWidth(0.76f)
                             .aspectRatio(1f)
@@ -345,24 +404,18 @@ internal fun ModernChatBubble(
                         } else {
                             mediaBoxModifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFF14131A))
+                                .background(if (theme.colors.isDark) Color(0xFF14131A) else theme.colors.surfaceElevated)
                         },
                         contentAlignment = Alignment.Center
                     ) {
                         if (isPile) {
-                            // Conspicuously layered multi-photo stack pile:
-                            // Top photo is crisp and prominent with deep drop shadow.
-                            // Underneath photo(s) visibly fan out with pronounced angles & offsets,
-                            // subtle crisp edge rim, and an eye-catching glassmorphic photo count badge.
                             val displayCards = pile.take(3)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true }
-                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
+                                    .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Draw from bottom of the stack to top (index 0 is on top)
                                 for (i in displayCards.indices.reversed()) {
                                     val cardUrl = displayCards[i]
                                     val rotation = when (i) {
@@ -408,10 +461,10 @@ internal fun ModernChatBubble(
                                                 clip = false
                                             )
                                             .clip(RoundedCornerShape(16.dp))
-                                            .background(Color(0xFF14131A))
+                                            .background(if (theme.colors.isDark) Color(0xFF14131A) else theme.colors.surfaceElevated)
                                             .border(
                                                 width = 1.dp,
-                                                color = if (i == 0) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.18f),
+                                                color = if (theme.colors.isDark) (if (i == 0) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.18f)) else theme.colors.surfaceBorder,
                                                 shape = RoundedCornerShape(16.dp)
                                             ),
                                         contentAlignment = Alignment.Center
@@ -428,20 +481,22 @@ internal fun ModernChatBubble(
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .background(Color.Black.copy(alpha = scrimAlpha))
+                                                    .background(
+                                                        if (theme.colors.isDark) Color.Black.copy(alpha = scrimAlpha)
+                                                        else Color.White.copy(alpha = scrimAlpha)
+                                                    )
                                             )
                                         }
                                     }
                                 }
 
-                                // High-contrast frosted glass stack count badge
                                 Surface(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
                                         .padding(6.dp),
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xDD0B0E1B),
-                                    border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f))
+                                    color = if (theme.colors.isDark) Color(0xDD0B0E1B) else theme.colors.surfaceElevated,
+                                    border = BorderStroke(1.dp, if (theme.colors.isDark) Color(0xFF8B5CF6).copy(alpha = 0.5f) else theme.colors.surfaceBorder)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
@@ -451,52 +506,18 @@ internal fun ModernChatBubble(
                                         Icon(
                                             imageVector = Icons.Default.PhotoLibrary,
                                             contentDescription = null,
-                                            tint = Color(0xFF38BDF8),
+                                            tint = theme.colors.primaryAccent,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Text(
                                             text = "${pile.size} Photos",
-                                            color = Color.White,
+                                            color = theme.colors.textPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             }
-                        } else if (isVideo && mediaUrl.isNotBlank()) {
-                            AndroidView(
-                                factory = { context ->
-                                    android.widget.VideoView(context).apply {
-                                        setVideoURI(android.net.Uri.parse(mediaUrl))
-                                        setOnPreparedListener { player ->
-                                            player.isLooping = false
-                                            videoPrepared = true
-                                            videoFailed = false
-                                            player.setOnBufferingUpdateListener { _, percent ->
-                                                videoBufferPercent = percent.coerceIn(0, 100)
-                                                videoBuffering = percent < 100
-                                            }
-                                            if (videoStarted) start()
-                                        }
-                                        setOnInfoListener { _, what, _ ->
-                                            when (what) {
-                                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START -> videoBuffering = true
-                                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END -> videoBuffering = false
-                                            }
-                                            true
-                                        }
-                                        setOnErrorListener { _, _, _ ->
-                                            videoFailed = true
-                                            videoBuffering = false
-                                            true
-                                        }
-                                    }
-                                },
-                                update = { player ->
-                                    if (videoStarted && videoPrepared && !videoFailed && !player.isPlaying) player.start()
-                                },
-                                modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
-                            )
                         } else if (mediaUrl.isNotBlank()) {
                             AsyncImage(
                                 model = mediaUrl,
@@ -510,11 +531,10 @@ internal fun ModernChatBubble(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0xFF14131A))
+                                    .background(if (theme.colors.isDark) Color(0xFF14131A) else theme.colors.surfaceElevated)
                                     .clickable {
                                         if (spoilerRevealed) showSingleImage = true else spoilerRevealed = true
-                                    }
-                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
+                                    },
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
                         } else {
@@ -526,47 +546,46 @@ internal fun ModernChatBubble(
                                 )
                             )
                         }
-                        if (isVideo && videoFailed && spoilerRevealed) {
-                            Surface(
-                                modifier = Modifier.align(Alignment.Center),
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color.Black.copy(alpha = 0.78f)
-                            ) {
-                                Text("Video unavailable", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White, fontSize = 12.sp)
-                            }
-                        } else if (isVideo && videoBuffering && spoilerRevealed) {
-                            Surface(
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color.Black.copy(alpha = 0.78f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    androidx.compose.material3.LinearProgressIndicator(
-                                        progress = { videoBufferPercent / 100f },
-                                        modifier = Modifier.width(110.dp),
-                                        color = Color.White,
-                                        trackColor = Color.White.copy(alpha = 0.3f)
+
+                        // Theme-aware, beautiful spoiler shield (no muddy blur artifacts)
+                        if (!spoilerRevealed) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        if (theme.colors.isDark) Color(0xE00D0C14)
+                                        else Color(0xF2F8FAFC)
                                     )
-                                    Text("$videoBufferPercent%", color = Color.White, fontSize = 11.sp)
+                                    .clickable { spoilerRevealed = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = if (theme.colors.isDark) Color.Black.copy(alpha = 0.72f) else Color.White,
+                                    border = BorderStroke(1.dp, if (theme.colors.isDark) Color.White.copy(alpha = 0.22f) else theme.colors.surfaceBorder),
+                                    shadowElevation = 3.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            tint = theme.colors.primaryAccent,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = "Reveal spoiler",
+                                            color = theme.colors.textPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        if (!spoilerRevealed) {
-                            Surface(
-                                modifier = Modifier.align(Alignment.Center).clickable { spoilerRevealed = true },
-                                shape = RoundedCornerShape(18.dp),
-                                color = Color.Black.copy(alpha = 0.72f)
-                            ) { Text("Reveal spoiler", modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp), color = Color.White, fontSize = 12.sp) }
-                        } else if (isVideo && !videoStarted) {
-                            Surface(
-                                modifier = Modifier.align(Alignment.Center).clickable { videoStarted = true },
-                                shape = CircleShape,
-                                color = Color.Black.copy(alpha = 0.72f)
-                            ) { Text("▶", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 20.sp) }
                         }
                     }
                     if (message.content.isNotBlank()) {
@@ -604,6 +623,69 @@ internal fun ModernChatBubble(
                         images = pileList,
                         onDismiss = { showPile = false }
                     )
+                }
+                if (showVideoPlayer && mediaUrlForViewer.isNotBlank()) {
+                    androidx.compose.ui.window.Dialog(
+                        onDismissRequest = { showVideoPlayer = false },
+                        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.94f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "[ Video ]",
+                                        style = theme.typography.titleMedium.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                    IconButton(onClick = { showVideoPlayer = false }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close",
+                                            tint = Color.White
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.Black)
+                                ) {
+                                    AndroidView(
+                                        factory = { ctx ->
+                                            android.widget.VideoView(ctx).apply {
+                                                setVideoURI(android.net.Uri.parse(mediaUrlForViewer))
+                                                val controller = android.widget.MediaController(ctx)
+                                                controller.setAnchorView(this)
+                                                setMediaController(controller)
+                                                setOnPreparedListener { it.start() }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(16f / 9f)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 if (showActions) {
                     MessageActionSheet(

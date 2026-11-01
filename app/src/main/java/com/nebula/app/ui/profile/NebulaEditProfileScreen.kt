@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Star
 import com.nebula.app.domain.model.NebulaSubscriptionTier
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -1181,36 +1183,33 @@ fun NebulaEditProfileScreen(
                         }
                     }
 
-                    // Custom status input. Every account can type their own status:
-                    // the old premium-plus gate left the field invisible, so tapping
-                    // "Custom" looked like it did nothing at all.
+                    // Custom status input: visible, beautifully styled, with live character count
                     if (statusText.equals("custom", ignoreCase = true)) {
-                        BasicTextField(
+                        OutlinedTextField(
                             value = customStatusText,
                             onValueChange = {
                                 if (it.length <= 80) customStatusText = it
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            textStyle = theme.typography.bodyMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontSize = 14.5.sp
-                            ),
-                            cursorBrush = SolidColor(theme.colors.primaryAccent),
+                            placeholder = {
+                                Text(
+                                    text = "What's on your mind? (max 80 chars)",
+                                    style = theme.typography.bodyMedium.copy(
+                                        color = theme.colors.textTertiary,
+                                        fontSize = 13.5.sp
+                                    )
+                                )
+                            },
                             singleLine = true,
-                            decorationBox = { innerTextField ->
-                                Box {
-                                    if (statusText.isEmpty()) {
-                                        Text(
-                                            text = "Custom status (max 80 characters)",
-                                            style = theme.typography.bodyMedium.copy(
-                                                color = theme.colors.textTertiary,
-                                                fontSize = 14.sp
-                                            )
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            }
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = theme.colors.surfaceElevated,
+                                unfocusedContainerColor = theme.colors.surfaceElevated,
+                                focusedBorderColor = theme.colors.primaryAccent,
+                                unfocusedBorderColor = theme.colors.surfaceBorder,
+                                focusedTextColor = theme.colors.textPrimary,
+                                unfocusedTextColor = theme.colors.textPrimary
+                            )
                         )
                     }
                 }

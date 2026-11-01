@@ -18,8 +18,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PeopleOutline
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -266,6 +271,34 @@ fun NebulaProfileHeader(
                     Spacer(modifier = Modifier.size(8.dp))
                     trailingNameBadge()
                 }
+
+                // Friend count to the right of the user's name taking gap
+                Spacer(modifier = Modifier.weight(1f))
+                val friendCount = user.friendsCount ?: 0
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(theme.colors.surfaceElevated)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PeopleOutline,
+                        contentDescription = null,
+                        tint = theme.colors.textSecondary,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "$friendCount ${if (friendCount == 1) "friend" else "friends"}",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.5.sp
+                        )
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(2.dp))
@@ -281,6 +314,47 @@ fun NebulaProfileHeader(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // Status bar showing online / offline / custom statuses
+            val isOnline = user.isOnline && user.profileStatus != "offline" && user.presenceStatus != NebulaPresenceStatus.OFFLINE
+            val statusDisplay = when {
+                user.customStatus.isNotBlank() -> user.customStatus
+                !isOnline -> "Offline"
+                user.currentRoomId != null || user.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> "In a room"
+                user.presenceStatus == NebulaPresenceStatus.PRIVATE_CHAT -> "In chat"
+                else -> "Online"
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = theme.colors.surfaceElevated,
+                border = BorderStroke(1.dp, theme.colors.surfaceBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (isOnline) Color(0xFF10B981) else Color(0xFF6B7280))
+                    )
+                    Text(
+                        text = statusDisplay,
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))

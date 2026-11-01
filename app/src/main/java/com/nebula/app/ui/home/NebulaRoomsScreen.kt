@@ -100,29 +100,21 @@ fun NebulaRoomsScreen(
     val theme = Theme.current
     val context = LocalContext.current
 
-    var searchQuery by remember { mutableStateOf("") }
     var selectedSort by remember { mutableStateOf(RoomSortOption.HIGH_TO_LOW) }
     var selectedTags by remember { mutableStateOf(setOf<String>()) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
-    // Curated category filter row starting with "All", "Chill", "Study", etc.
-    val recentFilters = listOf("All", "Chill", "Study", "Cinema", "Lo-Fi", "Gaming", "Tech", "Anime")
+    // Recently used tags from rooms currently in the space
+    val recentFilters = remember(rooms) {
+        val roomTags = rooms.flatMap { it.tags }.filter { it.isNotBlank() }.distinct()
+        val defaultFallback = listOf("Chill", "Music", "Study", "Cinema", "Gaming", "Tech", "Anime")
+        (listOf("All") + (roomTags + defaultFallback).distinct()).take(10)
+    }
 
     // Filter and Sort rooms directly from repository / backend
-    val displayedRooms = remember(searchQuery, selectedTags, selectedSort, rooms) {
+    val displayedRooms = remember(selectedTags, selectedSort, rooms) {
         rooms.filter { room ->
-            // Search query filter
-            val matchesSearch = searchQuery.isBlank() ||
-                room.name.contains(searchQuery, ignoreCase = true) ||
-                room.hostName.contains(searchQuery, ignoreCase = true) ||
-                room.tags.any { it.contains(searchQuery, ignoreCase = true) } ||
-                (room.mediaItem?.title?.contains(searchQuery, ignoreCase = true) == true)
-
-            // Tag filter (if any selected, must match at least one)
-            val matchesTags = selectedTags.isEmpty() ||
-                room.tags.any { it in selectedTags }
-
-            matchesSearch && matchesTags
+            selectedTags.isEmpty() || room.tags.any { it in selectedTags }
         }.sortedWith { a, b ->
             when (selectedSort) {
                 RoomSortOption.HIGH_TO_LOW -> b.participantCount.compareTo(a.participantCount)
@@ -163,52 +155,7 @@ fun NebulaRoomsScreen(
             }
         }
 
-        // 2. SEARCH PRE-EXISTING ROOMS
-        item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = {
-                    Text(
-                        text = "Search rooms by name, tag, or topic...",
-                        style = theme.typography.bodyMedium.copy(color = theme.colors.textTertiary, fontSize = 13.5.sp)
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = theme.colors.textTertiary,
-                        modifier = Modifier.size(19.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = theme.colors.textSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = theme.colors.surface,
-                    unfocusedContainerColor = theme.colors.surface,
-                    focusedBorderColor = theme.colors.primaryAccent,
-                    unfocusedBorderColor = theme.colors.surfaceBorder,
-                    focusedTextColor = theme.colors.textPrimary,
-                    unfocusedTextColor = theme.colors.textPrimary
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // 3. FLIPKART/AMAZON STYLE FILTERS & RECENTLY USED TAGS BAR
+        // 2. FILTERS & RECENTLY USED TAGS BAR: ( Filters | [recent tags] )
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -363,14 +310,13 @@ fun NebulaRoomsScreen(
                             )
                         )
                         Text(
-                            text = if (rooms.isEmpty()) "Tap the TV icon above to create a watch party and invite friends" else "Try clearing filters or searching for something else",
+                            text = if (rooms.isEmpty()) "Tap the TV icon above to create a watch party and invite friends" else "Try clearing filters to see more rooms",
                             style = theme.typography.caption.copy(color = theme.colors.textSecondary)
                         )
-                        if (rooms.isNotEmpty() && (searchQuery.isNotEmpty() || selectedTags.isNotEmpty() || selectedSort != RoomSortOption.HIGH_TO_LOW)) {
+                        if (rooms.isNotEmpty() && (selectedTags.isNotEmpty() || selectedSort != RoomSortOption.HIGH_TO_LOW)) {
                             Spacer(modifier = Modifier.height(6.dp))
                             Button(
                                 onClick = {
-                                    searchQuery = ""
                                     selectedTags = emptySet()
                                     selectedSort = RoomSortOption.HIGH_TO_LOW
                                 },

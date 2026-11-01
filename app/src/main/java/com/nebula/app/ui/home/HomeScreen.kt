@@ -176,6 +176,9 @@ fun HomeScreen(
                                 avatarLetter = uiState.userProfile.avatarFallbackLetter,
                                 bio = uiState.userProfile.bio,
                                 status = uiState.userProfile.status,
+                                customStatus = uiState.userProfile.customStatus,
+                                friendsCount = uiState.friends.size,
+                                tier = if (uiState.userProfile.isPremium) "premium" else "free",
                                 bannerIndex = uiState.userProfile.bannerIndex,
                                 avatarUrl = uiState.userProfile.avatarUri,
                                 bannerUrl = uiState.userProfile.bannerUrl,
@@ -414,7 +417,8 @@ fun HomeScreen(
                                             onJoinRoom = { viewModel.onJoinRoom(it) },
                                             onCreateRoomClick = { viewModel.onCreateRoomClick() },
                                             onOpenConversation = { viewModel.onSelectSocialConversation(it) },
-                                            onFriendClick = { viewModel.onOpenFriendProfile(it) }
+                                            onFriendClick = { viewModel.onOpenFriendProfile(it) },
+                                            onInviteToRoom = { viewModel.onInviteFriendToActiveRoom(it) }
                                         )
                                     }
                                 }

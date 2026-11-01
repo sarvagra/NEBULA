@@ -55,6 +55,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -238,6 +241,43 @@ fun NASidebar(
                                 fontSize = 13.sp
                             )
                         )
+
+                        // Status bar showing online / offline / custom statuses
+                        val isOnline = userProfile.status.lowercase() != "offline"
+                        val statusDisplay = when {
+                            userProfile.customStatus.isNotBlank() -> userProfile.customStatus
+                            !isOnline -> "Offline"
+                            else -> "Online"
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = theme.colors.surfaceElevated,
+                            border = BorderStroke(1.dp, theme.colors.surfaceBorder),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isOnline) Color(0xFF10B981) else Color(0xFF6B7280))
+                                )
+                                Text(
+                                    text = statusDisplay,
+                                    style = theme.typography.caption.copy(
+                                        color = theme.colors.textPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))

@@ -21,10 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Sell
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Star
+import com.nebula.app.domain.model.NebulaSubscriptionTier
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
@@ -62,17 +60,21 @@ fun NebulaBetaProgramScreen(
 
     BackHandler { onBack() }
 
-    var featureCustomStatus by remember {
-        mutableStateOf(sessionManager.isFeatureEnabled(SessionManager.FEATURE_CUSTOM_STATUS))
+    val currentProfile = sessionManager.getUserProfile()
+    var currentTier by remember {
+        mutableStateOf(currentProfile?.subscriptionTier ?: NebulaSubscriptionTier.FREE)
     }
-    var featureCustomBanner by remember {
-        mutableStateOf(sessionManager.isFeatureEnabled(SessionManager.FEATURE_CUSTOM_BANNER))
-    }
-    var featureVideoBanner by remember {
-        mutableStateOf(sessionManager.isFeatureEnabled(SessionManager.FEATURE_VIDEO_BANNER))
-    }
-    var featureAllTags by remember {
-        mutableStateOf(sessionManager.isFeatureEnabled(SessionManager.FEATURE_ALL_TAGS))
+
+    fun applyTier(tier: NebulaSubscriptionTier) {
+        currentTier = tier
+        val profile = sessionManager.getUserProfile()
+        if (profile != null) {
+            val updated = profile.copy(
+                subscriptionTier = tier,
+                isPremium = tier != NebulaSubscriptionTier.FREE
+            )
+            sessionManager.saveUserProfile(updated)
+        }
     }
 
     Column(
@@ -163,10 +165,10 @@ fun NebulaBetaProgramScreen(
                 }
             }
 
-            // FEATURE SWITCHES CARD
+            // BETA ACCESS TIERS (Premium vs Premium Plus)
             item {
                 Text(
-                    text = "FEATURE PREFERENCES",
+                    text = "BETA ACCESS TIERS",
                     style = theme.typography.caption.copy(
                         color = theme.colors.textTertiary,
                         fontWeight = FontWeight.Bold,
@@ -183,52 +185,24 @@ fun NebulaBetaProgramScreen(
                         .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
                 ) {
                     BetaFeatureItem(
-                        icon = Icons.Default.Tune,
-                        title = "Custom status",
-                        subtitle = "Write your own status text instead of preset labels",
-                        checked = featureCustomStatus,
-                        onCheckedChange = {
-                            featureCustomStatus = it
-                            sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_STATUS, it)
+                        icon = Icons.Default.Star,
+                        title = "Premium",
+                        subtitle = "Enable Nebula Premium: custom statuses, extended direct messages, and priority rooms",
+                        checked = currentTier == NebulaSubscriptionTier.PREMIUM,
+                        onCheckedChange = { isChecked ->
+                            applyTier(if (isChecked) NebulaSubscriptionTier.PREMIUM else NebulaSubscriptionTier.FREE)
                         }
                     )
 
                     BetaDivider()
 
                     BetaFeatureItem(
-                        icon = Icons.Default.Image,
-                        title = "Custom banner",
-                        subtitle = "Upload custom images or animated artwork for your profile banner",
-                        checked = featureCustomBanner,
-                        onCheckedChange = {
-                            featureCustomBanner = it
-                            sessionManager.setFeatureEnabled(SessionManager.FEATURE_CUSTOM_BANNER, it)
-                        }
-                    )
-
-                    BetaDivider()
-
-                    BetaFeatureItem(
-                        icon = Icons.Default.Movie,
-                        title = "Video banner",
-                        subtitle = "Loop short high-definition clips in your profile header",
-                        checked = featureVideoBanner,
-                        onCheckedChange = {
-                            featureVideoBanner = it
-                            sessionManager.setFeatureEnabled(SessionManager.FEATURE_VIDEO_BANNER, it)
-                        }
-                    )
-
-                    BetaDivider()
-
-                    BetaFeatureItem(
-                        icon = Icons.Default.Sell,
-                        title = "Full profile tags",
-                        subtitle = "Show all interests and community badges on your public profile",
-                        checked = featureAllTags,
-                        onCheckedChange = {
-                            featureAllTags = it
-                            sessionManager.setFeatureEnabled(SessionManager.FEATURE_ALL_TAGS, it)
+                        icon = Icons.Default.AutoAwesome,
+                        title = "Premium Plus",
+                        subtitle = "Enable Nebula Premium Plus: video banners, unlimited profile tags, animated icons, and exclusive tier status",
+                        checked = currentTier == NebulaSubscriptionTier.PREMIUM_PLUS,
+                        onCheckedChange = { isChecked ->
+                            applyTier(if (isChecked) NebulaSubscriptionTier.PREMIUM_PLUS else NebulaSubscriptionTier.FREE)
                         }
                     )
                 }
