@@ -26,6 +26,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -98,6 +100,8 @@ internal fun AttachmentDraftCard(
     modifier: Modifier = Modifier
 ) {
     val theme = Theme.current
+    var is1to1Crop by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
     val message = when (draft.state) {
         AttachmentUploadState.UPLOADING -> "Uploading… ${draft.progress}%"
         AttachmentUploadState.READY -> "Ready to send"
@@ -139,19 +143,43 @@ internal fun AttachmentDraftCard(
                             model = draft.localUri,
                             contentDescription = "Photo ready to send",
                             modifier = Modifier.fillMaxWidth().fillMaxHeight(),
-                            contentScale = ContentScale.Crop,
+                            contentScale = if (is1to1Crop) ContentScale.Crop else ContentScale.Fit,
                             loading = { }
                         )
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (draft.isVideo) "Video" else "Photo",
-                        style = theme.typography.bodySmall.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = if (draft.isVideo) "Video" else "Photo",
+                            style = theme.typography.bodySmall.copy(
+                                color = theme.colors.textPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         )
-                    )
+                        if (!draft.isVideo) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (is1to1Crop) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surfaceElevated)
+                                    .border(1.dp, if (is1to1Crop) theme.colors.primaryAccent else theme.colors.surfaceBorder, RoundedCornerShape(6.dp))
+                                    .clickable { is1to1Crop = !is1to1Crop }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (is1to1Crop) "1:1 Crop" else "Fit",
+                                    style = theme.typography.caption.copy(
+                                        color = if (is1to1Crop) theme.colors.primaryAccent else theme.colors.textSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = message,
                         style = theme.typography.caption.copy(

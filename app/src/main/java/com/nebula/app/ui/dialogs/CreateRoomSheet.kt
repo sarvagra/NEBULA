@@ -592,7 +592,8 @@ fun CreateRoomSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    com.nebula.app.ui.home.ALL_ROOM_TAGS.forEach { tag ->
+                    val popularTags = listOf("Cinema", "Anime", "Chill", "Lo-Fi", "Gaming", "Music", "Study", "Tech", "Podcast", "Watch Party")
+                    popularTags.forEach { tag ->
                         val isSelected = selectedTags.contains(tag)
                         val isTooLong = tag.length > MAX_ROOM_TAG_LENGTH
                         val canSelect = isSelected || (selectedTags.size < MAX_ROOM_TAGS && !isTooLong)

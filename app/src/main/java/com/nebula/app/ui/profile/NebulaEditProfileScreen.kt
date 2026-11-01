@@ -35,8 +35,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import com.nebula.app.domain.model.NebulaSubscriptionTier
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -86,6 +90,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val BANNER_PALETTES = com.nebula.app.ui.components.NebulaBannerThemes.ALL.map { it.name to it.colors }
+
+private fun sanitizeNote(input: String): String {
+    val noWhitespace = input.filterNot { it.isWhitespace() }
+    val sb = StringBuilder()
+    var count = 0
+    var i = 0
+    while (i < noWhitespace.length && count < 8) {
+        val cp = noWhitespace.codePointAt(i)
+        val charCount = Character.charCount(cp)
+        val isLetter = Character.isLetter(cp)
+        val isEmoji = (cp in 0x1F300..0x1FAFF) || (cp in 0x2600..0x27BF) ||
+                (cp in 0x1F900..0x1F9FF) || (cp in 0x1F600..0x1F64F) ||
+                (cp in 0x1F680..0x1F6FF) || (cp in 0x2700..0x27BF) ||
+                (cp in 0xFE00..0xFE0F) || (cp in 0x1F1E6..0x1F1FF)
+        if (isLetter || isEmoji) {
+            sb.appendCodePoint(cp)
+            count++
+        }
+        i += charCount
+    }
+    return sb.toString()
+}
 
 private val AVAILABLE_INTERESTS = listOf(
     "🎬 Sci-Fi", "🎧 Lo-Fi", "🍿 Watch Parties", "🌌 Ambient", "🎮 Gaming", "📚 Study", "🎧 Podcast", "🎨 Design"
@@ -212,6 +238,12 @@ fun NebulaEditProfileScreen(
                 }
 
                 if (isVideo) {
+                    val isPremiumPlus = userProfile.subscriptionTier == NebulaSubscriptionTier.PREMIUM_PLUS
+                    if (!isPremiumPlus) {
+                        Toast.makeText(context, "Video banners require Premium Plus ✨", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+
                     var durationMs = 0L
                     try {
                         context.contentResolver.openFileDescriptor(selectedUri, "r")?.use { pfd ->
@@ -827,45 +859,86 @@ fun NebulaEditProfileScreen(
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Custom Media Banner Chip
+                        // Custom Media Banner Chip + Upload Button
                         item {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (customBannerUri != null) theme.colors.primaryAccent.copy(alpha = 0.25f)
-                                        else theme.colors.surfaceElevated
-                                    )
-                                    .border(
-                                        width = if (customBannerUri != null) 2.dp else 1.dp,
-                                        color = if (customBannerUri != null) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        bannerPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val isCustomSelected = customBannerUri != null
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (isCustomSelected) theme.colors.primaryAccent.copy(alpha = 0.25f)
+                                            else theme.colors.surfaceElevated
+                                        )
+                                        .border(
+                                            width = if (isCustomSelected) 2.dp else 1.dp,
+                                            color = if (isCustomSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            if (customBannerUri != null) {
+                                                // Retain selected custom banner
+                                            } else {
+                                                Toast.makeText(context, "Tap + Upload to add a custom banner", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = theme.colors.primaryAccent,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "Custom Media",
+                                            style = theme.typography.caption.copy(
+                                                color = theme.colors.textPrimary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            )
                                         )
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                }
+
+                                // Separate "+ Upload" Button
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(theme.colors.primaryAccent)
+                                        .clickable {
+                                            bannerPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                            )
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = theme.colors.primaryAccent,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "Custom Media",
-                                        style = theme.typography.caption.copy(
-                                            color = theme.colors.textPrimary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(13.dp)
                                         )
-                                    )
+                                        Text(
+                                            text = "Upload",
+                                            style = theme.typography.caption.copy(
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -905,6 +978,7 @@ fun NebulaEditProfileScreen(
 
                         items(visibleThemes, key = { it.id }) { themeItem ->
                             val isSelected = selectedBannerIndex == themeItem.id && customBannerUri == null
+                            val isLocked = themeItem.id > 3 && userProfile.subscriptionTier == NebulaSubscriptionTier.FREE
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -915,12 +989,16 @@ fun NebulaEditProfileScreen(
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable {
-                                        selectedBannerIndex = themeItem.id
-                                        customBannerUri = null
-                                        pendingBannerDataUrl = null
-                                        pendingVideoFile = null
-                                        pendingVideoBytes = null
-                                        pendingSelectedBannerAssetId = null
+                                        if (isLocked) {
+                                            Toast.makeText(context, "Preset banners are unlocked with Premium ✨", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            selectedBannerIndex = themeItem.id
+                                            customBannerUri = null
+                                            pendingBannerDataUrl = null
+                                            pendingVideoFile = null
+                                            pendingVideoBytes = null
+                                            pendingSelectedBannerAssetId = null
+                                        }
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
@@ -928,7 +1006,9 @@ fun NebulaEditProfileScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    if (themeItem.emojis.isNotEmpty()) {
+                                    if (isLocked) {
+                                        Icon(Icons.Default.Lock, contentDescription = "Locked", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
+                                    } else if (themeItem.emojis.isNotEmpty()) {
                                         Text(text = themeItem.emojis.first(), fontSize = 11.sp)
                                     } else if (themeItem.patternType != com.nebula.app.ui.components.BannerPatternType.CLEAN_GRADIENT) {
                                         Text(text = "◆", fontSize = 9.sp, color = Color.White.copy(alpha = 0.9f))
@@ -1109,9 +1189,87 @@ fun NebulaEditProfileScreen(
                 )
             }
 
-            // 5. STATUS / ROOM PRESENCE (Online/Offline defaults, custom up to 8 chars for premium)
+            // 5. PRESENCE STATUS (Online, Idle, Offline [Premium])
             item {
                 val isPremiumUser = userProfile.subscriptionTier != NebulaSubscriptionTier.FREE
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(theme.colors.surface)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "PRESENCE STATUS",
+                        style = theme.typography.caption.copy(
+                            color = theme.colors.textSecondary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp,
+                            fontSize = 10.5.sp
+                        )
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("online" to "Online", "idle" to "Idle", "offline" to "Offline").forEach { (presetKey, presetLabel) ->
+                            val isSelected = statusText.equals(presetKey, ignoreCase = true)
+                            val isOfflineLocked = presetKey == "offline" && !isPremiumUser
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surfaceElevated)
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        if (isOfflineLocked) {
+                                            Toast.makeText(context, "Invisible offline status is available with Premium ✨", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            statusText = presetKey
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    if (isOfflineLocked) {
+                                        Icon(Icons.Default.Lock, contentDescription = "Locked", tint = theme.colors.textTertiary, modifier = Modifier.size(11.dp))
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    when (presetKey) {
+                                                        "online" -> theme.colors.successColor
+                                                        "idle" -> Color(0xFFF59E0B)
+                                                        else -> theme.colors.textTertiary
+                                                    }
+                                                )
+                                        )
+                                    }
+                                    Text(
+                                        text = presetLabel,
+                                        style = theme.typography.caption.copy(
+                                            color = if (isSelected) theme.colors.primaryAccent else theme.colors.textPrimary,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5b. NOTE FEATURE (Instagram-style 1-word note, Premium Plus exclusive)
+            item {
                 val isPremiumPlus = userProfile.subscriptionTier == NebulaSubscriptionTier.PREMIUM_PLUS
                 Column(
                     modifier = Modifier
@@ -1127,72 +1285,63 @@ fun NebulaEditProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "STATUS / ROOM PRESENCE",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.textSecondary,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.1.sp,
-                                fontSize = 10.5.sp
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "NOTE",
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.1.sp,
+                                    fontSize = 10.5.sp
+                                )
                             )
-                        )
-                        Text("${customStatusText.length}/80", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
-                    }
-
-                    // Default presets (Online, Offline)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Every preset is available to every account: there is no
-                        // purchase step left in the product.
-                        listOf("dynamic", "offline", "custom").forEach { preset ->
-                            val isSelected = statusText.equals(preset, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) theme.colors.primaryAccent.copy(alpha = 0.2f) else theme.colors.surfaceElevated)
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { statusText = preset }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            if (isPremiumPlus) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(theme.colors.primaryAccent.copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (preset == "dynamic") theme.colors.successColor
-                                                else theme.colors.textTertiary
-                                            )
-                                    )
-                                    Text(
-                                        text = when (preset) { "dynamic" -> "Dynamic"; "offline" -> "Offline"; else -> "Custom" },
-                                        style = theme.typography.caption.copy(
-                                            color = if (isSelected) theme.colors.primaryAccent else theme.colors.textPrimary,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 12.sp
-                                        )
-                                    )
+                                    Text("PLUS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = theme.colors.primaryAccent)
                                 }
                             }
                         }
+                        if (isPremiumPlus) {
+                            Text("${customStatusText.length}/8", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
+                        }
                     }
 
-                    // Custom status input: visible, beautifully styled, with live character count
-                    if (statusText.equals("custom", ignoreCase = true)) {
+                    if (!isPremiumPlus) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(theme.colors.surfaceElevated)
+                                .clickable {
+                                    Toast.makeText(context, "Notes are a Premium Plus exclusive feature ✨", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = theme.colors.primaryAccent, modifier = Modifier.size(18.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Unlock Profile Notes", color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("Set a 1-word note that appears on your profile and active tab", color = theme.colors.textTertiary, fontSize = 11.sp)
+                            }
+                        }
+                    } else {
                         OutlinedTextField(
                             value = customStatusText,
                             onValueChange = {
-                                if (it.length <= 80) customStatusText = it
+                                customStatusText = sanitizeNote(it)
                             },
                             placeholder = {
                                 Text(
-                                    text = "What's on your mind? (max 80 chars)",
+                                    text = "e.g. vibing 🎧 (1 word, max 8 chars)",
                                     style = theme.typography.bodyMedium.copy(
                                         color = theme.colors.textTertiary,
                                         fontSize = 13.5.sp
@@ -1200,6 +1349,13 @@ fun NebulaEditProfileScreen(
                                 )
                             },
                             singleLine = true,
+                            trailingIcon = {
+                                if (customStatusText.isNotEmpty()) {
+                                    IconButton(onClick = { customStatusText = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear note", tint = theme.colors.textSecondary, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1210,6 +1366,10 @@ fun NebulaEditProfileScreen(
                                 focusedTextColor = theme.colors.textPrimary,
                                 unfocusedTextColor = theme.colors.textPrimary
                             )
+                        )
+                        Text(
+                            text = "1 word • Up to 8 letters or emojis • No numbers or symbols",
+                            style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp)
                         )
                     }
                 }
@@ -1909,14 +2069,21 @@ fun Custom16to9CropDialog(
                     style = theme.typography.caption.copy(color = theme.colors.textSecondary)
                 )
 
-                // 16:9 Viewport
+                // 16:9 Viewport with gesture support
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color.Black)
-                        .border(2.dp, theme.colors.primaryAccent, RoundedCornerShape(12.dp)),
+                        .border(2.dp, theme.colors.primaryAccent, RoundedCornerShape(12.dp))
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, gestureZoom, _ ->
+                                zoom = (zoom * gestureZoom).coerceIn(1.0f, 3.0f)
+                                panX = (panX - (pan.x / 120f)).coerceIn(-1.0f, 1.0f)
+                                panY = (panY - (pan.y / 120f)).coerceIn(-1.0f, 1.0f)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     androidx.compose.foundation.Image(
@@ -2005,7 +2172,7 @@ fun Custom16to9CropDialog(
                 onClick = {
                     try {
                         val cropped = android.graphics.Bitmap.createBitmap(bitmap, startX, startY, cropWidth, cropHeight)
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(cropped, 640, 360, true)
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(cropped, 960, 540, true)
                         onConfirmCrop(scaled)
                     } catch (e: Exception) {
                         onConfirmCrop(bitmap)

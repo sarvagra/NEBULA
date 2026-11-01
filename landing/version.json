@@ -1,10 +1,10 @@
 {
   "success": true,
-  "versionCode": 12,
-  "versionName": "1.1.10",
+  "versionCode": 13,
+  "versionName": "1.1.11",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Chat [ Video ] bubble: clean preview-less video capsule with tap-to-play popup viewer\n• Rewired custom status & presence pipeline with green/grey online dots, dynamic active presence, and profile status bar & friend count\n• Rooms discovery: streamlined filter & tag bar (Filters | recently used tags) with search pipeline removed\n• Beta Program: simplified to dual Premium and Premium Plus toggles\n• Universal theme blur fix: pristine frosted surfaces across dark & light themes\n• Active friends quick popup card with PFP, friend count, bio, and Follow/Invite to Room actions",
+  "releaseNotes": "• Profile: Custom 16:9 banner touch cropping gestures, separated Note feature & presence status, and unlocked picture banners\n• Rooms: Live member avatar strip below player, real-time Relevance sorting, clean filters & curated tags\n• Social: Instant 0ms optimistic message unsend, 1:1 photo cropping & fit previews, and long-press actions on photos & videos\n• Home: Dedicated Home screen title, aesthetic empty state, and streamlined member preview sheet\n• Deep-linking: Seamless watch party room invite links on nebula-73kb.onrender.com",
   "forceUpdate": false,
-  "publishedAt": "2026-11-01T08:30:00Z"
+  "publishedAt": "2026-11-01T10:30:00Z"
 }

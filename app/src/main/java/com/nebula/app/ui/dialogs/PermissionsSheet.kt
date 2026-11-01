@@ -123,10 +123,22 @@ fun PermissionsSheet(
         // Read refreshTrigger so Compose re-evaluates when state changes
         if (refreshTrigger < 0) return false
         return if (spec.id == "notifications") {
-            if (Build.VERSION.SDK_INT >= 33 && spec.permissionString != null) {
+            val systemEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+            if (!systemEnabled) {
+                false
+            } else if (Build.VERSION.SDK_INT >= 33 && spec.permissionString != null) {
                 ContextCompat.checkSelfPermission(context, spec.permissionString) == PackageManager.PERMISSION_GRANTED
             } else {
-                NotificationManagerCompat.from(context).areNotificationsEnabled()
+                true
+            }
+        } else if (spec.id == "media") {
+            if (Build.VERSION.SDK_INT >= 34) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED
+            } else if (Build.VERSION.SDK_INT >= 33) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+            } else {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
             }
         } else if (spec.permissionString != null) {
             ContextCompat.checkSelfPermission(context, spec.permissionString) == PackageManager.PERMISSION_GRANTED
@@ -135,8 +147,16 @@ fun PermissionsSheet(
         }
     }
 
-    fun safeOpenAppSettings() {
+    fun safeOpenAppSettings(forNotifications: Boolean = false) {
         try {
+            if (forNotifications) {
+                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return
+            }
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", context.packageName, null)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -174,7 +194,9 @@ fun PermissionsSheet(
                         .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(14.dp))
                         .clickable {
                             if (!granted) {
-                                if (spec.permissionString != null) {
+                                if (spec.id == "notifications" && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                                    safeOpenAppSettings(forNotifications = true)
+                                } else if (spec.permissionString != null) {
                                     launcher.launch(spec.permissionString)
                                 } else {
                                     safeOpenAppSettings()
@@ -224,7 +246,9 @@ fun PermissionsSheet(
                         checked = granted,
                         onCheckedChange = { next ->
                             if (next) {
-                                if (spec.permissionString != null) {
+                                if (spec.id == "notifications" && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                                    safeOpenAppSettings(forNotifications = true)
+                                } else if (spec.permissionString != null) {
                                     launcher.launch(spec.permissionString)
                                 } else {
                                     safeOpenAppSettings()

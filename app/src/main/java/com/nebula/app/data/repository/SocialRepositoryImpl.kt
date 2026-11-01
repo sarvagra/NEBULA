@@ -541,7 +541,20 @@ class SocialRepositoryImpl(
 
     override suspend fun editMessage(messageId: String, content: String): Boolean = updateMessageFromResponse(apiClient.editDirectMessage(messageId, content))
 
-    override suspend fun unsendMessage(messageId: String): Boolean = updateMessageFromResponse(apiClient.unsendDirectMessage(messageId))
+    override suspend fun unsendMessage(messageId: String): Boolean {
+        // STEP 1: INSTANT OPTIMISTIC REMOVAL (0ms local response)
+        val active = _activeConversation.value
+        if (active != null) {
+            val revised = active.copy(messages = active.messages.filterNot { it.id == messageId })
+            _activeConversation.value = revised
+            _conversations.value = _conversations.value.map { if (it.id == active.id) revised else it }
+            sessionManager?.saveCachedConversations(_conversations.value)
+        }
+
+        // STEP 2: Background server synchronization
+        val response = apiClient.unsendDirectMessage(messageId)
+        return response is ApiResponse.Success
+    }
 
     private fun updateMessageFromResponse(response: ApiResponse<JSONObject>): Boolean {
         if (response !is ApiResponse.Success) return false

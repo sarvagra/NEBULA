@@ -35,7 +35,8 @@ enum class BannerPatternType {
     HEXAGONS,
     DIAMONDS,
     WAVES,
-    EMOJIS
+    EMOJIS,
+    IMAGE
 }
 
 data class NebulaBannerThemeItem(
@@ -44,40 +45,48 @@ data class NebulaBannerThemeItem(
     val category: String,
     val colors: List<Color>,
     val patternType: BannerPatternType = BannerPatternType.CLEAN_GRADIENT,
-    val emojis: List<String> = emptyList()
+    val emojis: List<String> = emptyList(),
+    val drawableResId: Int? = null
 )
 
 object NebulaBannerThemes {
     val ALL: List<NebulaBannerThemeItem> = listOf(
-        // --- Classic Gradients ---
-        NebulaBannerThemeItem(0, "Deep Indigo", "Gradients", listOf(Color(0xFF1E1B4B), Color(0xFF312E81))),
-        NebulaBannerThemeItem(1, "Nebula Violet", "Gradients", listOf(Color(0xFF3B0764), Color(0xFF581C87))),
-        NebulaBannerThemeItem(2, "Midnight Teal", "Gradients", listOf(Color(0xFF042F2E), Color(0xFF115E59))),
-        NebulaBannerThemeItem(3, "Cosmic Crimson", "Gradients", listOf(Color(0xFF450A0A), Color(0xFF7F1D1D))),
-        NebulaBannerThemeItem(4, "Obsidian Glass", "Gradients", listOf(Color(0xFF090B10), Color(0xFF1E222D))),
-        NebulaBannerThemeItem(5, "Solar Gold", "Gradients", listOf(Color(0xFF78350F), Color(0xFFB45309), Color(0xFFF59E0B))),
-        NebulaBannerThemeItem(6, "Electric Royal", "Gradients", listOf(Color(0xFF0F172A), Color(0xFF1E3A8A), Color(0xFF3B82F6))),
-        NebulaBannerThemeItem(7, "Emerald Jade", "Gradients", listOf(Color(0xFF064E3B), Color(0xFF059669), Color(0xFF10B981))),
+        // --- 4 Color Palette Banners for Free Tier (IDs 0..3) ---
+        NebulaBannerThemeItem(0, "Deep Indigo", "Palettes", listOf(Color(0xFF1E1B4B), Color(0xFF312E81))),
+        NebulaBannerThemeItem(1, "Nebula Violet", "Palettes", listOf(Color(0xFF3B0764), Color(0xFF581C87))),
+        NebulaBannerThemeItem(2, "Midnight Teal", "Palettes", listOf(Color(0xFF042F2E), Color(0xFF115E59))),
+        NebulaBannerThemeItem(3, "Cosmic Crimson", "Palettes", listOf(Color(0xFF450A0A), Color(0xFF7F1D1D))),
+
+        // --- Picture Banners (Unlocked for Premium) ---
+        NebulaBannerThemeItem(4, "Moon Dance", "Pictures", listOf(Color(0xFF0F172A), Color(0xFF1E293B)), BannerPatternType.IMAGE, drawableResId = com.nebula.app.R.drawable.banner_preset_moon_dance),
+        NebulaBannerThemeItem(5, "Moonlight Lilies", "Pictures", listOf(Color(0xFF0B192C), Color(0xFF1E3E62)), BannerPatternType.IMAGE, drawableResId = com.nebula.app.R.drawable.banner_preset_moon_flowers),
+        NebulaBannerThemeItem(6, "Celestial Cosmic", "Pictures", listOf(Color(0xFF1A1A24), Color(0xFF2E236C)), BannerPatternType.IMAGE, drawableResId = com.nebula.app.R.drawable.banner_preset_vishnu),
+
+        // --- Premium Gradients ---
+        NebulaBannerThemeItem(7, "Obsidian Glass", "Gradients", listOf(Color(0xFF090B10), Color(0xFF1E222D))),
+        NebulaBannerThemeItem(8, "Solar Gold", "Gradients", listOf(Color(0xFF78350F), Color(0xFFB45309), Color(0xFFF59E0B))),
+        NebulaBannerThemeItem(9, "Electric Royal", "Gradients", listOf(Color(0xFF0F172A), Color(0xFF1E3A8A), Color(0xFF3B82F6))),
+        NebulaBannerThemeItem(10, "Emerald Jade", "Gradients", listOf(Color(0xFF064E3B), Color(0xFF059669), Color(0xFF10B981))),
 
         // --- Geometric & Modern Shapes ---
-        NebulaBannerThemeItem(8, "Floating Orbs", "Shapes", listOf(Color(0xFF4C1D95), Color(0xFF7C3AED), Color(0xFFEC4899)), BannerPatternType.FLOATING_CIRCLES),
-        NebulaBannerThemeItem(9, "Cyber Grid", "Shapes", listOf(Color(0xFF0F172A), Color(0xFF0284C7)), BannerPatternType.CYBER_GRID),
-        NebulaBannerThemeItem(10, "Neon Hexagons", "Shapes", listOf(Color(0xFF14532D), Color(0xFF16A34A), Color(0xFF22C55E)), BannerPatternType.HEXAGONS),
-        NebulaBannerThemeItem(11, "Prism Diamonds", "Shapes", listOf(Color(0xFF701A75), Color(0xFFC026D3), Color(0xFFF472B6)), BannerPatternType.DIAMONDS),
-        NebulaBannerThemeItem(12, "Cosmic Waves", "Shapes", listOf(Color(0xFF172554), Color(0xFF2563EB), Color(0xFF06B6D4)), BannerPatternType.WAVES),
-        NebulaBannerThemeItem(13, "Solar Rings", "Shapes", listOf(Color(0xFF881337), Color(0xFFE11D48), Color(0xFFF97316)), BannerPatternType.FLOATING_CIRCLES),
+        NebulaBannerThemeItem(11, "Floating Orbs", "Shapes", listOf(Color(0xFF4C1D95), Color(0xFF7C3AED), Color(0xFFEC4899)), BannerPatternType.FLOATING_CIRCLES),
+        NebulaBannerThemeItem(12, "Cyber Grid", "Shapes", listOf(Color(0xFF0F172A), Color(0xFF0284C7)), BannerPatternType.CYBER_GRID),
+        NebulaBannerThemeItem(13, "Neon Hexagons", "Shapes", listOf(Color(0xFF14532D), Color(0xFF16A34A), Color(0xFF22C55E)), BannerPatternType.HEXAGONS),
+        NebulaBannerThemeItem(14, "Prism Diamonds", "Shapes", listOf(Color(0xFF701A75), Color(0xFFC026D3), Color(0xFFF472B6)), BannerPatternType.DIAMONDS),
+        NebulaBannerThemeItem(15, "Cosmic Waves", "Shapes", listOf(Color(0xFF172554), Color(0xFF2563EB), Color(0xFF06B6D4)), BannerPatternType.WAVES),
+        NebulaBannerThemeItem(16, "Solar Rings", "Shapes", listOf(Color(0xFF881337), Color(0xFFE11D48), Color(0xFFF97316)), BannerPatternType.FLOATING_CIRCLES),
 
         // --- Emoji & Playful Vibes ---
-        NebulaBannerThemeItem(14, "Cosmic Galaxy", "Emojis", listOf(Color(0xFF0B0F19), Color(0xFF2E1065)), BannerPatternType.EMOJIS, listOf("🌌", "✨", "🪐", "⭐")),
-        NebulaBannerThemeItem(15, "Retro Arcade", "Emojis", listOf(Color(0xFF18181B), Color(0xFF6B21A8)), BannerPatternType.EMOJIS, listOf("🎮", "👾", "🕹️", "⚡")),
-        NebulaBannerThemeItem(16, "Lo-Fi Beats", "Emojis", listOf(Color(0xFF2E1065), Color(0xFF581C87)), BannerPatternType.EMOJIS, listOf("🎧", "🎵", "🎶", "💜")),
-        NebulaBannerThemeItem(17, "Super Energy", "Emojis", listOf(Color(0xFF7C2D12), Color(0xFFDC2626)), BannerPatternType.EMOJIS, listOf("🔥", "⚡", "✨", "💫")),
-        NebulaBannerThemeItem(18, "Sakura Bloom", "Emojis", listOf(Color(0xFF500724), Color(0xFF9D174D)), BannerPatternType.EMOJIS, listOf("🌸", "🌺", "🍃", "✨")),
-        NebulaBannerThemeItem(19, "Midnight Coffee", "Emojis", listOf(Color(0xFF1C1917), Color(0xFF44403C)), BannerPatternType.EMOJIS, listOf("☕", "🌙", "📚", "✨")),
-        NebulaBannerThemeItem(20, "Warp Speed", "Emojis", listOf(Color(0xFF030712), Color(0xFF1E1B4B)), BannerPatternType.EMOJIS, listOf("🚀", "🌠", "🛸", "🌌")),
-        NebulaBannerThemeItem(21, "Tropical Wave", "Emojis", listOf(Color(0xFF083344), Color(0xFF0E7490)), BannerPatternType.EMOJIS, listOf("🌊", "🐬", "🌴", "✨")),
-        NebulaBannerThemeItem(22, "Neon City", "Emojis", listOf(Color(0xFF09090B), Color(0xFF4C0519)), BannerPatternType.EMOJIS, listOf("🌆", "🤖", "⚡", "🌃")),
-        NebulaBannerThemeItem(23, "Royal Trophy", "Emojis", listOf(Color(0xFF451A03), Color(0xFF78350F)), BannerPatternType.EMOJIS, listOf("👑", "🏆", "⭐", "💎"))
+        NebulaBannerThemeItem(17, "Cosmic Galaxy", "Emojis", listOf(Color(0xFF0B0F19), Color(0xFF2E1065)), BannerPatternType.EMOJIS, listOf("🌌", "✨", "🪐", "⭐")),
+        NebulaBannerThemeItem(18, "Retro Arcade", "Emojis", listOf(Color(0xFF18181B), Color(0xFF6B21A8)), BannerPatternType.EMOJIS, listOf("🎮", "👾", "🕹️", "⚡")),
+        NebulaBannerThemeItem(19, "Lo-Fi Beats", "Emojis", listOf(Color(0xFF2E1065), Color(0xFF581C87)), BannerPatternType.EMOJIS, listOf("🎧", "🎵", "🎶", "💜")),
+        NebulaBannerThemeItem(20, "Super Energy", "Emojis", listOf(Color(0xFF7C2D12), Color(0xFFDC2626)), BannerPatternType.EMOJIS, listOf("🔥", "⚡", "✨", "💫")),
+        NebulaBannerThemeItem(21, "Sakura Bloom", "Emojis", listOf(Color(0xFF500724), Color(0xFF9D174D)), BannerPatternType.EMOJIS, listOf("🌸", "🌺", "🍃", "✨")),
+        NebulaBannerThemeItem(22, "Midnight Coffee", "Emojis", listOf(Color(0xFF1C1917), Color(0xFF44403C)), BannerPatternType.EMOJIS, listOf("☕", "🌙", "📚", "✨")),
+        NebulaBannerThemeItem(23, "Warp Speed", "Emojis", listOf(Color(0xFF030712), Color(0xFF1E1B4B)), BannerPatternType.EMOJIS, listOf("🚀", "🌠", "🛸", "🌌")),
+        NebulaBannerThemeItem(24, "Tropical Wave", "Emojis", listOf(Color(0xFF083344), Color(0xFF0E7490)), BannerPatternType.EMOJIS, listOf("🌊", "🐬", "🌴", "✨")),
+        NebulaBannerThemeItem(25, "Neon City", "Emojis", listOf(Color(0xFF09090B), Color(0xFF4C0519)), BannerPatternType.EMOJIS, listOf("🌆", "🤖", "⚡", "🌃")),
+        NebulaBannerThemeItem(26, "Royal Trophy", "Emojis", listOf(Color(0xFF451A03), Color(0xFF78350F)), BannerPatternType.EMOJIS, listOf("👑", "🏆", "⭐", "💎"))
     )
 
     fun getTheme(index: Int): NebulaBannerThemeItem {
@@ -258,6 +267,17 @@ fun NebulaThemedBannerBackground(
                                 )
                         )
                     }
+                }
+            }
+
+            BannerPatternType.IMAGE -> {
+                if (themeItem.drawableResId != null) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(id = themeItem.drawableResId),
+                        contentDescription = themeItem.name,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }

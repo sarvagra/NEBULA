@@ -75,8 +75,9 @@ val ALL_ROOM_TAGS = listOf(
 )
 
 enum class RoomSortOption(val label: String, val shortLabel: String) {
-    HIGH_TO_LOW("Members: High to Low (Most Popular)", "High to Low"),
-    LOW_TO_HIGH("Members: Low to High (Cozy Rooms)", "Low to High")
+    RELEVANCE("Relevance (Recommended)", "Relevance"),
+    HIGH_TO_LOW("Members: High to Low", "High to Low"),
+    LOW_TO_HIGH("Members: Low to High", "Low to High")
 }
 
 /**
@@ -86,7 +87,7 @@ enum class RoomSortOption(val label: String, val shortLabel: String) {
  * - Removed "+ Create" button (accessible via top bar TV icon)
  * - Removed "Active Now & Friends" section (located on Friends/Home screens)
  * - Real-time pre-existing room search bar
- * - Flipkart/Amazon style Filter & Sort menu (50+ tags, max 3 selectable, High to Low / Low to High sorting)
+ * - Clean Filter & Sort menu
  * - Recently used filter chips row for 1-tap quick filtering
  * - Compact minimalist room cards with real live rooms from repository
  */
@@ -100,7 +101,7 @@ fun NebulaRoomsScreen(
     val theme = Theme.current
     val context = LocalContext.current
 
-    var selectedSort by remember { mutableStateOf(RoomSortOption.HIGH_TO_LOW) }
+    var selectedSort by remember { mutableStateOf(RoomSortOption.RELEVANCE) }
     var selectedTags by remember { mutableStateOf(setOf<String>()) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
@@ -113,13 +114,15 @@ fun NebulaRoomsScreen(
 
     // Filter and Sort rooms directly from repository / backend
     val displayedRooms = remember(selectedTags, selectedSort, rooms) {
-        rooms.filter { room ->
-            selectedTags.isEmpty() || room.tags.any { it in selectedTags }
-        }.sortedWith { a, b ->
-            when (selectedSort) {
-                RoomSortOption.HIGH_TO_LOW -> b.participantCount.compareTo(a.participantCount)
-                RoomSortOption.LOW_TO_HIGH -> a.participantCount.compareTo(b.participantCount)
+        val filtered = rooms.filter { room ->
+            selectedTags.isEmpty() || room.tags.any { roomTag ->
+                selectedTags.any { selected -> selected.equals(roomTag, ignoreCase = true) }
             }
+        }
+        when (selectedSort) {
+            RoomSortOption.RELEVANCE -> filtered.shuffled(java.util.Random(42))
+            RoomSortOption.HIGH_TO_LOW -> filtered.sortedByDescending { it.participantCount }
+            RoomSortOption.LOW_TO_HIGH -> filtered.sortedBy { it.participantCount }
         }
     }
 
@@ -162,8 +165,8 @@ fun NebulaRoomsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Main Amazon/Flipkart "Filters" Button with badge
-                val hasActiveFilters = selectedTags.isNotEmpty() || selectedSort != RoomSortOption.HIGH_TO_LOW
+                // Main "Filters" Button with badge
+                val hasActiveFilters = selectedTags.isNotEmpty() || selectedSort != RoomSortOption.RELEVANCE
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
@@ -269,7 +272,7 @@ fun NebulaRoomsScreen(
                     )
                 )
 
-                if (selectedTags.isNotEmpty() || selectedSort != RoomSortOption.HIGH_TO_LOW) {
+                if (selectedTags.isNotEmpty() || selectedSort != RoomSortOption.RELEVANCE) {
                     Text(
                         text = "Reset",
                         style = theme.typography.caption.copy(
@@ -279,7 +282,7 @@ fun NebulaRoomsScreen(
                         ),
                         modifier = Modifier.clickable {
                             selectedTags = emptySet()
-                            selectedSort = RoomSortOption.HIGH_TO_LOW
+                            selectedSort = RoomSortOption.RELEVANCE
                         }
                     )
                 }
@@ -313,12 +316,12 @@ fun NebulaRoomsScreen(
                             text = if (rooms.isEmpty()) "Tap the TV icon above to create a watch party and invite friends" else "Try clearing filters to see more rooms",
                             style = theme.typography.caption.copy(color = theme.colors.textSecondary)
                         )
-                        if (rooms.isNotEmpty() && (selectedTags.isNotEmpty() || selectedSort != RoomSortOption.HIGH_TO_LOW)) {
+                        if (rooms.isNotEmpty() && (selectedTags.isNotEmpty() || selectedSort != RoomSortOption.RELEVANCE)) {
                             Spacer(modifier = Modifier.height(6.dp))
                             Button(
                                 onClick = {
                                     selectedTags = emptySet()
-                                    selectedSort = RoomSortOption.HIGH_TO_LOW
+                                    selectedSort = RoomSortOption.RELEVANCE
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = theme.colors.surfaceElevated,
@@ -396,7 +399,7 @@ fun NebulaRoomsScreen(
                                     ),
                                     modifier = Modifier.clickable {
                                         selectedTags = emptySet()
-                                        selectedSort = RoomSortOption.HIGH_TO_LOW
+                                        selectedSort = RoomSortOption.RELEVANCE
                                     }
                                 )
 
@@ -424,7 +427,7 @@ fun NebulaRoomsScreen(
                             item {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(
-                                        text = "SORT BY MEMBERS",
+                                        text = "SORT BY",
                                         style = theme.typography.caption.copy(
                                             color = theme.colors.textSecondary,
                                             fontWeight = FontWeight.Bold,
@@ -480,7 +483,7 @@ fun NebulaRoomsScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "ROOM TAGS (50+ TAGS)",
+                                            text = "TAGS",
                                             style = theme.typography.caption.copy(
                                                 color = theme.colors.textSecondary,
                                                 fontWeight = FontWeight.Bold,

@@ -96,126 +96,11 @@ fun NebulaFriendsScreen(
         onSearchQuery(searchQuery)
     }
 
-    var showNewChatDialog by remember { mutableStateOf(false) }
-
     val filteredFriends = remember(searchQuery, friends, searchResults) {
         if (searchQuery.length >= 2) searchResults
         else if (searchQuery.isBlank()) friends
         else friends.filter {
             it.displayName.contains(searchQuery, ignoreCase = true) || it.username.contains(searchQuery, ignoreCase = true)
-        }
-    }
-
-    if (showNewChatDialog) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { showNewChatDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(16.dp))
-                    .padding(20.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "New Message",
-                            style = theme.typography.titleMedium.copy(
-                                color = theme.colors.textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
-                            )
-                        )
-                        IconButton(
-                            onClick = { showNewChatDialog = false },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = theme.colors.textSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Select a friend to start chatting:",
-                        style = theme.typography.caption.copy(color = theme.colors.textSecondary)
-                    )
-
-                    if (friends.isEmpty()) {
-                        Text(
-                            text = "You don't have any friends connected yet.",
-                            style = theme.typography.bodySmall.copy(color = theme.colors.textTertiary),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(260.dp)
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            friends.forEach { friend ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(theme.colors.surfaceElevated)
-                                        .clickable {
-                                            showNewChatDialog = false
-                                            onMessageFriend(friend)
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .clip(CircleShape)
-                                            .background(theme.colors.surface)
-                                            .border(1.dp, theme.colors.surfaceBorder, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(38.dp))
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = friend.displayName,
-                                            style = theme.typography.bodyMedium.copy(
-                                                color = theme.colors.textPrimary,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        )
-                                        Text(
-                                            text = friend.username,
-                                            style = theme.typography.caption.copy(
-                                                color = theme.colors.textSecondary,
-                                                fontSize = 11.5.sp
-                                            )
-                                        )
-                                    }
-
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                                        contentDescription = "Message",
-                                        tint = theme.colors.primaryAccent,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -253,24 +138,6 @@ fun NebulaFriendsScreen(
                                 color = theme.colors.textSecondary,
                                 fontSize = 13.sp
                             )
-                        )
-                    }
-
-                    // Functional Top-Right Add Chat button
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(theme.colors.surface)
-                            .border(1.dp, theme.colors.surfaceBorder, CircleShape)
-                            .clickable { showNewChatDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AddComment,
-                            contentDescription = "New chat",
-                            tint = theme.colors.primaryAccent,
-                            modifier = Modifier.size(19.dp)
                         )
                     }
                 }

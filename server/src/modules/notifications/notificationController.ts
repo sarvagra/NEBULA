@@ -64,7 +64,7 @@ export async function listNotifications(req: Request, res: Response): Promise<vo
     // it ("Sarvagra S sent you a friend request") instead of a generic icon.
     const actorIds = new Set<string>();
     for (const n of notifications) {
-      for (const key of ['requesterId', 'senderId', 'userId', 'fromUserId']) {
+      for (const key of ['requesterId', 'senderId', 'userId', 'fromUserId', 'inviterId']) {
         const value = (n.actionData as any)?.[key];
         if (typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value)) actorIds.add(value);
       }
@@ -79,7 +79,7 @@ export async function listNotifications(req: Request, res: Response): Promise<vo
       data: notifications.map((n) => {
         const json = n.toJSON() as any;
         const action = (n.actionData || {}) as any;
-        const actorId = ['requesterId', 'senderId', 'userId', 'fromUserId']
+        const actorId = ['requesterId', 'senderId', 'userId', 'fromUserId', 'inviterId']
           .map((key) => action[key])
           .find((value) => typeof value === 'string' && actorById.has(value));
         if (actorId) {

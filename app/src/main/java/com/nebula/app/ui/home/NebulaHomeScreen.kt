@@ -90,6 +90,31 @@ fun NebulaHomeScreen(
             contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
+            // 0. HOME TITLE HEADING (matches Rooms, Chats, Friends)
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Home",
+                        style = theme.typography.titleLarge.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp
+                        )
+                    )
+                    Text(
+                        text = "Explore rooms, live friends & sync spaces",
+                        style = theme.typography.bodySmall.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 13.sp
+                        )
+                    )
+                }
+            }
+
             // 1. ACTIVE NOW
             item {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -136,7 +161,7 @@ fun NebulaHomeScreen(
                                 .padding(vertical = 14.dp, horizontal = 16.dp)
                         ) {
                             Text(
-                                text = "Nobody's active right now • Friends who come online will show up here",
+                                text = "It's quiet here right now ✨ • Friends who come online will show up here",
                                 style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary, fontSize = 12.sp)
                             )
                         }
@@ -177,30 +202,6 @@ fun NebulaHomeScreen(
                             fontSize = 11.5.sp
                         )
                     )
-
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(onClick = onCreateRoomClick)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Create room",
-                            tint = theme.colors.primaryAccent,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Create Room",
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp
-                            )
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -390,9 +391,9 @@ private fun ActiveFriendItem(
             overflow = TextOverflow.Ellipsis
         )
 
-        // For premium users: show custom typed status. For normal users: dynamic presence without redundant offline.
-        val isPremium = user.tier.equals("premium", ignoreCase = true) || user.tier.equals("premium_plus", ignoreCase = true)
-        val subtitle = if (isPremium && user.customStatus.isNotBlank()) {
+        // For premium plus users: show custom note. For normal users: dynamic presence without redundant offline.
+        val isPremiumPlus = user.tier.equals("premium_plus", ignoreCase = true) || user.tier.equals("plus", ignoreCase = true)
+        val subtitle = if (isPremiumPlus && user.customStatus.isNotBlank()) {
             user.customStatus
         } else {
             when {
@@ -407,7 +408,7 @@ private fun ActiveFriendItem(
             Text(
                 text = subtitle,
                 style = theme.typography.caption.copy(
-                    color = if (isPremium && user.customStatus.isNotBlank()) theme.colors.primaryAccent else theme.colors.textSecondary,
+                    color = if (isPremiumPlus && user.customStatus.isNotBlank()) theme.colors.primaryAccent else theme.colors.textSecondary,
                     fontSize = 10.sp
                 ),
                 maxLines = 1,
@@ -439,230 +440,161 @@ private fun ActiveFriendQuickSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .clickable {
+                    onDismiss()
+                    onViewProfile(friend)
+                }
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp, top = 4.dp)
         ) {
-            // PFP with online dot
-            Box(contentAlignment = Alignment.BottomEnd) {
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
-                        .clip(CircleShape)
-                        .background(theme.colors.surfaceElevated)
-                        .border(2.dp, theme.colors.primaryAccent.copy(alpha = 0.4f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(68.dp))
-                }
-                val isOnline = friend.isOnline && friend.profileStatus != "offline" && friend.presenceStatus != NebulaPresenceStatus.OFFLINE
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(if (isOnline) Color(0xFF10B981) else Color(0xFF6B7280))
-                        .border(2.5.dp, theme.colors.surface, CircleShape)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Display name & handle
-            Text(
-                text = friend.displayName,
-                style = theme.typography.titleMedium.copy(
-                    color = theme.colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            )
-            Text(
-                text = if (friend.username.startsWith("@")) friend.username else "@${friend.username}",
-                style = theme.typography.bodySmall.copy(
-                    color = theme.colors.textSecondary,
-                    fontSize = 13.sp
-                )
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Friend count & Status chip
+            // Top Row: PFP on left (with online dot), name & @username beside it, invite/follow on right
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Friend count
-                val friendCount = friend.friendsCount ?: 0
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surfaceElevated)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PeopleOutline,
-                        contentDescription = null,
-                        tint = theme.colors.textSecondary,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = "$friendCount ${if (friendCount == 1) "friend" else "friends"}",
-                        style = theme.typography.caption.copy(
-                            color = theme.colors.textSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-
-                // Presence / Custom status chip
-                val isOnline = friend.isOnline && friend.profileStatus != "offline" && friend.presenceStatus != NebulaPresenceStatus.OFFLINE
-                val statusText = when {
-                    friend.customStatus.isNotBlank() -> friend.customStatus
-                    !isOnline -> "Offline"
-                    friend.currentRoomId != null || friend.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> "In a room"
-                    friend.presenceStatus == NebulaPresenceStatus.PRIVATE_CHAT -> "In chat"
-                    else -> "Active now"
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.colors.surfaceElevated)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
+                // PFP on left with presence dot
+                Box(contentAlignment = Alignment.BottomEnd) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(theme.colors.surfaceElevated)
+                            .border(1.5.dp, theme.colors.primaryAccent.copy(alpha = 0.4f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        NebulaAvatarImage(friend.avatarUrl, friend.avatarLetter, modifier = Modifier.size(52.dp))
+                    }
+                    val isOnline = friend.isOnline && friend.profileStatus != "offline" && friend.presenceStatus != NebulaPresenceStatus.OFFLINE
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
                             .clip(CircleShape)
                             .background(if (isOnline) Color(0xFF10B981) else Color(0xFF6B7280))
+                            .border(2.dp, theme.colors.surface, CircleShape)
                     )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // Name and @username beside it
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = friend.displayName,
+                        style = theme.typography.titleMedium.copy(
+                            color = theme.colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (friend.username.startsWith("@")) friend.username else "@${friend.username}",
+                        style = theme.typography.bodySmall.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = 12.5.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    // Status / Note text
+                    val statusText = when {
+                        friend.customStatus.isNotBlank() -> friend.customStatus
+                        !friend.isOnline -> "Offline"
+                        friend.currentRoomId != null || friend.presenceStatus == NebulaPresenceStatus.IN_A_ROOM -> "In a room"
+                        friend.presenceStatus == NebulaPresenceStatus.PRIVATE_CHAT -> "In chat"
+                        else -> "Active now"
+                    }
                     Text(
                         text = statusText,
                         style = theme.typography.caption.copy(
-                            color = theme.colors.textPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
+                            color = if (friend.customStatus.isNotBlank()) theme.colors.primaryAccent else theme.colors.textTertiary,
+                            fontSize = 11.sp
                         ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // Invite / Follow to room on the right
+                if (friend.currentRoomId != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.primaryAccent)
+                            .clickable {
+                                onDismiss()
+                                onFollowToRoom(friend.currentRoomId)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Follow",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.surfaceElevated)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                            .clickable {
+                                onDismiss()
+                                onInviteToRoom(friend)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GroupAdd,
+                                contentDescription = null,
+                                tint = theme.colors.primaryAccent,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Invite",
+                                color = theme.colors.primaryAccent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp
+                            )
+                        }
+                    }
+                }
             }
 
-            // Bio
+            // Below it their bio
             if (friend.bio.isNotBlank()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(theme.colors.surfaceElevated)
-                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                ) {
-                    Text(
-                        text = friend.bio,
-                        style = theme.typography.bodySmall.copy(
-                            color = theme.colors.textPrimary,
-                            fontSize = 12.5.sp,
-                            lineHeight = 17.sp
-                        ),
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Action button:
-            // "follow to room button if theyre in a room else invite to a room...
-            // remember inviting opens the create room panel and when room is created theyre invited automatically."
-            if (friend.currentRoomId != null) {
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onFollowToRoom(friend.currentRoomId)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.primaryAccent,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tv,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Follow to Room",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            } else {
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onInviteToRoom(friend)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.colors.primaryAccent,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.GroupAdd,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Invite to a Room",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            TextButton(
-                onClick = {
-                    onDismiss()
-                    onViewProfile(friend)
-                }
-            ) {
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "View full profile",
-                    style = theme.typography.caption.copy(
+                    text = friend.bio,
+                    style = theme.typography.bodySmall.copy(
                         color = theme.colors.textSecondary,
                         fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                        lineHeight = 17.sp
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

@@ -326,10 +326,17 @@ internal fun ModernChatBubble(
                                 else theme.colors.surfaceBorder,
                                 RoundedCornerShape(12.dp)
                             )
-                            .clickable {
-                                if (!spoilerRevealed) spoilerRevealed = true
-                                else if (mediaUrl.isNotBlank()) showVideoPlayer = true
-                            }
+                            .combinedClickable(
+                                onClick = {
+                                    if (!spoilerRevealed) spoilerRevealed = true
+                                    else if (mediaUrl.isNotBlank()) showVideoPlayer = true
+                                },
+                                onLongClick = {
+                                    if (isMe && message.deletedAt == null && message.sendState == MessageSendState.SENT) {
+                                        showActions = true
+                                    }
+                                }
+                            )
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -350,7 +357,7 @@ internal fun ModernChatBubble(
                         }
                         Column {
                             Text(
-                                text = if (!spoilerRevealed) "Spoiler [ Video ]" else "[ Video ]",
+                                text = if (!spoilerRevealed) "Spoiler Video" else "Video",
                                 style = theme.typography.bodyMedium.copy(
                                     color = if (isMe) Color.White else theme.colors.textPrimary,
                                     fontWeight = FontWeight.Bold,
@@ -413,7 +420,14 @@ internal fun ModernChatBubble(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true },
+                                    .combinedClickable(
+                                        onClick = { if (spoilerRevealed) showPile = true else spoilerRevealed = true },
+                                        onLongClick = {
+                                            if (isMe && message.deletedAt == null && message.sendState == MessageSendState.SENT) {
+                                                showActions = true
+                                            }
+                                        }
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 for (i in displayCards.indices.reversed()) {
@@ -532,9 +546,16 @@ internal fun ModernChatBubble(
                                     .fillMaxSize()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(if (theme.colors.isDark) Color(0xFF14131A) else theme.colors.surfaceElevated)
-                                    .clickable {
-                                        if (spoilerRevealed) showSingleImage = true else spoilerRevealed = true
-                                    },
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (spoilerRevealed) showSingleImage = true else spoilerRevealed = true
+                                        },
+                                        onLongClick = {
+                                            if (isMe && message.deletedAt == null && message.sendState == MessageSendState.SENT) {
+                                                showActions = true
+                                            }
+                                        }
+                                    ),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
                         } else {
@@ -648,7 +669,7 @@ internal fun ModernChatBubble(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "[ Video ]",
+                                        text = "Video",
                                         style = theme.typography.titleMedium.copy(
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold
@@ -662,11 +683,13 @@ internal fun ModernChatBubble(
                                         )
                                     }
                                 }
+                                var isVideoBuffering by remember { mutableStateOf(true) }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.Black)
+                                        .background(Color.Black),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     AndroidView(
                                         factory = { ctx ->
@@ -675,13 +698,28 @@ internal fun ModernChatBubble(
                                                 val controller = android.widget.MediaController(ctx)
                                                 controller.setAnchorView(this)
                                                 setMediaController(controller)
-                                                setOnPreparedListener { it.start() }
+                                                setOnPreparedListener {
+                                                    isVideoBuffering = false
+                                                    it.start()
+                                                }
+                                                setOnInfoListener { _, what, _ ->
+                                                    if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START) isVideoBuffering = true
+                                                    else if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END) isVideoBuffering = false
+                                                    false
+                                                }
                                             }
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .aspectRatio(16f / 9f)
                                     )
+                                    if (isVideoBuffering) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            modifier = Modifier.size(36.dp),
+                                            color = theme.colors.primaryAccent,
+                                            strokeWidth = 3.dp
+                                        )
+                                    }
                                 }
                             }
                         }

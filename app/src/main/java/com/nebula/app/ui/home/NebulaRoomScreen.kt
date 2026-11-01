@@ -664,6 +664,66 @@ fun NebulaRoomScreen(
             }
         }
 
+        // Live member avatar strip below player
+        if (participantsList.isNotEmpty()) {
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(participantsList) { p ->
+                        Box(
+                            modifier = Modifier
+                                .clickable { onViewParticipantProfile(p.user) }
+                        ) {
+                            NebulaAvatarImage(
+                                avatarUrl = p.user.avatarUrl,
+                                fallbackLetter = p.user.avatarLetter,
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .border(
+                                        width = if (p.isHost) 1.5.dp else 1.dp,
+                                        color = if (p.isHost) theme.colors.primaryAccent else Color.White.copy(alpha = 0.2f),
+                                        shape = androidx.compose.foundation.shape.CircleShape
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                androidx.compose.material3.Surface(
+                    onClick = { showMembersSheet = true },
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.colors.surfaceElevated.copy(alpha = 0.8f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(Color(0xFF22C55E))
+                        )
+                        Text(
+                            text = "${participantsList.size}",
+                            color = theme.colors.textPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
 
         // 5. LIVE CHAT — the feed fades into the dark under the player, so messages
         // dissolve as they scroll up instead of meeting a hard edge.
@@ -893,11 +953,20 @@ fun NebulaRoomScreen(
                 if (code.isNullOrBlank()) {
                     Toast.makeText(context, "This room has no share link yet", Toast.LENGTH_SHORT).show()
                 } else {
+                    val shareUrl = "https://nebula-73kb.onrender.com/room/$code"
+                    try {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        val clip = android.content.ClipData.newPlainText("Nebula Room Link", shareUrl)
+                        clipboard?.setPrimaryClip(clip)
+                        Toast.makeText(context, "Link copied to clipboard!", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        // ignore clipboard exception
+                    }
                     val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(
                             android.content.Intent.EXTRA_TEXT,
-                            "Join my Nebula watch party: https://nebula.app/room/$code"
+                            "Join my Nebula watch party: $shareUrl"
                         )
                     }
                     context.startActivity(android.content.Intent.createChooser(share, "Share room"))

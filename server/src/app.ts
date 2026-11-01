@@ -140,11 +140,11 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 12,
-      versionName: '1.1.10',
+      versionCode: 13,
+      versionName: '1.1.11',
       minSupportedVersionCode: 1,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• Chat [ Video ] bubble: clean preview-less video capsule with tap-to-play popup viewer\n• Rewired custom status & presence pipeline with green/grey online dots, dynamic active presence, and profile status bar & friend count\n• Rooms discovery: streamlined filter & tag bar (Filters | recently used tags) with search pipeline removed\n• Beta Program: simplified to dual Premium and Premium Plus toggles\n• Universal theme blur fix: pristine frosted surfaces across dark & light themes\n• Active friends quick popup card with PFP, friend count, bio, and Follow/Invite to Room actions',
+      releaseNotes: '• Profile: Custom 16:9 banner touch cropping gestures, separated Note feature & presence status, and unlocked picture banners\n• Rooms: Live member avatar strip below player, real-time Relevance sorting, clean filters & curated tags\n• Social: Instant 0ms optimistic message unsend, 1:1 photo cropping & fit previews, and long-press actions on photos & videos\n• Home: Dedicated Home screen title, aesthetic empty state, and streamlined member preview sheet\n• Deep-linking: Seamless watch party room invite links on nebula-73kb.onrender.com',
       forceUpdate: false,
       publishedAt: new Date().toISOString(),
     };
@@ -155,6 +155,42 @@ export function createApp(): express.Application {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
     res.json(getAppVersionManifest());
+  });
+
+  // Deep-link landing route for shared watch party rooms
+  app.get('/room/:code', (req, res) => {
+    const code = req.params.code;
+    const deepLink = `nebula://room/${encodeURIComponent(code)}`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Nebula Watch Party</title>
+  <style>
+    body { background: #0A0D14; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 32px 24px; max-width: 400px; width: 100%; backdrop-filter: blur(16px); }
+    h1 { font-size: 22px; margin-bottom: 8px; color: #E0E7FF; }
+    p { color: #94A3B8; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    .code { font-family: monospace; background: rgba(99,102,241,0.15); color: #818CF8; padding: 6px 14px; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block; margin-bottom: 24px; }
+    .btn { display: block; background: #6366F1; color: #FFFFFF; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: bold; font-size: 15px; margin-bottom: 12px; }
+    .btn-secondary { background: rgba(255,255,255,0.08); color: #CBD5E1; }
+  </style>
+  <script>
+    window.location.href = "${deepLink}";
+  </script>
+</head>
+<body>
+  <div class="card">
+    <h1>Nebula Watch Party</h1>
+    <p>You've been invited to join an active watch party.</p>
+    <div class="code">${code}</div>
+    <a href="${deepLink}" class="btn">Open in Nebula</a>
+    <a href="/download/nebula-latest.apk" class="btn btn-secondary">Download Nebula App</a>
+  </div>
+</body>
+</html>`);
   });
 
   // Serve latest APK download dynamically

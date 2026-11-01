@@ -101,23 +101,6 @@ fun NebulaChatsScreen(
                     )
                 )
             }
-
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(theme.colors.surface)
-                    .border(1.dp, theme.colors.surfaceBorder, CircleShape)
-                    .clickable { onStartNewChat() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AddComment,
-                    contentDescription = "New chat",
-                    tint = theme.colors.primaryAccent,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
         }
 
         Spacer(modifier = Modifier.height(10.dp))

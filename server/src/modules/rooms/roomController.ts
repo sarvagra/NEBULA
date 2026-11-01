@@ -606,13 +606,13 @@ export async function inviteRoomParticipant(req: Request, res: Response): Promis
     const invite = await NotificationModel.create({
       userId,
       type: 'room_invite',
-      title: room.name,
-      body: `${req.user.displayName} invited you to join a room.`,
+      title: `${room.name}`,
+      body: `${req.user.displayName} invited you to join ${room.name}`,
       actionData: { roomId: room._id.toString(), inviterId: req.user.id },
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     await RoomModel.updateOne({ _id: room._id }, { $addToSet: { invitedUserIds: userId } });
-    void notifyUser(userId, 'Room invitation', `${req.user.displayName} invited you to ${room.name}.`, { type: 'room_invite', roomId: room._id.toString() });
+    void notifyUser(userId, `${req.user.displayName} invited you`, `${req.user.displayName} invited you to join ${room.name}`, { type: 'room_invite', roomId: room._id.toString(), inviterId: req.user.id });
     res.status(201).json({ success: true, data: invite.toJSON() });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to invite participant' });
