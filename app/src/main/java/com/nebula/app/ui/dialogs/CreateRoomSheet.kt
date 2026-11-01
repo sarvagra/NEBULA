@@ -137,12 +137,8 @@ fun mediaLinkPrecheckError(rawUrl: String): String? {
     return null
 }
 
-/** Server-authoritative participant cap for a subscription tier. */
-fun roomParticipantCapForTier(tier: NebulaSubscriptionTier?): Int = when (tier) {
-    NebulaSubscriptionTier.PREMIUM_PLUS -> PREMIUM_PLUS_ROOM_PARTICIPANT_CAP
-    NebulaSubscriptionTier.PREMIUM -> PREMIUM_ROOM_PARTICIPANT_CAP
-    else -> BASIC_ROOM_PARTICIPANT_CAP
-}
+/** Participant cap: 50 for everyone. */
+fun roomParticipantCapForTier(tier: NebulaSubscriptionTier?): Int = PREMIUM_PLUS_ROOM_PARTICIPANT_CAP
 
 private fun tierCapLabel(cap: Int): String = "Room cap"
 

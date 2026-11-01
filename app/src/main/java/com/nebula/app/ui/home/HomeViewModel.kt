@@ -1524,13 +1524,6 @@ class HomeViewModel(
     }
 
     fun onSelectTheme(theme: AppThemeDefinition) {
-        if (theme.isPremium && _uiState.value.activeSubscriptionTier == NebulaSubscriptionTier.FREE) {
-            showToast("Upgrade to Nebula Premium to unlock ${theme.name}")
-            _uiState.value = _uiState.value.copy(
-                activeModalSheet = ActiveModalSheet.PremiumPlans
-            )
-            return
-        }
         viewModelScope.launch {
             themeRepository.setTheme(theme.id)
             _uiState.value = _uiState.value.copy(currentTheme = theme, activeModalSheet = null)

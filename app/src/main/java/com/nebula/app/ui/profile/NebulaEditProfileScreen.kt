@@ -238,11 +238,6 @@ fun NebulaEditProfileScreen(
                 }
 
                 if (isVideo) {
-                    val isPremiumPlus = userProfile.subscriptionTier == NebulaSubscriptionTier.PREMIUM_PLUS
-                    if (!isPremiumPlus) {
-                        Toast.makeText(context, "Video banners require Premium Plus ✨", Toast.LENGTH_LONG).show()
-                        return@launch
-                    }
 
                     var durationMs = 0L
                     try {
@@ -978,7 +973,7 @@ fun NebulaEditProfileScreen(
 
                         items(visibleThemes, key = { it.id }) { themeItem ->
                             val isSelected = selectedBannerIndex == themeItem.id && customBannerUri == null
-                            val isLocked = themeItem.id > 3 && userProfile.subscriptionTier == NebulaSubscriptionTier.FREE
+                            val isLocked = false
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -989,16 +984,12 @@ fun NebulaEditProfileScreen(
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable {
-                                        if (isLocked) {
-                                            Toast.makeText(context, "Preset banners are unlocked with Premium ✨", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            selectedBannerIndex = themeItem.id
-                                            customBannerUri = null
-                                            pendingBannerDataUrl = null
-                                            pendingVideoFile = null
-                                            pendingVideoBytes = null
-                                            pendingSelectedBannerAssetId = null
-                                        }
+                                        selectedBannerIndex = themeItem.id
+                                        customBannerUri = null
+                                        pendingBannerDataUrl = null
+                                        pendingVideoFile = null
+                                        pendingVideoBytes = null
+                                        pendingSelectedBannerAssetId = null
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
@@ -1006,9 +997,7 @@ fun NebulaEditProfileScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    if (isLocked) {
-                                        Icon(Icons.Default.Lock, contentDescription = "Locked", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
-                                    } else if (themeItem.emojis.isNotEmpty()) {
+                                    if (themeItem.emojis.isNotEmpty()) {
                                         Text(text = themeItem.emojis.first(), fontSize = 11.sp)
                                     } else if (themeItem.patternType != com.nebula.app.ui.components.BannerPatternType.CLEAN_GRADIENT) {
                                         Text(text = "◆", fontSize = 9.sp, color = Color.White.copy(alpha = 0.9f))
@@ -1189,9 +1178,8 @@ fun NebulaEditProfileScreen(
                 )
             }
 
-            // 5. PRESENCE STATUS (Online, Idle, Offline [Premium])
+            // 5. PRESENCE STATUS (Online, Idle, Offline)
             item {
-                val isPremiumUser = userProfile.subscriptionTier != NebulaSubscriptionTier.FREE
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1214,7 +1202,6 @@ fun NebulaEditProfileScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("online" to "Online", "idle" to "Idle", "offline" to "Offline").forEach { (presetKey, presetLabel) ->
                             val isSelected = statusText.equals(presetKey, ignoreCase = true)
-                            val isOfflineLocked = presetKey == "offline" && !isPremiumUser
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -1225,11 +1212,7 @@ fun NebulaEditProfileScreen(
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable {
-                                        if (isOfflineLocked) {
-                                            Toast.makeText(context, "Invisible offline status is available with Premium ✨", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            statusText = presetKey
-                                        }
+                                        statusText = presetKey
                                     }
                                     .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
@@ -1237,22 +1220,18 @@ fun NebulaEditProfileScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    if (isOfflineLocked) {
-                                        Icon(Icons.Default.Lock, contentDescription = "Locked", tint = theme.colors.textTertiary, modifier = Modifier.size(11.dp))
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    when (presetKey) {
-                                                        "online" -> theme.colors.successColor
-                                                        "idle" -> Color(0xFFF59E0B)
-                                                        else -> theme.colors.textTertiary
-                                                    }
-                                                )
-                                        )
-                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when (presetKey) {
+                                                    "online" -> theme.colors.successColor
+                                                    "idle" -> Color(0xFFF59E0B)
+                                                    else -> theme.colors.textTertiary
+                                                }
+                                            )
+                                    )
                                     Text(
                                         text = presetLabel,
                                         style = theme.typography.caption.copy(
@@ -1268,9 +1247,8 @@ fun NebulaEditProfileScreen(
                 }
             }
 
-            // 5b. NOTE FEATURE (Instagram-style 1-word note, Premium Plus exclusive)
+            // 5b. NOTE FEATURE (Instagram-style 1-word note)
             item {
-                val isPremiumPlus = userProfile.subscriptionTier == NebulaSubscriptionTier.PREMIUM_PLUS
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1285,56 +1263,19 @@ fun NebulaEditProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "NOTE",
-                                style = theme.typography.caption.copy(
-                                    color = theme.colors.textSecondary,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.1.sp,
-                                    fontSize = 10.5.sp
-                                )
+                        Text(
+                            text = "NOTE",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp,
+                                fontSize = 10.5.sp
                             )
-                            if (isPremiumPlus) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(theme.colors.primaryAccent.copy(alpha = 0.2f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text("PLUS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = theme.colors.primaryAccent)
-                                }
-                            }
-                        }
-                        if (isPremiumPlus) {
-                            Text("${customStatusText.length}/8", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
-                        }
+                        )
+                        Text("${customStatusText.length}/8", style = theme.typography.caption.copy(color = theme.colors.textTertiary, fontSize = 10.5.sp))
                     }
 
-                    if (!isPremiumPlus) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(theme.colors.surfaceElevated)
-                                .clickable {
-                                    Toast.makeText(context, "Notes are a Premium Plus exclusive feature ✨", Toast.LENGTH_SHORT).show()
-                                }
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = theme.colors.primaryAccent, modifier = Modifier.size(18.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Unlock Profile Notes", color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text("Set a 1-word note that appears on your profile and active tab", color = theme.colors.textTertiary, fontSize = 11.sp)
-                            }
-                        }
-                    } else {
-                        OutlinedTextField(
+                    OutlinedTextField(
                             value = customStatusText,
                             onValueChange = {
                                 customStatusText = sanitizeNote(it)
@@ -1373,7 +1314,6 @@ fun NebulaEditProfileScreen(
                         )
                     }
                 }
-            }
 
             // 6. INTERESTS & ROOM BADGES
             item {

@@ -40,7 +40,7 @@ fun ThemeSelectorSheet(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "Choose your aesthetic. Free tier includes Light & Dark. Lavender & Red-Hot-Pink are included in Premium.",
+                text = "Choose your aesthetic. All themes are unlocked and available to everyone.",
                 style = theme.typography.bodySmall.copy(color = theme.colors.textSecondary),
                 modifier = Modifier.padding(horizontal = theme.spacing.screenHorizontal)
             )

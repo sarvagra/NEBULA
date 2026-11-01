@@ -29,46 +29,46 @@ export const DAY_MS = DAY;
 
 const ENTITLEMENTS: Record<SubscriptionTier, TierEntitlements> = {
   free: {
-    dmRetentionDays: 180,
-    dmRetentionLabel: '6 months',
-    messageEditLimit: 1,
-    profileAssetHistoryLimit: 1,
-    maxRoomParticipants: 24,
-    maxProfileTags: 5,
-    customStatusAllowed: false,
-    suggestionDailyRefreshLimit: 3,
-    suggestionPageSize: 5,
+    dmRetentionDays: 365,
+    dmRetentionLabel: '12 months',
+    messageEditLimit: 10,
+    profileAssetHistoryLimit: 10,
+    maxRoomParticipants: 50,
+    maxProfileTags: 25,
+    customStatusAllowed: true,
+    suggestionDailyRefreshLimit: 50,
+    suggestionPageSize: 20,
   },
   premium: {
-    dmRetentionDays: 180,
-    dmRetentionLabel: '6 months',
-    messageEditLimit: 2,
-    profileAssetHistoryLimit: 3,
-    maxRoomParticipants: 24,
-    maxProfileTags: 8,
-    customStatusAllowed: false,
-    suggestionDailyRefreshLimit: 6,
-    suggestionPageSize: 10,
+    dmRetentionDays: 365,
+    dmRetentionLabel: '12 months',
+    messageEditLimit: 10,
+    profileAssetHistoryLimit: 10,
+    maxRoomParticipants: 50,
+    maxProfileTags: 25,
+    customStatusAllowed: true,
+    suggestionDailyRefreshLimit: 50,
+    suggestionPageSize: 20,
   },
   premium_plus: {
     dmRetentionDays: 365,
     dmRetentionLabel: '12 months',
-    messageEditLimit: 2,
-    profileAssetHistoryLimit: 5,
-    maxRoomParticipants: 24,
-    maxProfileTags: 12,
+    messageEditLimit: 10,
+    profileAssetHistoryLimit: 10,
+    maxRoomParticipants: 50,
+    maxProfileTags: 25,
     customStatusAllowed: true,
-    suggestionDailyRefreshLimit: 12,
-    suggestionPageSize: 12,
+    suggestionDailyRefreshLimit: 50,
+    suggestionPageSize: 20,
   },
 };
 
 export function normalizeTier(tier?: string | null): SubscriptionTier {
-  return tier === 'premium' || tier === 'premium_plus' ? tier : 'free';
+  return 'premium_plus';
 }
 
 export function entitlementsForTier(tier?: string | null): TierEntitlements {
-  return ENTITLEMENTS[normalizeTier(tier)];
+  return ENTITLEMENTS.premium_plus;
 }
 
 /** Oldest direct message that stays readable for a tier. */
@@ -91,12 +91,11 @@ export function profileAssetHistoryLimitForTier(tier?: string | null): number {
 
 /** Read-only payload for GET /billing/entitlement so clients never guess limits. */
 export function entitlementsDTO(tier?: string | null) {
-  const resolved = normalizeTier(tier);
-  const e = ENTITLEMENTS[resolved];
+  const e = ENTITLEMENTS.premium_plus;
   return {
-    tier: resolved,
-    isPremium: resolved !== 'free',
-    isPremiumPlus: resolved === 'premium_plus',
+    tier: 'premium_plus',
+    isPremium: true,
+    isPremiumPlus: true,
     dmRetentionDays: e.dmRetentionDays,
     dmRetentionLabel: e.dmRetentionLabel,
     messageEditLimit: e.messageEditLimit,

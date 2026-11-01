@@ -366,10 +366,10 @@ fun NebulaChatDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val messages = conversation.messages
-                val lastOwnMessageId = messages.lastOrNull {
+                val lastOwnMessage = messages.lastOrNull {
                     it.role == MessageRole.USER && it.deletedAt == null
-                }?.id
-                itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                }
+                itemsIndexed(messages, key = { _, m -> m.clientKey?.takeIf { it.isNotBlank() } ?: m.id }) { index, message ->
                     val previous = messages.getOrNull(index - 1)
                     val next = messages.getOrNull(index + 1)
                     // Consecutive messages from the same sender form one visual
@@ -387,7 +387,7 @@ fun NebulaChatDetailScreen(
                             showAvatar = startsGroup,
                             isGroupedWithPrevious = !startsGroup,
                             isGroupedWithNext = !endsGroup,
-                            showsReceipt = message.id == lastOwnMessageId,
+                            showsReceipt = (lastOwnMessage != null && (message.id == lastOwnMessage.id || (message.clientKey != null && message.clientKey == lastOwnMessage.clientKey))),
                             dragOffset = dragOffsetAnimatable.value,
                             onEdit = { editingMessage = message },
                             onUnsend = { onUnsendMessage(message.id) },

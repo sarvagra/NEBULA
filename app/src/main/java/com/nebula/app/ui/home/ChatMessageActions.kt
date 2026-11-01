@@ -175,7 +175,9 @@ internal fun MessageActionSheet(
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         MessageInfoRow("Sent", message.timestamp)
-                        MessageInfoRow("Delivered", message.deliveredAt)
+                        val effectiveDeliveredAt = message.deliveredAt
+                            ?: if (message.sendState == com.nebula.app.domain.model.MessageSendState.SENT || message.readAt != null) (message.readAt ?: message.timestamp) else null
+                        MessageInfoRow("Delivered", effectiveDeliveredAt)
                         MessageInfoRow("Seen", message.readAt)
                         message.editedAt?.let { edited ->
                             androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))

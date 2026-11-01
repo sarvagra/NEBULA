@@ -45,7 +45,7 @@ fun PersonalizationSheet(
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
-    val maxChars = if (userProfile.isPremium) 500 else 250
+    val maxChars = 500
 
     var text by remember(userProfile.customInstructions) {
         mutableStateOf(userProfile.customInstructions)
@@ -65,7 +65,7 @@ fun PersonalizationSheet(
                 .padding(horizontal = theme.spacing.screenHorizontal),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header explanation with Tier Badge
+            // Header explanation
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -79,11 +79,7 @@ fun PersonalizationSheet(
                     )
                 )
 
-                if (userProfile.isPremium) {
-                    PABadge(text = "PRO 500 CHARS", isPrimary = true)
-                } else {
-                    PABadge(text = "FREE 250 CHARS", isPrimary = false)
-                }
+                PABadge(text = "500 CHARS", isPrimary = true)
             }
 
             Text(
@@ -141,14 +137,7 @@ fun PersonalizationSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                if (!userProfile.isPremium) {
-                    Text(
-                        text = "Need more? Pro unlocks 500 characters",
-                        style = theme.typography.caption.copy(color = theme.colors.primaryAccent)
-                    )
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+                Spacer(modifier = Modifier.weight(1f))
 
                 Text(
                     text = "$currentLength / $maxChars",

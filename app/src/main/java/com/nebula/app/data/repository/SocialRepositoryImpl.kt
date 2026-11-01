@@ -222,21 +222,32 @@ class SocialRepositoryImpl(
         val conversations = _conversations.value.map { conversation ->
             if (conversation.id != peerId) conversation else {
                 knownConversation = true
-                if (conversation.messages.any { it.id == incoming.id }) {
-                    conversation
-                } else {
-                    val merged = conversation.messages + incoming
-                    conversation.copy(
-                        messages = merged,
-                        lastMessageText = previewText(incoming),
-                        lastMessageTime = compactTimeLabel(incoming.timestamp),
-                        // Only the peer's messages count as unread, and only while the
-                        // thread is not the one on screen.
-                        unreadCount = if (incoming.role == MessageRole.ASSISTANT &&
-                            _activeConversation.value?.id != peerId
-                        ) conversation.unreadCount + 1 else conversation.unreadCount
-                    )
+                val existingIndex = conversation.messages.indexOfFirst {
+                    (incoming.clientKey != null && it.clientKey == incoming.clientKey) ||
+                        (incoming.id.isNotBlank() && it.id == incoming.id) ||
+                        (it.clientKey != null && it.id == "pending_${it.clientKey}" && it.clientKey == incoming.clientKey)
                 }
+                val merged = if (existingIndex >= 0) {
+                    conversation.messages.toMutableList().apply {
+                        val prev = this[existingIndex]
+                        this[existingIndex] = incoming.copy(
+                            clientKey = incoming.clientKey ?: prev.clientKey,
+                            sendState = MessageSendState.SENT
+                        )
+                    }
+                } else {
+                    conversation.messages + incoming
+                }
+                conversation.copy(
+                    messages = merged,
+                    lastMessageText = previewText(incoming),
+                    lastMessageTime = compactTimeLabel(incoming.timestamp),
+                    // Only the peer's messages count as unread, and only while the
+                    // thread is not the one on screen.
+                    unreadCount = if (incoming.role == MessageRole.ASSISTANT &&
+                        _activeConversation.value?.id != peerId
+                    ) conversation.unreadCount + 1 else conversation.unreadCount
+                )
             }
         }
         // A thread we have never seen (new friend, or the list not loaded yet) is worth
@@ -249,12 +260,26 @@ class SocialRepositoryImpl(
 
         if (_activeConversation.value?.id == peerId) {
             val active = _activeConversation.value ?: return
-            if (active.messages.none { it.id == incoming.id }) {
-                _activeConversation.value = active.copy(
-                    messages = active.messages + incoming,
-                    unreadCount = 0
-                )
+            val existingIndex = active.messages.indexOfFirst {
+                (incoming.clientKey != null && it.clientKey == incoming.clientKey) ||
+                    (incoming.id.isNotBlank() && it.id == incoming.id) ||
+                    (it.clientKey != null && it.id == "pending_${it.clientKey}" && it.clientKey == incoming.clientKey)
             }
+            val merged = if (existingIndex >= 0) {
+                active.messages.toMutableList().apply {
+                    val prev = this[existingIndex]
+                    this[existingIndex] = incoming.copy(
+                        clientKey = incoming.clientKey ?: prev.clientKey,
+                        sendState = MessageSendState.SENT
+                    )
+                }
+            } else {
+                active.messages + incoming
+            }
+            _activeConversation.value = active.copy(
+                messages = merged,
+                unreadCount = 0
+            )
             if (incoming.role == MessageRole.ASSISTANT) {
                 backgroundScope.launch { apiClient.markConversationRead(peerId) }
             }
@@ -321,16 +346,31 @@ class SocialRepositoryImpl(
         replacement: ChatMessage? = null
     ) {
         updateConversation(conversationId) { conv ->
-            val messages = conv.messages.map { message ->
+            val updated = conv.messages.map { message ->
                 when {
-                    message.clientKey != clientKey -> message
-                    replacement != null -> replacement.copy(clientKey = clientKey, sendState = state)
-                    else -> message.copy(sendState = state)
+                    message.clientKey == clientKey -> {
+                        replacement?.copy(clientKey = clientKey, sendState = state)
+                            ?: message.copy(sendState = state)
+                    }
+                    replacement != null && message.id == replacement.id -> {
+                        replacement.copy(clientKey = clientKey, sendState = state)
+                    }
+                    else -> message
                 }
             }
-            val last = messages.lastOrNull()
+            val seenKeys = mutableSetOf<String>()
+            val seenIds = mutableSetOf<String>()
+            val deduplicated = mutableListOf<ChatMessage>()
+            for (msg in updated) {
+                val duplicateKey = msg.clientKey != null && !seenKeys.add(msg.clientKey)
+                val duplicateId = msg.id.isNotBlank() && !seenIds.add(msg.id)
+                if (!duplicateKey && !duplicateId) {
+                    deduplicated.add(msg)
+                }
+            }
+            val last = deduplicated.lastOrNull()
             conv.copy(
-                messages = messages,
+                messages = deduplicated,
                 lastMessageText = last?.let { previewText(it) } ?: conv.lastMessageText,
                 lastMessageTime = last?.let { compactTimeLabel(it.timestamp) } ?: conv.lastMessageTime
             )
@@ -875,6 +915,10 @@ class SocialRepositoryImpl(
         val history = item.optJSONArray("editHistory")?.let { entries ->
             List(entries.length()) { index -> entries.optJSONObject(index)?.optString("text").orEmpty() }
         } ?: emptyList()
+        val cKey = item.optString("clientKey").takeIf { it.isNotBlank() }
+            ?: item.optString("idempotencyKey").takeIf { it.isNotBlank() }
+        val deliveredEpoch = item.optString("deliveredAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+            ?: item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
         return ChatMessage(
             id = item.optString("id"),
             role = if (item.optString("senderId") == partnerId) MessageRole.ASSISTANT else MessageRole.USER,
@@ -891,9 +935,10 @@ class SocialRepositoryImpl(
             editHistory = history,
             deletedAt = item.optString("deletedAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
             readAt = item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
-            deliveredAt = item.optString("deliveredAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            deliveredAt = deliveredEpoch,
             isSpoiler = item.optBoolean("isSpoiler", false),
             mediaMimeType = item.optString("mediaMimeType").ifBlank { null },
+            clientKey = cKey,
         )
     }
 

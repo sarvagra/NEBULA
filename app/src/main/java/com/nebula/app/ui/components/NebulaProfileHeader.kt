@@ -236,81 +236,64 @@ fun NebulaProfileHeader(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = user.displayName,
-                    style = theme.typography.titleLarge.copy(
-                        color = theme.colors.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (compact) 19.sp else 23.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (tierLabel != null) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(theme.colors.primaryAccent.copy(alpha = 0.16f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = tierLabel,
-                            style = theme.typography.caption.copy(
-                                color = theme.colors.primaryAccent,
+                            text = user.displayName,
+                            style = theme.typography.titleLarge.copy(
+                                color = theme.colors.textPrimary,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 9.5.sp
-                            )
+                                fontSize = if (compact) 19.sp else 23.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (trailingNameBadge != null) {
+                            Spacer(modifier = Modifier.size(8.dp))
+                            trailingNameBadge()
+                        }
                     }
-                }
-                if (trailingNameBadge != null) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    trailingNameBadge()
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = if (user.username.startsWith("@")) user.username else "@${user.username}",
+                        style = theme.typography.bodyMedium.copy(
+                            color = theme.colors.textSecondary,
+                            fontSize = if (compact) 12.5.sp else 13.5.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
-                // Instagram-style Friends Count: Big number on top, "friends" below
-                Spacer(modifier = Modifier.weight(1f))
+                // Instagram-style Friends Count on the far right
                 val friendCount = user.friendsCount ?: 0
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(start = 12.dp)
+                    modifier = Modifier.padding(start = 16.dp, end = 2.dp)
                 ) {
                     Text(
                         text = "$friendCount",
                         style = theme.typography.titleLarge.copy(
                             color = theme.colors.textPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = if (compact) 18.sp else 21.sp
+                            fontSize = if (compact) 19.sp else 22.sp
                         )
                     )
                     Text(
                         text = if (friendCount == 1) "friend" else "friends",
                         style = theme.typography.caption.copy(
                             color = theme.colors.textSecondary,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium
                         )
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (user.username.startsWith("@")) user.username else "@${user.username}",
-                    style = theme.typography.bodyMedium.copy(
-                        color = theme.colors.textSecondary,
-                        fontSize = if (compact) 12.5.sp else 13.5.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
 
             // Status display: clean text below profile (removed strip / card)

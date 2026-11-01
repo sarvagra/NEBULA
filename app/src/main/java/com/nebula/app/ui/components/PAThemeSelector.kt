@@ -56,7 +56,7 @@ fun PAThemeSelector(
     ) {
         items(availableThemes) { themeItem ->
             val isSelected = themeItem.id == activeTheme.id
-            val isLocked = themeItem.isPremium && !isUserPremium
+            val isLocked = false
 
             Row(
                 modifier = Modifier
@@ -75,11 +75,7 @@ fun PAThemeSelector(
                         shape = RoundedCornerShape(currentTheme.radii.lg)
                     )
                     .clickable {
-                        if (isLocked) {
-                            onUpgradeRequested()
-                        } else {
-                            onSelectTheme(themeItem)
-                        }
+                        onSelectTheme(themeItem)
                     }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -126,16 +122,6 @@ fun PAThemeSelector(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             )
-                            if (themeItem.isPremium) {
-                                PABadge(
-                                    text = "PREMIUM",
-                                    isPrimary = true
-                                )
-                            } else {
-                                PABadge(
-                                    text = "FREE"
-                                )
-                            }
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(

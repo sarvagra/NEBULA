@@ -391,9 +391,8 @@ private fun ActiveFriendItem(
             overflow = TextOverflow.Ellipsis
         )
 
-        // For premium plus users: show custom note. For normal users: dynamic presence without redundant offline.
-        val isPremiumPlus = user.tier.equals("premium_plus", ignoreCase = true) || user.tier.equals("plus", ignoreCase = true)
-        val subtitle = if (isPremiumPlus && user.customStatus.isNotBlank()) {
+        val hasNote = user.customStatus.isNotBlank()
+        val subtitle = if (hasNote) {
             user.customStatus
         } else {
             when {
@@ -408,7 +407,7 @@ private fun ActiveFriendItem(
             Text(
                 text = subtitle,
                 style = theme.typography.caption.copy(
-                    color = if (isPremiumPlus && user.customStatus.isNotBlank()) theme.colors.primaryAccent else theme.colors.textSecondary,
+                    color = if (hasNote) theme.colors.primaryAccent else theme.colors.textSecondary,
                     fontSize = 10.sp
                 ),
                 maxLines = 1,

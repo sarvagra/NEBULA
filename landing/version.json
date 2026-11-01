@@ -1,10 +1,10 @@
 {
   "success": true,
-  "versionCode": 13,
-  "versionName": "1.1.11",
+  "versionCode": 14,
+  "versionName": "1.1.12",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Profile: Custom 16:9 banner touch cropping gestures, separated Note feature & presence status, and unlocked picture banners\n• Rooms: Live member avatar strip below player, real-time Relevance sorting, clean filters & curated tags\n• Social: Instant 0ms optimistic message unsend, 1:1 photo cropping & fit previews, and long-press actions on photos & videos\n• Home: Dedicated Home screen title, aesthetic empty state, and streamlined member preview sheet\n• Deep-linking: Seamless watch party room invite links on nebula-73kb.onrender.com",
+  "releaseNotes": "• Social: Ultra-smooth 0ms message sending without flicker or vanishing, persistent delivery timestamps, and reliable socket syncing\n• Profile: Unlocked all banner themes & video banners, free 1-word Note feature, invisible presence mode, and moved friends count to the far right\n• Features: All premium tiers fully unlocked across the app with maximum room capacity and all themes available",
   "forceUpdate": false,
-  "publishedAt": "2026-11-01T10:30:00Z"
+  "publishedAt": "2026-11-01T11:00:00Z"
 }

@@ -480,13 +480,8 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     });
 
     if (conversationId && !roomId) {
-      // Double tick means the recipient's device actually has it. If they are
-      // connected right now the message is delivered on the spot; otherwise it stays
-      // a single tick until their next read receipt upgrades it.
-      if (await isUserOnline(conversationId)) {
-        message.deliveredAt = new Date();
-        await message.save();
-      }
+      message.deliveredAt = new Date();
+      await message.save();
       const notificationBody = text?.trim() || 'Sent you an attachment';
       try {
         await NotificationModel.create({
