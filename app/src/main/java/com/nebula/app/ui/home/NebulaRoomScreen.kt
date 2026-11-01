@@ -424,7 +424,7 @@ fun NebulaRoomScreen(
             } else {
                 RoomPlayerSurface(
                     room = room,
-                    isHost = isCurrentUserAdmin,
+                    isHost = canControlPlayback,
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
@@ -687,6 +687,24 @@ fun NebulaRoomScreen(
                 )
 
                 if (canControlPlayback) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { onTogglePlayPause() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (room.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (room.isPlaying) "Pause Room" else "Play Room",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)

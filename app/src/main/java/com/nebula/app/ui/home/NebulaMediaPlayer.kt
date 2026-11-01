@@ -499,7 +499,7 @@ fun NebulaMediaPlayer(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    useController = false
+                    useController = isHost
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     this.player = player
                 }

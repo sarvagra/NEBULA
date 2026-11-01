@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
             ProvideAppTheme(theme = activeTheme) {
                 val updateState by UpdateManager.updateState.collectAsState()
-                if (updateState is UpdateState.Available || updateState is UpdateState.Downloading || updateState is UpdateState.ReadyToInstall) {
+                if (updateState is UpdateState.Available || updateState is UpdateState.Downloading || updateState is UpdateState.ReadyToInstall || updateState is UpdateState.Error) {
                     androidx.activity.compose.BackHandler {
                         finishAffinity()
                         kotlin.system.exitProcess(0)

@@ -217,7 +217,7 @@ class RoomRepositoryImpl(
             val id = json.optString("id").ifBlank { json.optString("_id") }
             if (id.isBlank()) continue
             val createdAt = json.optString("createdAt")
-            if (createdAt.isNotBlank() && (cursor == null || createdAt > cursor!!)) cursor = createdAt
+            if (createdAt.isNotBlank() && (cursor == null || createdAt > cursor)) cursor = createdAt
             val text = json.optString("text", "")
             val mediaUrl = json.optString("mediaUrl", "")
             val finalContent = when {

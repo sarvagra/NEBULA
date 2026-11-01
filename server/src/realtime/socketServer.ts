@@ -79,7 +79,8 @@ export function notifyRoomParticipantKicked(roomId: string, userId: string): voi
   if (!roomIo) return;
   const roomChannel = `room:${roomId}`;
   const userChannel = `user:${userId}`;
-  roomIo.to(roomChannel).emit('participant:left', { userId });
+  roomIo.to(roomChannel).emit('participant:left', { roomId, userId });
+  roomIo.to(roomChannel).emit('room:participant_left', { roomId, userId });
   void roomIo.in(userChannel).fetchSockets().then((sockets) => {
     for (const socket of sockets) {
       socket.leave(roomChannel);
@@ -298,7 +299,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
           io.to(`room:${roomId}`).emit('room:host_changed', { newHostId: room.hostId });
         }
         await UserModel.updateOne({ _id: user.id, activeRoomId: roomId }, { $set: { activeRoomId: null, presenceStatus: 'online' } });
-        io.to(`room:${roomId}`).emit('participant:left', { userId: user.id, displayName: user.displayName });
+        io.to(`room:${roomId}`).emit('participant:left', { roomId, userId: user.id, displayName: user.displayName });
+        io.to(`room:${roomId}`).emit('room:participant_left', { roomId, userId: user.id, displayName: user.displayName });
         for (const activeSocket of await io.in(`user:${user.id}`).fetchSockets()) {
           activeSocket.leave(`room:${roomId}`);
           activeSocket.emit('room:removed', { roomId, reason: 'inactive' });
