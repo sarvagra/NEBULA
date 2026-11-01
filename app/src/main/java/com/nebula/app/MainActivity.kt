@@ -48,6 +48,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.nebula.app.data.auth.NebulaAuthManager
 import com.nebula.app.data.repository.RoomRepositoryImpl
 import com.nebula.app.data.repository.SocialRepositoryImpl
+import com.nebula.app.ui.dialogs.UpdateDialog
+import com.nebula.app.update.UpdateManager
 
 class MainActivity : ComponentActivity() {
     private val notificationDestination = MutableStateFlow<Pair<String, String>?>(null)
@@ -147,6 +149,20 @@ class MainActivity : ComponentActivity() {
             var isSplashVisible by remember { mutableStateOf(true) }
 
             ProvideAppTheme(theme = activeTheme) {
+                val updateState by UpdateManager.updateState.collectAsState()
+                UpdateDialog(
+                    state = updateState,
+                    onDismiss = { UpdateManager.dismissUpdate() },
+                    onStartDownload = { info ->
+                        lifecycleScope.launch {
+                            UpdateManager.downloadAndInstall(this@MainActivity, info)
+                        }
+                    },
+                    onInstall = { file ->
+                        UpdateManager.promptInstall(this@MainActivity, file)
+                    }
+                )
+
                 Crossfade(
                     targetState = isSplashVisible,
                     animationSpec = tween(durationMillis = 350),

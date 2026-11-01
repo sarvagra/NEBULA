@@ -66,6 +66,7 @@ object UpdateManager {
         val now = System.currentTimeMillis()
         // Throttle automatic checks by 15 seconds to avoid spamming
         if (!isManual && (now - lastCheckTimestampMs < 15_000L)) {
+            android.util.Log.d("UpdateManager", "Update check throttled (<15s since last check)")
             return@withContext null
         }
         lastCheckTimestampMs = now
@@ -98,15 +99,19 @@ object UpdateManager {
                     }
                     if (conn.responseCode in 200..299) {
                         val body = conn.inputStream.bufferedReader().use { it.readText() }
+                        android.util.Log.d("UpdateManager", "Success from $endpoint: $body")
                         responseJson = JSONObject(body)
                         break
+                    } else {
+                        android.util.Log.w("UpdateManager", "Endpoint $endpoint returned code ${conn.responseCode}")
                     }
-                } catch (_: Exception) {
-                    // Try next candidate
+                } catch (e: Exception) {
+                    android.util.Log.w("UpdateManager", "Candidate $endpoint failed: ${e.message}")
                 }
             }
 
             if (responseJson == null) {
+                android.util.Log.e("UpdateManager", "Unable to reach any update endpoint.")
                 if (isManual) {
                     _updateState.value = UpdateState.Error("Unable to reach update server.")
                 }
@@ -124,6 +129,7 @@ object UpdateManager {
             }
 
             val currentVersionCode = BuildConfig.VERSION_CODE
+            android.util.Log.i("UpdateManager", "Version check: installed=$currentVersionCode, server=$latestVersionCode ($latestVersionName)")
             if (latestVersionCode > currentVersionCode) {
                 val updateInfo = AppUpdateInfo(
                     versionCode = latestVersionCode,
@@ -132,9 +138,11 @@ object UpdateManager {
                     releaseNotes = releaseNotes,
                     forceUpdate = forceUpdate
                 )
+                android.util.Log.i("UpdateManager", "New update detected! Showing UpdateDialog for v$latestVersionName (Build $latestVersionCode)")
                 _updateState.value = UpdateState.Available(updateInfo)
                 return@withContext updateInfo
             } else {
+                android.util.Log.i("UpdateManager", "App is up to date (current $currentVersionCode >= server $latestVersionCode)")
                 if (isManual) {
                     _updateState.value = UpdateState.Idle
                     withContext(Dispatchers.Main) {

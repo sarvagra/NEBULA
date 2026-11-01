@@ -331,8 +331,9 @@ internal fun ModernChatBubble(
                         Modifier.fillMaxWidth().height(180.dp)
                     } else if (isPile) {
                         Modifier
-                            .fillMaxWidth(0.74f)
+                            .fillMaxWidth(0.76f)
                             .aspectRatio(1f)
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
                     } else {
                         Modifier
                             .fillMaxWidth(0.74f)
@@ -349,8 +350,10 @@ internal fun ModernChatBubble(
                         contentAlignment = Alignment.Center
                     ) {
                         if (isPile) {
-                            // Truly borderless multi-photo pile: clean edge-to-edge cover photo
-                            // with natural fanned-out preview layers underneath and sleek floating badge.
+                            // Conspicuously layered multi-photo stack pile:
+                            // Top photo is crisp and prominent with deep drop shadow.
+                            // Underneath photo(s) visibly fan out with pronounced angles & offsets,
+                            // subtle crisp edge rim, and an eye-catching glassmorphic photo count badge.
                             val displayCards = pile.take(3)
                             Box(
                                 modifier = Modifier
@@ -363,24 +366,34 @@ internal fun ModernChatBubble(
                                 for (i in displayCards.indices.reversed()) {
                                     val cardUrl = displayCards[i]
                                     val rotation = when (i) {
-                                        2 -> if (isMe) -4.5f else 4.5f
-                                        1 -> if (isMe) 3.5f else -3.5f
+                                        2 -> if (isMe) 11.5f else -11.5f
+                                        1 -> if (isMe) -7.5f else 7.5f
                                         else -> 0f
                                     }
                                     val xOffset = when (i) {
-                                        2 -> if (isMe) (-6).dp else 6.dp
-                                        1 -> if (isMe) 5.dp else (-5).dp
+                                        2 -> if (isMe) 16.dp else (-16).dp
+                                        1 -> if (isMe) (-14).dp else 14.dp
                                         else -> 0.dp
                                     }
                                     val yOffset = when (i) {
-                                        2 -> (-3).dp
-                                        1 -> (-1.5).dp
+                                        2 -> (-14).dp
+                                        1 -> (-8).dp
                                         else -> 0.dp
                                     }
+                                    val cardScale = when (i) {
+                                        2 -> 0.88f
+                                        1 -> 0.94f
+                                        else -> 1f
+                                    }
                                     val scrimAlpha = when (i) {
-                                        2 -> 0.22f
-                                        1 -> 0.10f
+                                        2 -> 0.28f
+                                        1 -> 0.14f
                                         else -> 0f
+                                    }
+                                    val elevation = when (i) {
+                                        0 -> 10.dp
+                                        1 -> 4.dp
+                                        else -> 2.dp
                                     }
 
                                     Box(
@@ -388,13 +401,19 @@ internal fun ModernChatBubble(
                                             .fillMaxSize()
                                             .offset(x = xOffset, y = yOffset)
                                             .rotate(rotation)
+                                            .scale(cardScale)
                                             .shadow(
-                                                elevation = if (i == 0) 6.dp else 2.dp,
+                                                elevation = elevation,
                                                 shape = RoundedCornerShape(16.dp),
                                                 clip = false
                                             )
                                             .clip(RoundedCornerShape(16.dp))
-                                            .background(Color(0xFF14131A)),
+                                            .background(Color(0xFF14131A))
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (i == 0) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.18f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (cardUrl.isNotBlank()) {
@@ -415,26 +434,28 @@ internal fun ModernChatBubble(
                                     }
                                 }
 
+                                // High-contrast frosted glass stack count badge
                                 Surface(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(8.dp),
+                                        .padding(6.dp),
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color.Black.copy(alpha = 0.65f)
+                                    color = Color(0xDD0B0E1B),
+                                    border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.PhotoLibrary,
                                             contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(13.dp)
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(14.dp)
                                         )
                                         Text(
-                                            text = "${pile.size}",
+                                            text = "${pile.size} Photos",
                                             color = Color.White,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold

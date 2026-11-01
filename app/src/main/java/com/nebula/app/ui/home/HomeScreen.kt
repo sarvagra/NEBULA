@@ -113,27 +113,12 @@ fun HomeScreen(
     // picker over the people you are connected to, and starting a conversation
     // goes through the same path as messaging from a profile or a room.
     var showNewChatSheet by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // In-App Self-Updater
-    val coroutineScope = rememberCoroutineScope()
-    val updateState by UpdateManager.updateState.collectAsState()
-
     LaunchedEffect(Unit) {
         UpdateManager.checkForUpdate(context)
     }
-
-    UpdateDialog(
-        state = updateState,
-        onDismiss = { UpdateManager.dismissUpdate() },
-        onStartDownload = { info ->
-            coroutineScope.launch {
-                UpdateManager.downloadAndInstall(context, info)
-            }
-        },
-        onInstall = { file ->
-            UpdateManager.promptInstall(context, file)
-        }
-    )
 
     // Quick Toast feedback
     LaunchedEffect(uiState.quickToastMessage) {
@@ -365,24 +350,33 @@ fun HomeScreen(
         } else {
             // STANDARD TAB SHELL
             // Real-time interactive pager with beyondBoundsPageCount = 1 so adjacent tabs
-            // (especially Profile) stay pre-composed and warm for 60/120fps stutter-free swiping.
+            // stay pre-composed and warm for 60/120fps stutter-free swiping.
             val pagerState = androidx.compose.foundation.pager.rememberPagerState(
                 initialPage = uiState.currentTab.ordinal,
                 pageCount = { NebulaTab.values().size }
             )
 
-            // Sync tab changes from navigation to pager
-            androidx.compose.runtime.LaunchedEffect(uiState.currentTab) {
-                if (pagerState.currentPage != uiState.currentTab.ordinal) {
-                    pagerState.animateScrollToPage(uiState.currentTab.ordinal)
+            // Sync pager settled page to ViewModel ONLY when interactive swiping has settled.
+            // Using settledPage prevents intermediate pages from cancelling or hijacking tab switches.
+            androidx.compose.runtime.LaunchedEffect(pagerState) {
+                androidx.compose.runtime.snapshotFlow { pagerState.settledPage }.collect { settledPage ->
+                    val targetTab = NebulaTab.values().getOrNull(settledPage) ?: NebulaTab.HOME
+                    if (uiState.currentTab != targetTab) {
+                        viewModel.onTabSelected(targetTab)
+                    }
                 }
             }
 
-            // Sync tab changes from interactive swipe to ViewModel
-            androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
-                val targetTab = NebulaTab.values().getOrNull(pagerState.currentPage) ?: NebulaTab.HOME
-                if (uiState.currentTab != targetTab) {
-                    viewModel.onTabSelected(targetTab)
+            // Sync tab changes from external navigation (e.g. top bar avatar click, deep links) to pager
+            androidx.compose.runtime.LaunchedEffect(uiState.currentTab) {
+                if (pagerState.currentPage != uiState.currentTab.ordinal) {
+                    pagerState.animateScrollToPage(
+                        page = uiState.currentTab.ordinal,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 260,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing
+                        )
+                    )
                 }
             }
 
@@ -393,6 +387,7 @@ fun HomeScreen(
                 androidx.compose.foundation.pager.HorizontalPager(
                     state = pagerState,
                     beyondBoundsPageCount = 1,
+                    key = { page -> NebulaTab.values()[page].name },
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     when (NebulaTab.values()[page]) {
@@ -576,7 +571,20 @@ fun HomeScreen(
             // 2. BOTTOM NAVIGATION BAR
             NABottomBar(
                 currentTab = uiState.currentTab,
-                onTabSelected = { tab -> viewModel.onTabSelected(tab) },
+                onTabSelected = { tab ->
+                    if (uiState.currentTab != tab) {
+                        viewModel.onTabSelected(tab)
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(
+                                page = tab.ordinal,
+                                animationSpec = androidx.compose.animation.core.tween(
+                                    durationMillis = 260,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                )
+                            )
+                        }
+                    }
+                },
                 hasUnreadChats = uiState.socialConversations.any { it.unreadCount > 0 },
                 hasActiveRooms = uiState.rooms.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomCenter)

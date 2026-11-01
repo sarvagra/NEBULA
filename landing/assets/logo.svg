@@ -1,57 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nebula">
   <defs>
-    <radialGradient id="core" cx="38%" cy="32%" r="72%">
+    <radialGradient id="nebulaCore" cx="36%" cy="32%" r="68%">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="42%" stop-color="#c4b5fd"/>
-      <stop offset="100%" stop-color="#6d28d9"/>
+      <stop offset="35%" stop-color="#c4b5fd"/>
+      <stop offset="65%" stop-color="#8b5cf6"/>
+      <stop offset="90%" stop-color="#6d28d9"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
     </radialGradient>
-    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="nebulaRing" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#22d3ee"/>
-      <stop offset="55%" stop-color="#a78bfa"/>
+      <stop offset="50%" stop-color="#a78bfa"/>
       <stop offset="100%" stop-color="#f472b6"/>
     </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="2.6" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="nebulaGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
-    <style>
-      @keyframes completeRing {
-        0% {
-          stroke-dasharray: 0 130;
-          stroke-dashoffset: 0;
-          opacity: 0.35;
-        }
-        60% {
-          stroke-dasharray: 130 0;
-          stroke-dashoffset: 0;
-          opacity: 1;
-        }
-        85% {
-          stroke-dasharray: 130 0;
-          stroke-dashoffset: 0;
-          opacity: 0.95;
-        }
-        100% {
-          stroke-dasharray: 130 0;
-          stroke-dashoffset: 0;
-          opacity: 0.95;
-        }
-      }
-      .animated-ring {
-        animation: completeRing 2.6s cubic-bezier(0.34, 1.2, 0.64, 1) infinite;
-        transform-origin: 32px 33px;
-      }
-    </style>
   </defs>
-  <g filter="url(#glow)">
-    <!-- Planet Core Shadow/Aura -->
-    <circle cx="32" cy="32" r="16.5" fill="#6d28d9" opacity="0.3" />
-    <!-- Planetary Ring completing smoothly -->
-    <ellipse class="animated-ring" cx="32" cy="33" rx="27" ry="9.5" fill="none" stroke="url(#ring)" stroke-width="2.6" transform="rotate(-24 32 33)" opacity="0.95" stroke-linecap="round"/>
-    <!-- Celestial Orb Core -->
-    <circle cx="32" cy="32" r="15.5" fill="url(#core)"/>
-    <circle cx="32" cy="32" r="15.5" fill="none" stroke="#ffffff" stroke-opacity="0.4" stroke-width="1"/>
-    <!-- Foreground Ring Arc for 3D depth -->
-    <ellipse class="animated-ring" cx="32" cy="33" rx="27" ry="9.5" fill="none" stroke="url(#ring)" stroke-width="2.6" transform="rotate(-24 32 33)" stroke-dasharray="42 130" opacity="0.92" stroke-linecap="round"/>
+
+  <g filter="url(#nebulaGlow)">
+    <!-- Ambient Cosmic Aura -->
+    <circle cx="32" cy="32" r="18" fill="#6d28d9" opacity="0.32" />
+
+    <!-- 1. Complete Continuous Orbital Ring (back half visible, outer tips seamless) -->
+    <ellipse cx="32" cy="32" rx="27" ry="9" fill="none" stroke="url(#nebulaRing)" stroke-width="2.6" transform="rotate(-24 32 32)" opacity="0.92" />
+
+    <!-- 2. Celestial Sphere Orb Core (centered at 32, 32) -->
+    <circle cx="32" cy="32" r="15" fill="url(#nebulaCore)"/>
+    <circle cx="32" cy="32" r="15" fill="none" stroke="#ffffff" stroke-opacity="0.36" stroke-width="0.8"/>
+
+    <!-- 3. Foreground Orbital Ring Arc (passes over front of sphere, seamless depth) -->
+    <g transform="rotate(-24 32 32)">
+      <path d="M 56.5 35.8 A 27 9 0 0 1 7.5 35.8" fill="none" stroke="url(#nebulaRing)" stroke-width="2.6" stroke-linecap="round" opacity="0.98" />
+    </g>
   </g>
 </svg>
