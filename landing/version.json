@@ -1,11 +1,11 @@
 {
   "success": true,
-  "versionCode": 8,
-  "versionName": "1.1.6",
+  "versionCode": 9,
+  "versionName": "1.1.7",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• App icon background set to pure space black across all Android app drawer launchers\n• Fixed photo and video sending in DMs and rooms: added image enum to message schema\n• Main send button now sends attached photos/videos with optional caption text\n• Smooth spoiler toggle and multi-image grid sending",
+  "releaseNotes": "• Multi-image stack pile display in DMs with layered previews and count badge\n• Restored stack pile display and cache for received photo sets\n• Tap to open full-screen gallery with smooth multi-photo swipe",
   "forceUpdate": false,
-  "publishedAt": "2026-11-01T00:30:00Z"
+  "publishedAt": "2026-11-01T05:40:00Z"
 }
 

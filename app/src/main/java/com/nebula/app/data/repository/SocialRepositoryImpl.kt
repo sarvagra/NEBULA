@@ -294,7 +294,8 @@ class SocialRepositoryImpl(
             message.deletedAt != null -> "Message deleted"
             message.messageType == "room_card" -> "Watch party invite"
             message.messageType == "video" -> message.content.ifBlank { "Video" }
-            message.mediaUrl != null || message.messageType == "media" -> message.content.ifBlank { "Photo" }
+            message.mediaUrls.size > 1 -> message.content.ifBlank { "${message.mediaUrls.size} Photos" }
+            message.mediaUrl != null || message.mediaUrls.isNotEmpty() || message.messageType in listOf("media", "image") -> message.content.ifBlank { "Photo" }
             else -> message.content
         }
         return when {

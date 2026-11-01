@@ -396,6 +396,11 @@ class SessionManager(context: Context) {
                             put("senderAvatarUrl", m.senderAvatarUrl ?: "")
                             put("senderAvatarLetter", m.senderAvatarLetter)
                             put("mediaUrl", m.mediaUrl ?: "")
+                            if (m.mediaUrls.isNotEmpty()) {
+                                val mArr = org.json.JSONArray()
+                                m.mediaUrls.forEach { mArr.put(it) }
+                                put("mediaUrls", mArr)
+                            }
                             put("messageType", m.messageType)
                             put("isSpoiler", m.isSpoiler)
                             put("mediaMimeType", m.mediaMimeType ?: "")
@@ -456,6 +461,9 @@ class SessionManager(context: Context) {
                                 senderAvatarUrl = mObj.optString("senderAvatarUrl", "").ifEmpty { null },
                                 senderAvatarLetter = mObj.optString("senderAvatarLetter", "U"),
                                 mediaUrl = mObj.optString("mediaUrl", "").ifEmpty { null },
+                                mediaUrls = mObj.optJSONArray("mediaUrls")?.let { arr ->
+                                    (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+                                } ?: emptyList(),
                                 messageType = mObj.optString("messageType", "text"),
                                 isSpoiler = mObj.optBoolean("isSpoiler", false),
                                 mediaMimeType = mObj.optString("mediaMimeType", "").ifEmpty { null },

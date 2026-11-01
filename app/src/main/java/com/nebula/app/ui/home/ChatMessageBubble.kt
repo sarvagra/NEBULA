@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -55,7 +56,9 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Tv
@@ -194,9 +197,9 @@ internal fun ModernChatBubble(
     // than a file. It shares the borderless bubble treatment with media while keeping
     // its own content branch below.
     val isRoomCard = roomCardCode(message) != null
-    val mediaUrlForViewer = message.mediaUrl.orEmpty()
-    val isMediaMessage = message.deletedAt == null &&
-        (message.mediaUrl != null || message.messageType == "media" || message.messageType == "video")
+    val mediaUrlForViewer = message.mediaUrl.orEmpty().ifBlank { message.mediaUrls.firstOrNull().orEmpty() }
+    val isMediaMessage = message.deletedAt == null && !isRoomCard &&
+        (!message.mediaUrl.isNullOrBlank() || message.mediaUrls.isNotEmpty() || message.messageType in listOf("media", "image", "video"))
     var spoilerRevealed by remember(message.id) { mutableStateOf(!message.isSpoiler) }
     var videoStarted by remember(message.id) { mutableStateOf(false) }
     var videoPrepared by remember(message.id) { mutableStateOf(false) }
@@ -303,8 +306,7 @@ internal fun ModernChatBubble(
                     vertical = if (isMediaMessage) 0.dp else 10.dp
                 )
         ) {
-            val isMedia = message.deletedAt == null && !isRoomCard &&
-                (message.mediaUrl != null || message.messageType == "media")
+            val isMedia = isMediaMessage
             // The Surface slot stacks its children in a Box, so the delivery marker has
             // to live in a Column or it would be painted on top of the message text.
             Column {
@@ -316,12 +318,25 @@ internal fun ModernChatBubble(
                     onJoin = onJoinRoomByCode
                 )
             } else if (isMedia) {
+                val mediaUrl = message.mediaUrl.orEmpty().ifBlank { message.mediaUrls.firstOrNull().orEmpty() }
+                val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
+                val pile = if (message.mediaUrls.isNotEmpty()) {
+                    message.mediaUrls.filter { it.isNotBlank() }
+                } else if (mediaUrl.isNotBlank()) {
+                    listOf(mediaUrl)
+                } else {
+                    emptyList()
+                }
+                val isPile = pile.size > 1
+
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Border-less media surface. The height follows the picture's
-                    // own aspect ratio so a portrait photo no longer sits inside a
-                    // wide coloured slab with empty bars either side.
+                    // Border-less media surface.
                     val mediaBoxModifier = if (isVideoMessage) {
                         Modifier.fillMaxWidth().height(180.dp)
+                    } else if (isPile) {
+                        Modifier
+                            .fillMaxWidth(0.72f)
+                            .aspectRatio(1f)
                     } else {
                         Modifier
                             .fillMaxWidth(0.72f)
@@ -329,69 +344,110 @@ internal fun ModernChatBubble(
                     }
                     Box(
                         modifier = mediaBoxModifier
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isMe) Color.Black.copy(alpha = 0.25f) else theme.colors.surfaceElevated
+                                if (isMe) Color.Black.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        val mediaUrl = message.mediaUrl.orEmpty()
-                        val isVideo = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
-                        val pile = message.mediaUrls
-                        if (pile.size > 1) {
-                            // One stack, not a grid: the photos sit on top of each other
-                            // with a slight lean, and the whole stack opens together in
-                            // the viewer, which swipes between them.
-                            val visible = pile.takeLast(3)
+                        if (isPile) {
+                            // Layered photo stack: displays true preview layers tilted behind
+                            // the cover photo, with a pill counter badge. Tapping opens full gallery.
+                            val displayCards = pile.take(3)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true }
                                     .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
-                                    .padding(14.dp),
+                                    .padding(12.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                visible.forEachIndexed { index, _ ->
-                                    val depth = visible.lastIndex - index
+                                // Draw from bottom of the stack to top (index 0 is on top)
+                                for (i in displayCards.indices.reversed()) {
+                                    val cardUrl = displayCards[i]
+                                    val rotation = when (i) {
+                                        2 -> if (isMe) -6f else 6f
+                                        1 -> if (isMe) 5f else -5f
+                                        else -> 0f
+                                    }
+                                    val xOffset = when (i) {
+                                        2 -> if (isMe) (-8).dp else 8.dp
+                                        1 -> if (isMe) 6.dp else (-6).dp
+                                        else -> 0.dp
+                                    }
+                                    val yOffset = when (i) {
+                                        2 -> (-4).dp
+                                        1 -> (-2).dp
+                                        else -> 0.dp
+                                    }
+                                    val scrimAlpha = when (i) {
+                                        2 -> 0.35f
+                                        1 -> 0.18f
+                                        else -> 0f
+                                    }
+
                                     Box(
                                         modifier = Modifier
-                                            .matchParentSize()
-                                            .padding(start = (depth * 8).dp, bottom = (depth * 6).dp)
-                                            .rotate(if (depth % 2 == 0) -6f else 6f)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(
-                                                if (depth == 0) Color.Black.copy(alpha = 0.35f)
-                                                else if (isMe) theme.colors.primaryAccent.copy(alpha = 0.55f)
-                                                else theme.colors.surfaceElevated
+                                            .fillMaxSize()
+                                            .offset(x = xOffset, y = yOffset)
+                                            .rotate(rotation)
+                                            .shadow(
+                                                elevation = if (i == 0) 4.dp else 2.dp,
+                                                shape = RoundedCornerShape(12.dp)
                                             )
-                                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp)),
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color(0xFF181720))
+                                            .border(
+                                                width = 1.2.dp,
+                                                color = if (i == 0) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.20f),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        if (depth == 0) {
-                                            val topUrl = pile.last()
-                                            if (topUrl.isNotBlank()) {
-                                                AsyncImage(
-                                                    model = topUrl,
-                                                    contentDescription = "Shared photo",
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                                )
-                                            }
+                                        if (cardUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = cardUrl,
+                                                contentDescription = "Photo ${i + 1} of ${pile.size}",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                            )
+                                        }
+                                        if (scrimAlpha > 0f) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color.Black.copy(alpha = scrimAlpha))
+                                            )
                                         }
                                     }
                                 }
+
                                 Surface(
-                                    modifier = Modifier.align(Alignment.BottomEnd),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(6.dp),
                                     shape = RoundedCornerShape(10.dp),
-                                    color = Color.Black.copy(alpha = 0.7f)
+                                    color = Color.Black.copy(alpha = 0.75f),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
                                 ) {
-                                    Text(
-                                        text = "${pile.size}",
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PhotoLibrary,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "${pile.size}",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         } else if (isVideo && mediaUrl.isNotBlank()) {
@@ -574,8 +630,9 @@ internal fun ModernChatBubble(
                     )
                 }
                 if (showPile) {
+                    val pileList = if (message.mediaUrls.isNotEmpty()) message.mediaUrls else listOfNotNull(message.mediaUrl)
                     com.nebula.app.ui.components.NebulaImageViewer(
-                        images = message.mediaUrls,
+                        images = pileList,
                         onDismiss = { showPile = false }
                     )
                 }
