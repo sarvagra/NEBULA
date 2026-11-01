@@ -40,7 +40,7 @@ data class PendingOutgoingMessage(
  */
 class SessionManager(context: Context) {
 
-    private val appContext: Context = context.applicationContext
+    val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = appContext.getSharedPreferences(
         PREFS_NAME,
         Context.MODE_PRIVATE

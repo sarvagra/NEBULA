@@ -41,15 +41,18 @@ class NebulaApplication : Application(), ImageLoaderFactory {
         }
         .memoryCache {
             coil.memory.MemoryCache.Builder(this)
-                .maxSizePercent(0.25)
+                .maxSizePercent(0.35)
+                .strongReferencesEnabled(true)
                 .build()
         }
         .diskCache {
             coil.disk.DiskCache.Builder()
                 .directory(cacheDir.resolve("image_cache"))
-                .maxSizeBytes(250L * 1024 * 1024)
+                .maxSizeBytes(500L * 1024 * 1024)
                 .build()
         }
-        .crossfade(true)
+        .respectCacheHeaders(false)
+        .allowHardware(true)
+        .crossfade(150)
         .build()
 }

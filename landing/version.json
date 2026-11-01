@@ -1,11 +1,11 @@
 {
   "success": true,
-  "versionCode": 9,
-  "versionName": "1.1.7",
+  "versionCode": 10,
+  "versionName": "1.1.8",
   "minSupportedVersionCode": 1,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Multi-image stack pile display in DMs with layered previews and count badge\n• Restored stack pile display and cache for received photo sets\n• Tap to open full-screen gallery with smooth multi-photo swipe",
+  "releaseNotes": "• Borderless edge-to-edge photo stack pile without artificial trimming or borders\n• High-speed image loading & background prefetching for instant Instagram-like speed\n• Expanded 500MB local media cache with hardware GPU bitmap acceleration",
   "forceUpdate": false,
-  "publishedAt": "2026-11-01T05:40:00Z"
+  "publishedAt": "2026-11-01T06:45:00Z"
 }
 

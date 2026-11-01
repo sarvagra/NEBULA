@@ -88,6 +88,7 @@ class SocialRepositoryImpl(
             val readTarget = target.copy(unreadCount = 0)
             _activeConversation.value = readTarget
             _conversations.value = _conversations.value.map { if (it.id == id) readTarget else it }
+            prefetchMedia(readTarget.messages.takeLast(10))
 
             // STEP 2: Asynchronous background synchronization without freezing the UI
             backgroundScope.launch {
@@ -131,6 +132,7 @@ class SocialRepositoryImpl(
                     if (it.id == id) updatedTarget else it
                 }
                 sessionManager?.saveCachedConversations(_conversations.value)
+                prefetchMedia(mergedMessages.takeLast(10))
 
                 // Restore anything typed before the last process exit, then try to send it.
                 hydratePendingQueue()
@@ -214,6 +216,7 @@ class SocialRepositoryImpl(
         if (peerId.isBlank() || peerId == myId) return
         val incoming = messageFromJson(payload, peerId)
         if (incoming.id.isBlank()) return
+        prefetchMedia(listOf(incoming))
 
         var knownConversation = false
         val conversations = _conversations.value.map { conversation ->
@@ -620,20 +623,22 @@ class SocialRepositoryImpl(
         return true
     }
 
-    override suspend fun refresh() {
-        val friends = apiClient.getFriends()
+    override suspend fun refresh(): Unit = coroutineScope {
+        val requestsDeferred = async(Dispatchers.IO) { apiClient.getFriendRequests() }
+        val suggestionsDeferred = async(Dispatchers.IO) { apiClient.getSuggestedPeople() }
+        val friendsDeferred = async(Dispatchers.IO) { apiClient.getFriends() }
+
+        val friends = friendsDeferred.await()
         if (friends is ApiResponse.Success) {
             val friendUsers = parseUsers(friends.data)
             _friends.value = attachRoomPresence(friendUsers)
             // One round-trip per friend, but issued concurrently: the previous
             // sequential loop made the Chats list wait on every friend in turn.
-            val histories: Map<String, ApiResponse<JSONArray>> = coroutineScope {
-                _friends.value.map { friend ->
-                    async(kotlinx.coroutines.Dispatchers.IO) {
-                        friend.id to apiClient.getConversationMessages(friend.id)
-                    }
-                }.awaitAll().toMap()
-            }
+            val histories: Map<String, ApiResponse<JSONArray>> = _friends.value.map { friend ->
+                async(Dispatchers.IO) {
+                    friend.id to apiClient.getConversationMessages(friend.id)
+                }
+            }.awaitAll().toMap()
             val previousById = _conversations.value.associateBy { it.id }
             _conversations.value = _friends.value.map { friend ->
                 val history = histories[friend.id]
@@ -660,12 +665,14 @@ class SocialRepositoryImpl(
                     messages = messages,
                 )
             }.sortedByDescending { it.messages.lastOrNull()?.timestamp ?: 0L }
+
+            prefetchMedia(_conversations.value.flatMap { it.messages.takeLast(3) })
         }
-        val requests = apiClient.getFriendRequests()
+        val requests = requestsDeferred.await()
         if (requests is ApiResponse.Success) {
             _friendRequests.value = parseRequests(requests.data)
         }
-        val suggestions = apiClient.getSuggestedPeople()
+        val suggestions = suggestionsDeferred.await()
         if (suggestions is ApiResponse.Success) {
             val currentUserId = sessionManager?.getUserProfile()?.id
             val friendIds = _friends.value.map { it.id }.toSet()
@@ -680,6 +687,24 @@ class SocialRepositoryImpl(
         hydratePendingQueue()
         sessionManager?.saveCachedFriends(_friends.value)
         sessionManager?.saveCachedConversations(_conversations.value)
+    }
+
+    private fun prefetchMedia(messages: List<ChatMessage>) {
+        val ctx: android.content.Context = sessionManager?.appContext ?: return
+        val loader = coil.Coil.imageLoader(ctx)
+        messages.forEach { msg ->
+            if (!msg.mediaUrl.isNullOrBlank()) {
+                loader.enqueue(coil.request.ImageRequest.Builder(ctx).data(msg.mediaUrl).build())
+            }
+            msg.mediaUrls.forEach { url ->
+                if (url.isNotBlank()) {
+                    loader.enqueue(coil.request.ImageRequest.Builder(ctx).data(url).build())
+                }
+            }
+            if (!msg.senderAvatarUrl.isNullOrBlank()) {
+                loader.enqueue(coil.request.ImageRequest.Builder(ctx).data(msg.senderAvatarUrl).build())
+            }
+        }
     }
 
     /** Chat-list timestamp: time for today, "Yesterday", else a short date. */

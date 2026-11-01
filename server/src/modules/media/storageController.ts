@@ -24,6 +24,7 @@ export async function redirectToObject(req: Request, res: Response): Promise<voi
   }
 
   try {
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800, immutable');
     res.redirect(302, await getPrivateObjectRedirect(key));
   } catch {
     res.status(404).json({ success: false, error: 'Media object unavailable' });

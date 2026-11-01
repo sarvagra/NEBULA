@@ -209,10 +209,6 @@ internal fun ModernChatBubble(
     // Default to a landscape-ish box until the real dimensions arrive.
     val isVideoMessage = message.mediaMimeType?.startsWith("video/") == true || message.messageType == "video"
     var mediaAspectRatio by remember(message.id) { mutableStateOf(4f / 3f) }
-    // The picture is only painted once its real ratio is known. Painting it into a
-    // guessed 4:3 box first made a portrait photo sit letterboxed inside a box that
-    // then jumped to the right size underneath it.
-    var mediaRatioKnown by remember(message.id) { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -335,54 +331,55 @@ internal fun ModernChatBubble(
                         Modifier.fillMaxWidth().height(180.dp)
                     } else if (isPile) {
                         Modifier
-                            .fillMaxWidth(0.72f)
+                            .fillMaxWidth(0.74f)
                             .aspectRatio(1f)
                     } else {
                         Modifier
-                            .fillMaxWidth(0.72f)
+                            .fillMaxWidth(0.74f)
                             .aspectRatio(mediaAspectRatio)
                     }
                     Box(
-                        modifier = mediaBoxModifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isMe) Color.Black.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f)
-                            ),
+                        modifier = if (isPile) {
+                            mediaBoxModifier
+                        } else {
+                            mediaBoxModifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF14131A))
+                        },
                         contentAlignment = Alignment.Center
                     ) {
                         if (isPile) {
-                            // Layered photo stack: displays true preview layers tilted behind
-                            // the cover photo, with a pill counter badge. Tapping opens full gallery.
+                            // Truly borderless multi-photo pile: clean edge-to-edge cover photo
+                            // with natural fanned-out preview layers underneath and sleek floating badge.
                             val displayCards = pile.take(3)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clickable { if (spoilerRevealed) showPile = true else spoilerRevealed = true }
-                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
-                                    .padding(12.dp),
+                                    .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
                                 contentAlignment = Alignment.Center
                             ) {
                                 // Draw from bottom of the stack to top (index 0 is on top)
                                 for (i in displayCards.indices.reversed()) {
                                     val cardUrl = displayCards[i]
                                     val rotation = when (i) {
-                                        2 -> if (isMe) -6f else 6f
-                                        1 -> if (isMe) 5f else -5f
+                                        2 -> if (isMe) -4.5f else 4.5f
+                                        1 -> if (isMe) 3.5f else -3.5f
                                         else -> 0f
                                     }
                                     val xOffset = when (i) {
-                                        2 -> if (isMe) (-8).dp else 8.dp
-                                        1 -> if (isMe) 6.dp else (-6).dp
+                                        2 -> if (isMe) (-6).dp else 6.dp
+                                        1 -> if (isMe) 5.dp else (-5).dp
                                         else -> 0.dp
                                     }
                                     val yOffset = when (i) {
-                                        2 -> (-4).dp
-                                        1 -> (-2).dp
+                                        2 -> (-3).dp
+                                        1 -> (-1.5).dp
                                         else -> 0.dp
                                     }
                                     val scrimAlpha = when (i) {
-                                        2 -> 0.35f
-                                        1 -> 0.18f
+                                        2 -> 0.22f
+                                        1 -> 0.10f
                                         else -> 0f
                                     }
 
@@ -392,16 +389,12 @@ internal fun ModernChatBubble(
                                             .offset(x = xOffset, y = yOffset)
                                             .rotate(rotation)
                                             .shadow(
-                                                elevation = if (i == 0) 4.dp else 2.dp,
-                                                shape = RoundedCornerShape(12.dp)
+                                                elevation = if (i == 0) 6.dp else 2.dp,
+                                                shape = RoundedCornerShape(16.dp),
+                                                clip = false
                                             )
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFF181720))
-                                            .border(
-                                                width = 1.2.dp,
-                                                color = if (i == 0) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.20f),
-                                                shape = RoundedCornerShape(12.dp)
-                                            ),
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color(0xFF14131A)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (cardUrl.isNotBlank()) {
@@ -425,13 +418,12 @@ internal fun ModernChatBubble(
                                 Surface(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(6.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color.Black.copy(alpha = 0.75f),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
+                                        .padding(8.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Black.copy(alpha = 0.65f)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
@@ -439,12 +431,12 @@ internal fun ModernChatBubble(
                                             imageVector = Icons.Default.PhotoLibrary,
                                             contentDescription = null,
                                             tint = Color.White,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(13.dp)
                                         )
                                         Text(
                                             text = "${pile.size}",
                                             color = Color.White,
-                                            fontSize = 11.5.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -485,68 +477,24 @@ internal fun ModernChatBubble(
                                 modifier = Modifier.fillMaxSize().then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier)
                             )
                         } else if (mediaUrl.isNotBlank()) {
-                            SubcomposeAsyncImage(
+                            AsyncImage(
                                 model = mediaUrl,
                                 contentDescription = "Shared image",
                                 onSuccess = { state ->
-                                    // Coil hands back the picture's own aspect; the box is
-                                    // resized to it before any pixels are drawn.
                                     val size = state.painter.intrinsicSize
                                     if (size.width > 0f && size.height > 0f) {
-                                        mediaAspectRatio = (size.width / size.height).coerceIn(0.5f, 2.2f)
+                                        mediaAspectRatio = (size.width / size.height).coerceIn(0.55f, 2.0f)
                                     }
-                                    mediaRatioKnown = true
                                 },
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF14131A))
                                     .clickable {
                                         if (spoilerRevealed) showSingleImage = true else spoilerRevealed = true
                                     }
                                     .then(if (!spoilerRevealed) Modifier.blur(18.dp) else Modifier),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                loading = {
-                                    // Real loading feedback: a shimmering sweep plus an
-                                    // indeterminate spinner, so a slow image is visibly
-                                    // working rather than looking stuck.
-                                    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "img-load")
-                                    val shimmer by transition.animateFloat(
-                                        initialValue = 0f,
-                                        targetValue = 1f,
-                                        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                                            animation = androidx.compose.animation.core.tween(1100),
-                                            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
-                                        ),
-                                        label = "shimmer"
-                                    )
-                                    Box(
-                                        Modifier
-                                            .fillMaxSize()
-                                            .background(
-                                                androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                                    colors = listOf(
-                                                        theme.colors.surfaceElevated.copy(alpha = 0.55f),
-                                                        theme.colors.surfaceBorder.copy(alpha = 0.75f),
-                                                        theme.colors.surfaceElevated.copy(alpha = 0.55f)
-                                                    ),
-                                                    startX = shimmer * 900f - 450f,
-                                                    endX = shimmer * 900f + 450f
-                                                )
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        androidx.compose.material3.CircularProgressIndicator(
-                                            modifier = Modifier.size(22.dp),
-                                            strokeWidth = 2.dp,
-                                            color = theme.colors.primaryAccent
-                                        )
-                                    }
-                                },
-                                error = {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("Image unavailable", color = if (isMe) Color.White else theme.colors.textSecondary, fontSize = 12.sp)
-                                    }
-                                },
-                                success = { if (mediaRatioKnown) SubcomposeAsyncImageContent() }
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
                         } else {
                             Text(
