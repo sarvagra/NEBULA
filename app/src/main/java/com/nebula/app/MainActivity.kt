@@ -50,6 +50,7 @@ import com.nebula.app.data.repository.RoomRepositoryImpl
 import com.nebula.app.data.repository.SocialRepositoryImpl
 import com.nebula.app.ui.dialogs.UpdateDialog
 import com.nebula.app.update.UpdateManager
+import com.nebula.app.update.UpdateState
 
 class MainActivity : ComponentActivity() {
     private val notificationDestination = MutableStateFlow<Pair<String, String>?>(null)
@@ -150,9 +151,18 @@ class MainActivity : ComponentActivity() {
 
             ProvideAppTheme(theme = activeTheme) {
                 val updateState by UpdateManager.updateState.collectAsState()
+                if (updateState is UpdateState.Available || updateState is UpdateState.Downloading || updateState is UpdateState.ReadyToInstall) {
+                    androidx.activity.compose.BackHandler {
+                        finishAffinity()
+                        kotlin.system.exitProcess(0)
+                    }
+                }
                 UpdateDialog(
                     state = updateState,
-                    onDismiss = { UpdateManager.dismissUpdate() },
+                    onDismiss = {
+                        finishAffinity()
+                        kotlin.system.exitProcess(0)
+                    },
                     onStartDownload = { info ->
                         lifecycleScope.launch {
                             UpdateManager.downloadAndInstall(this@MainActivity, info)

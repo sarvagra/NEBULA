@@ -117,8 +117,33 @@ class RoomRepositoryImpl(
                 _activeRoom.value = current.copy(likeVoteCount = likeCount, skipVoteCount = skipCount)
             }
         },
-        onSettingsUpdated = {
+        onSettingsUpdated = { json ->
+            _activeRoom.value?.let { current ->
+                val leaderOnly = if (json.has("leaderOnlyControls")) json.optBoolean("leaderOnlyControls") else current.leaderOnlyControls
+                val votingEnabled = if (json.has("votingEnabled")) json.optBoolean("votingEnabled") else current.votingEnabled
+                val name = json.optString("name").takeIf { it.isNotBlank() } ?: current.name
+                val updated = current.copy(
+                    leaderOnlyControls = leaderOnly,
+                    votingEnabled = votingEnabled,
+                    name = name
+                )
+                _activeRoom.value = updated
+                _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
+            }
             realtimeScope.launch { syncActiveRoom() }
+        },
+        onParticipantLeft = { leftUserId ->
+            _activeRoom.value?.let { current ->
+                if (leftUserId.isNotBlank()) {
+                    val remaining = current.participants.filterNot { it.user.id == leftUserId }
+                    val updated = current.copy(
+                        participants = remaining,
+                        participantCount = remaining.size
+                    )
+                    _activeRoom.value = updated
+                    _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
+                }
+            }
         }
     )
 

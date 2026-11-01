@@ -140,12 +140,12 @@ export function createApp(): express.Application {
     }
     return {
       success: true,
-      versionCode: 14,
-      versionName: '1.1.12',
-      minSupportedVersionCode: 1,
+      versionCode: 15,
+      versionName: '1.1.15',
+      minSupportedVersionCode: 15,
       apkUrl: '/download/nebula-latest.apk',
-      releaseNotes: '• Social: Ultra-smooth 0ms message sending without flicker or vanishing, persistent delivery timestamps, and reliable socket syncing\n• Profile: Unlocked all banner themes & video banners, free 1-word Note feature, invisible presence mode, and moved friends count to the far right\n• Features: All premium tiers fully unlocked across the app with maximum room capacity and all themes available',
-      forceUpdate: false,
+      releaseNotes: '• Strict Force Update: App now strictly requires all users to update to continue using NEBULA\n• Rooms: Fixed Leader-Only controls enforcement, fixed ghost participants staying when leaving, cleaned in-room menubar\n• Profiles: Clicking participant avatar below video now opens their exact profile card\n• Players: Fixed Google Drive video player bug, removed web clutter, and direct-streamed MP4 playback\n• Chats: Fixed app crash when opening previous direct message conversations',
+      forceUpdate: true,
       publishedAt: new Date().toISOString(),
     };
   };

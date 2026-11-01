@@ -449,9 +449,10 @@ class SessionManager(context: Context) {
                     for (m in 0 until msgsArray.length()) {
                         val mObj = msgsArray.optJSONObject(m) ?: continue
                         val role = try { MessageRole.valueOf(mObj.optString("role", "USER")) } catch (_: Exception) { MessageRole.USER }
+                        val msgId = mObj.optString("id").ifBlank { mObj.optString("_id") }.ifBlank { "msg_${m}_${System.currentTimeMillis()}" }
                         messages.add(
                             ChatMessage(
-                                id = mObj.optString("id"),
+                                id = msgId,
                                 role = role,
                                 content = mObj.optString("content", ""),
                                 timeLabel = mObj.optString("timeLabel", ""),

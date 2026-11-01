@@ -150,7 +150,9 @@ fun NebulaChatDetailScreen(
 
     LaunchedEffect(conversation.messages.size) {
         if (conversation.messages.isNotEmpty()) {
-            listState.animateScrollToItem(conversation.messages.lastIndex)
+            runCatching {
+                listState.animateScrollToItem(conversation.messages.lastIndex)
+            }
         }
     }
 
@@ -369,7 +371,15 @@ fun NebulaChatDetailScreen(
                 val lastOwnMessage = messages.lastOrNull {
                     it.role == MessageRole.USER && it.deletedAt == null
                 }
-                itemsIndexed(messages, key = { _, m -> m.clientKey?.takeIf { it.isNotBlank() } ?: m.id }) { index, message ->
+                itemsIndexed(
+                    items = messages,
+                    key = { index, m ->
+                        val base = m.clientKey?.takeIf { it.isNotBlank() }
+                            ?: m.id.takeIf { it.isNotBlank() }
+                            ?: "msg_${m.timestamp}"
+                        "${base}_$index"
+                    }
+                ) { index, message ->
                     val previous = messages.getOrNull(index - 1)
                     val next = messages.getOrNull(index + 1)
                     // Consecutive messages from the same sender form one visual

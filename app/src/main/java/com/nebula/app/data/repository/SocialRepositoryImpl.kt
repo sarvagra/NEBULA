@@ -919,8 +919,9 @@ class SocialRepositoryImpl(
             ?: item.optString("idempotencyKey").takeIf { it.isNotBlank() }
         val deliveredEpoch = item.optString("deliveredAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
             ?: item.optString("readAt").takeIf { it.isNotBlank() }?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+        val messageId = item.optString("id").ifBlank { item.optString("_id") }.ifBlank { "msg_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}" }
         return ChatMessage(
-            id = item.optString("id"),
+            id = messageId,
             role = if (item.optString("senderId") == partnerId) MessageRole.ASSISTANT else MessageRole.USER,
             content = item.optString("text"), timeLabel = "",
             mediaUrls = item.optJSONArray("mediaUrls")?.let { arr ->

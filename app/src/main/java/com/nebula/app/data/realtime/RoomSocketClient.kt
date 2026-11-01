@@ -31,7 +31,8 @@ class RoomSocketClient(
     private val onReaction: (JSONObject) -> Unit = {},
     private val onMicToggled: (JSONObject) -> Unit = {},
     private val onVotingUpdated: (JSONObject) -> Unit = {},
-    private val onSettingsUpdated: (JSONObject) -> Unit = {}
+    private val onSettingsUpdated: (JSONObject) -> Unit = {},
+    private val onParticipantLeft: (String) -> Unit = {}
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
@@ -79,7 +80,18 @@ class RoomSocketClient(
                     ?.invoke("This account was signed out from another device")
             }
             on("participant:joined") { onParticipantsChanged() }
-            on("participant:left") { onParticipantsChanged() }
+            on("participant:left") { args ->
+                val payload = args.firstOrNull() as? JSONObject
+                val leftUserId = payload?.optString("userId").orEmpty()
+                if (leftUserId.isNotBlank()) onParticipantLeft(leftUserId)
+                onParticipantsChanged()
+            }
+            on("room:participant_left") { args ->
+                val payload = args.firstOrNull() as? JSONObject
+                val leftUserId = payload?.optString("userId").orEmpty()
+                if (leftUserId.isNotBlank()) onParticipantLeft(leftUserId)
+                onParticipantsChanged()
+            }
             on("participant:updated") { onParticipantsChanged() }
             on("participant:mic_toggled") { args ->
                 (args.firstOrNull() as? JSONObject)?.let(onMicToggled)
@@ -91,6 +103,9 @@ class RoomSocketClient(
                 (args.firstOrNull() as? JSONObject)?.let(onVotingUpdated)
             }
             on("room:settings_updated") { args ->
+                (args.firstOrNull() as? JSONObject)?.let(onSettingsUpdated)
+            }
+            on("room:updated") { args ->
                 (args.firstOrNull() as? JSONObject)?.let(onSettingsUpdated)
             }
             on("room:host_changed") { args ->

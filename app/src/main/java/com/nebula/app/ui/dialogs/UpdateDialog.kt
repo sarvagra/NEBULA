@@ -62,18 +62,17 @@ fun UpdateDialog(
 ) {
     if (state is UpdateState.Idle || state is UpdateState.Checking) return
 
-    val isForced = when (state) {
-        is UpdateState.Available -> state.info.forceUpdate
-        is UpdateState.Downloading -> state.info.forceUpdate
-        is UpdateState.ReadyToInstall -> state.info.forceUpdate
-        else -> false
-    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isForced = true
 
     Dialog(
-        onDismissRequest = { if (!isForced && state !is UpdateState.Downloading) onDismiss() },
+        onDismissRequest = {
+            (context as? android.app.Activity)?.finishAffinity()
+            kotlin.system.exitProcess(0)
+        },
         properties = DialogProperties(
-            dismissOnBackPress = !isForced && state !is UpdateState.Downloading,
-            dismissOnClickOutside = !isForced && state !is UpdateState.Downloading
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
         )
     ) {
         val theme = Theme.current
@@ -208,15 +207,16 @@ fun UpdateDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            if (!isForced) {
-                                OutlinedButton(
-                                    onClick = onDismiss,
-                                    modifier = Modifier.weight(1f).height(46.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                                ) {
-                                    Text("Later", color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
-                                }
+                            OutlinedButton(
+                                onClick = {
+                                    (context as? android.app.Activity)?.finishAffinity()
+                                    kotlin.system.exitProcess(0)
+                                },
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
+                            ) {
+                                Text("Exit App", color = Color(0xFFEF4444), fontWeight = FontWeight.SemiBold)
                             }
 
                             Button(
@@ -406,12 +406,15 @@ fun UpdateDialog(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             OutlinedButton(
-                                onClick = onDismiss,
-                                modifier = Modifier.weight(1f).height(46.dp),
+                                onClick = {
+                                    (context as? android.app.Activity)?.finishAffinity()
+                                    kotlin.system.exitProcess(0)
+                                },
+                                modifier = Modifier.fillMaxWidth().height(46.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
                             ) {
-                                Text("Dismiss", color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+                                Text("Exit App", color = Color(0xFFEF4444), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }

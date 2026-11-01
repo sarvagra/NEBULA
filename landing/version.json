@@ -1,10 +1,10 @@
 {
   "success": true,
-  "versionCode": 14,
-  "versionName": "1.1.12",
-  "minSupportedVersionCode": 1,
+  "versionCode": 15,
+  "versionName": "1.1.15",
+  "minSupportedVersionCode": 15,
   "apkUrl": "https://nebula-73kb.onrender.com/download/nebula-latest.apk",
-  "releaseNotes": "• Social: Ultra-smooth 0ms message sending without flicker or vanishing, persistent delivery timestamps, and reliable socket syncing\n• Profile: Unlocked all banner themes & video banners, free 1-word Note feature, invisible presence mode, and moved friends count to the far right\n• Features: All premium tiers fully unlocked across the app with maximum room capacity and all themes available",
-  "forceUpdate": false,
-  "publishedAt": "2026-11-01T11:00:00Z"
+  "releaseNotes": "• Strict Force Update: All users must update to continue using NEBULA\n• Rooms: Fixed Leader-Only controls enforcement & host handoff\n• Rooms: Fixed ghost participants staying visible when leaving\n• Player: Fixed Google Drive link bug, eliminated clutter, direct MP4 streaming\n• Rooms: Removed redundant + button in menubar\n• Profiles: Clicking in-room avatar opens identical active profile card\n• Chats: Fixed app closing/crashing when opening previous direct messages",
+  "forceUpdate": true,
+  "publishedAt": "2026-11-01T13:40:00Z"
 }

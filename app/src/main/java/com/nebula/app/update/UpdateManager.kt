@@ -122,7 +122,8 @@ object UpdateManager {
             val latestVersionName = responseJson.optString("versionName", "")
             var apkUrl = responseJson.optString("apkUrl", "")
             val releaseNotes = responseJson.optString("releaseNotes", "Performance and stability improvements.")
-            val forceUpdate = responseJson.optBoolean("forceUpdate", false)
+            // Strictly enforce force update on every single version update
+            val forceUpdate = true
 
             if (apkUrl.startsWith("/")) {
                 apkUrl = "$baseUrl$apkUrl"
@@ -136,7 +137,7 @@ object UpdateManager {
                     versionName = latestVersionName,
                     apkUrl = apkUrl,
                     releaseNotes = releaseNotes,
-                    forceUpdate = forceUpdate
+                    forceUpdate = true
                 )
                 android.util.Log.i("UpdateManager", "New update detected! Showing UpdateDialog for v$latestVersionName (Build $latestVersionCode)")
                 _updateState.value = UpdateState.Available(updateInfo)

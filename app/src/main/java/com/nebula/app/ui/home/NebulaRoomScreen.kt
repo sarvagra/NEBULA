@@ -257,8 +257,10 @@ fun NebulaRoomScreen(
     var isMicMuted by remember { mutableStateOf(false) }
     var selectedMemberForMenu by remember { mutableStateOf<RoomParticipant?>(null) }
     val seekTo = { positionMs: Long ->
-        if (canControlPlayback) hostSeekCommand = (++seekCommandId) to positionMs
-        onSeekTo(positionMs)
+        if (canControlPlayback) {
+            hostSeekCommand = (++seekCommandId) to positionMs
+            onSeekTo(positionMs)
+        }
     }
 
     // Room participants list - Deduplicate by user ID or displayName to guarantee 1 instance per user
@@ -622,20 +624,7 @@ fun NebulaRoomScreen(
                     }
                 }
 
-                // Add / Switch Media (if host or if everyone can control)
-                if (canControlPlayback) {
-                    IconButton(
-                        onClick = { showMediaSearchSheet = true },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Play something else",
-                            tint = theme.colors.textPrimary,
-                            modifier = Modifier.size(21.dp)
-                        )
-                    }
-                }
+
 
                 // Room Options (3 dots)
                 IconButton(
@@ -881,7 +870,7 @@ fun NebulaRoomScreen(
                     items(participantsList, key = { it.user.id }) { p ->
                         ParticipantAvatarPill(
                             participant = p,
-                            onClick = { selectedMemberForMenu = p }
+                            onClick = { onViewParticipantProfile(p.user) }
                         )
                     }
                 }

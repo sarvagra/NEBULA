@@ -75,6 +75,26 @@ private val DIRECT_MEDIA_EXTENSIONS = listOf(
     ".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".mkv", ".mov", ".ts"
 )
 
+fun extractGoogleDriveFileId(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    val trimmed = url.trim()
+    val fileDRegex = Regex("""(?:drive|docs)\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)""")
+    fileDRegex.find(trimmed)?.groupValues?.get(1)?.let { return it }
+    val idParamRegex = Regex("""(?:drive|docs)\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)""")
+    idParamRegex.find(trimmed)?.groupValues?.get(1)?.let { return it }
+    return null
+}
+
+fun normalizeGoogleDriveDirectStreamUrl(url: String?): String? {
+    val id = extractGoogleDriveFileId(url) ?: return null
+    return "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t"
+}
+
+fun normalizeGoogleDriveEmbedUrl(url: String?): String? {
+    val id = extractGoogleDriveFileId(url) ?: return null
+    return "https://drive.google.com/file/d/$id/preview"
+}
+
 /**
  * True when [url] addresses a media file the player can stream directly.
  *
@@ -85,6 +105,7 @@ fun isDirectMediaUrl(url: String?): Boolean {
     if (url.isNullOrBlank()) return false
     val lower = url.trim().lowercase()
     if (!lower.startsWith("http://") && !lower.startsWith("https://")) return false
+    if (extractGoogleDriveFileId(url) != null) return true
     val withoutQuery = lower.substringBefore('?').substringBefore('#')
     return DIRECT_MEDIA_EXTENSIONS.any { withoutQuery.endsWith(it) } ||
         withoutQuery.contains(".m3u8") ||
@@ -126,6 +147,10 @@ fun resolveRoomPlayback(room: com.nebula.app.domain.model.NebulaRoom): RoomPlayb
     val videoId = media.youtubeVideoId?.takeIf { it.isNotBlank() }
         ?: com.nebula.app.domain.model.SharedMediaItem.extractYouTubeId(media.mediaUrl)
     if (!videoId.isNullOrBlank()) return RoomPlaybackTarget.YouTube(videoId)
+    val driveStream = normalizeGoogleDriveDirectStreamUrl(media.mediaUrl)
+    if (driveStream != null) {
+        return RoomPlaybackTarget.Direct(driveStream)
+    }
     return when {
         isDirectMediaUrl(media.mediaUrl) -> RoomPlaybackTarget.Direct(media.mediaUrl)
         isWebPageMediaUrl(media.mediaUrl) -> RoomPlaybackTarget.Web(media.mediaUrl)
@@ -292,6 +317,7 @@ fun NebulaWebPlayer(
     }
 
     Box(modifier = modifier.background(Color.Black)) {
+        val effectiveWebUrl = normalizeGoogleDriveEmbedUrl(mediaUrl) ?: mediaUrl
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -307,19 +333,31 @@ fun NebulaWebPlayer(
                     webViewClient = object : android.webkit.WebViewClient() {
                         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // Many players only create their <video> after a click. A
-                            // gentle synthetic nudge starts muted autoplay where allowed.
-                            view?.evaluateJavascript(
-                                "try{document.querySelectorAll('video').forEach(function(v){v.muted=false;" +
-                                    "var p=v.play(); if(p&&p.catch)p.catch(function(){});});}catch(e){}",
-                                null
-                            )
+                            // Hide Google Drive headers, toolbars, pop-outs, and clutter
+                            val clutterCss = """
+                                .ndfHFb-c4YZDc-Wrql6b, .ndfHFb-c4YZDc-n1UuX-Bz112c, .drive-viewer-toolstrip,
+                                div[role="toolbar"], .gb_y, .gb_z, .gb_A, .gb_4, .drive-viewer-popout-button,
+                                a[aria-label*="Pop-out"], a[aria-label*="Open in new window"], div[aria-label*="Open in new window"],
+                                .ndfHFb-c4YZDc-to915-L9xDu-c3mTv { display: none !important; opacity: 0 !important; pointer-events: none !important; }
+                                html, body, iframe, .ndfHFb-c4YZDc-bN97Pc { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; background: #000 !important; }
+                            """.trimIndent().replace("\n", " ")
+                            val jsInjection = "(function(){" +
+                                "var s = document.createElement('style');" +
+                                "s.textContent = '$clutterCss';" +
+                                "document.head.appendChild(s);" +
+                                "try{document.querySelectorAll('video').forEach(function(v){v.muted=false; var p=v.play(); if(p&&p.catch)p.catch(function(){});});}catch(e){}" +
+                                "})();"
+                            view?.evaluateJavascript(jsInjection, null)
                         }
                     }
-                    loadUrl(mediaUrl)
+                    loadUrl(effectiveWebUrl)
                 }
             },
-            update = { it.loadUrl(mediaUrl) }
+            update = { view ->
+                if (view.url != effectiveWebUrl) {
+                    view.loadUrl(effectiveWebUrl)
+                }
+            }
         )
         if (mediaEnded) {
             EndedOverlay(isHost = isHost, onRestartVideo = onRestartVideo)
@@ -390,7 +428,8 @@ fun NebulaMediaPlayer(
     }
 
     DisposableEffect(roomId, mediaUrl) {
-        player.setMediaItem(MediaItem.fromUri(mediaUrl))
+        val streamUrl = normalizeGoogleDriveDirectStreamUrl(mediaUrl) ?: mediaUrl
+        player.setMediaItem(MediaItem.fromUri(streamUrl))
         player.prepare()
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
