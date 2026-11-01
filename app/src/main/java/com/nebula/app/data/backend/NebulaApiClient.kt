@@ -289,7 +289,9 @@ object NebulaApiClient {
         maxParticipants: Int? = null,
         mediaTitle: String? = null,
         mediaSubtitle: String? = null,
-        mediaUrl: String? = null
+        mediaUrl: String? = null,
+        leaderOnlyControls: Boolean = true,
+        votingEnabled: Boolean = true
     ): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             put("name", name)
@@ -300,6 +302,8 @@ object NebulaApiClient {
             mediaTitle?.let { put("mediaTitle", it) }
             mediaSubtitle?.let { put("mediaSubtitle", it) }
             mediaUrl?.let { put("mediaUrl", it) }
+            put("leaderOnlyControls", leaderOnlyControls)
+            put("votingEnabled", votingEnabled)
         }
         return request("/rooms", "POST", body)
     }
@@ -358,16 +362,28 @@ object NebulaApiClient {
     suspend fun updateRoomSettings(
         roomId: String,
         name: String? = null,
+        privacy: String? = null,
+        leaderOnlyControls: Boolean? = null,
+        votingEnabled: Boolean? = null,
         maxParticipants: Int? = null,
         tags: List<String>? = null
     ): ApiResponse<JSONObject> {
         val body = JSONObject().apply {
             name?.let { put("name", it) }
+            privacy?.let { put("privacy", it) }
+            leaderOnlyControls?.let { put("leaderOnlyControls", it) }
+            votingEnabled?.let { put("votingEnabled", it) }
             maxParticipants?.let { put("maxParticipants", it) }
             tags?.let { put("tags", JSONArray(it)) }
         }
         return request("/rooms/$roomId/settings", "PUT", body)
     }
+
+    suspend fun voteLike(roomId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/vote-like", "POST", JSONObject())
+
+    suspend fun voteSkip(roomId: String): ApiResponse<JSONObject> =
+        request("/rooms/$roomId/vote-skip", "POST", JSONObject())
 
     suspend fun transferHost(roomId: String, newHostId: String? = null, random: Boolean = false): ApiResponse<JSONObject> {
         val body = JSONObject().apply {

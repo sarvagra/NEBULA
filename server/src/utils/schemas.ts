@@ -63,6 +63,8 @@ export const CreateRoomSchema = z.object({
   mediaUrl: z.string().trim().max(500).optional(),
   isSpoiler: z.boolean().optional().default(false),
   mediaMimeType: z.string().trim().max(80).optional(),
+  leaderOnlyControls: z.boolean().optional().default(true),
+  votingEnabled: z.boolean().optional().default(true),
 });
 
 export const InviteRoomSchema = z.object({

@@ -24,6 +24,7 @@ data class HomeUiState(
     val isOnline: Boolean = true,
     val roomChatInput: String = "",
     val lastRoomReaction: String? = null,
+    val floatingReactions: List<com.nebula.app.domain.model.RoomReactionItem> = emptyList(),
     /** Items the active room has agreed to watch later. */
     val roomQueue: List<com.nebula.app.domain.model.RoomQueueItem> = emptyList(),
 

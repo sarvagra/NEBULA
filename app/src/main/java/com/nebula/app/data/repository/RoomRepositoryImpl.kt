@@ -18,6 +18,9 @@ import com.nebula.app.domain.repository.IRoomRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,6 +51,9 @@ class RoomRepositoryImpl(
 
     private val _lastReaction = MutableStateFlow<String?>(null)
     override val lastReaction: StateFlow<String?> = _lastReaction.asStateFlow()
+
+    private val _floatingReactions = MutableSharedFlow<com.nebula.app.domain.model.RoomReactionItem>(extraBufferCapacity = 64)
+    override val floatingReactions: SharedFlow<com.nebula.app.domain.model.RoomReactionItem> = _floatingReactions.asSharedFlow()
 
     private val _queue = MutableStateFlow<List<RoomQueueItem>>(emptyList())
     override val queue: StateFlow<List<RoomQueueItem>> = _queue.asStateFlow()
@@ -83,7 +89,37 @@ class RoomRepositoryImpl(
                 refreshQueue()
             }
         },
-        onQueueChanged = { realtimeScope.launch { refreshQueue() } }
+        onQueueChanged = { realtimeScope.launch { refreshQueue() } },
+        onReaction = { json ->
+            val reaction = com.nebula.app.domain.model.RoomReactionItem(
+                id = json.optString("id", UUID.randomUUID().toString()),
+                emoji = json.optString("emoji"),
+                senderName = json.optString("displayName", "Member"),
+                timestamp = json.optLong("timestamp", System.currentTimeMillis())
+            )
+            _lastReaction.value = reaction.emoji
+            _floatingReactions.tryEmit(reaction)
+        },
+        onMicToggled = { json ->
+            val userId = json.optString("userId")
+            val isMuted = json.optBoolean("isMuted", true)
+            _activeRoom.value?.let { current ->
+                val updatedParticipants = current.participants.map { p ->
+                    if (p.user.id == userId) p.copy(isMicMuted = isMuted) else p
+                }
+                _activeRoom.value = current.copy(participants = updatedParticipants)
+            }
+        },
+        onVotingUpdated = { json ->
+            val likeCount = json.optInt("likeCount", 0)
+            val skipCount = json.optInt("skipCount", 0)
+            _activeRoom.value?.let { current ->
+                _activeRoom.value = current.copy(likeVoteCount = likeCount, skipVoteCount = skipCount)
+            }
+        },
+        onSettingsUpdated = {
+            realtimeScope.launch { syncActiveRoom() }
+        }
     )
 
     /** Newest room-chat timestamp already shown, used as the reconnect backfill cursor. */
@@ -197,7 +233,9 @@ class RoomRepositoryImpl(
         activityType: RoomActivityType,
         mediaItem: SharedMediaItem?,
         tags: List<String>?,
-        maxParticipants: Int?
+        maxParticipants: Int?,
+        leaderOnlyControls: Boolean,
+        votingEnabled: Boolean
     ): NebulaRoom {
         val privacyStr = when (privacy) {
             RoomPrivacy.INVITE_ONLY -> "invite_only"
@@ -217,7 +255,9 @@ class RoomRepositoryImpl(
             maxParticipants = maxParticipants,
             mediaTitle = mediaItem?.title ?: "Ambient Stream",
             mediaSubtitle = mediaItem?.source ?: "Synchronized Session",
-            mediaUrl = mediaItem?.youtubeVideoId?.let { "https://www.youtube.com/watch?v=$it" } ?: (mediaItem?.mediaUrl ?: "")
+            mediaUrl = mediaItem?.youtubeVideoId?.let { "https://www.youtube.com/watch?v=$it" } ?: (mediaItem?.mediaUrl ?: ""),
+            leaderOnlyControls = leaderOnlyControls,
+            votingEnabled = votingEnabled
         )
 
         val newRoom = if (res is ApiResponse.Success) {
@@ -274,13 +314,26 @@ class RoomRepositoryImpl(
 
     override suspend fun updateRoomSettings(
         name: String?,
+        privacy: RoomPrivacy?,
+        leaderOnlyControls: Boolean?,
+        votingEnabled: Boolean?,
         maxParticipants: Int?,
         tags: List<String>?
     ): NebulaRoom? {
         val current = _activeRoom.value ?: return null
+        val privacyStr = privacy?.let {
+            when (it) {
+                RoomPrivacy.INVITE_ONLY -> "invite_only"
+                RoomPrivacy.FRIENDS -> "friends"
+                else -> "public"
+            }
+        }
         val res = apiClient.updateRoomSettings(
             roomId = current.id,
             name = name,
+            privacy = privacyStr,
+            leaderOnlyControls = leaderOnlyControls,
+            votingEnabled = votingEnabled,
             maxParticipants = maxParticipants,
             tags = tags
         )
@@ -484,6 +537,10 @@ class RoomRepositoryImpl(
     private fun applyRealtimeMediaState(positionMs: Long, isPlaying: Boolean) {
         val current = _activeRoom.value ?: return
         val safePositionMs = positionMs.coerceAtLeast(0L)
+        // If play state is identical and time difference is < 1000ms, do not trigger recomposition!
+        if (current.isPlaying == isPlaying && kotlin.math.abs(current.playbackPositionMs - safePositionMs) < 1000L) {
+            return
+        }
         val updated = current.copy(
             isPlaying = isPlaying,
             mediaEnded = if (isPlaying) false else current.mediaEnded,
@@ -496,6 +553,38 @@ class RoomRepositoryImpl(
         )
         _activeRoom.value = updated
         _rooms.value = _rooms.value.map { if (it.id == updated.id) updated else it }
+    }
+
+    override fun toggleMic(isMuted: Boolean) {
+        socketClient.toggleMic(isMuted)
+    }
+
+    override suspend fun voteLike(): Boolean {
+        val current = _activeRoom.value ?: return false
+        val res = apiClient.voteLike(current.id)
+        if (res is ApiResponse.Success) {
+            val data = res.data.optJSONObject("data")
+            val liked = data?.optBoolean("liked") ?: !current.hasLiked
+            val likeCount = data?.optInt("likeCount", current.likeVoteCount) ?: current.likeVoteCount
+            val updated = current.copy(hasLiked = liked, likeVoteCount = likeCount)
+            _activeRoom.value = updated
+            return true
+        }
+        return false
+    }
+
+    override suspend fun voteSkip(): Boolean {
+        val current = _activeRoom.value ?: return false
+        val res = apiClient.voteSkip(current.id)
+        if (res is ApiResponse.Success) {
+            val data = res.data.optJSONObject("data")
+            val hasVotedSkip = data?.optBoolean("hasVotedSkip") ?: !current.hasVotedSkip
+            val skipCount = data?.optInt("skipCount", current.skipVoteCount) ?: current.skipVoteCount
+            val updated = current.copy(hasVotedSkip = hasVotedSkip, skipVoteCount = skipCount)
+            _activeRoom.value = updated
+            return true
+        }
+        return false
     }
 
     private fun applyRealtimeEndedState(positionMs: Long, ended: Boolean) {
@@ -645,10 +734,12 @@ class RoomRepositoryImpl(
                 roomsJoinedCount = 0,
                 timeInSyncHours = 0.0
             )
+            val isMicMuted = p.optBoolean("isMicMuted", true)
             if (participantList.none { it.user.id == pId }) participantList.add(
                 RoomParticipant(
                     user = u,
-                    isHost = isHost
+                    isHost = isHost,
+                    isMicMuted = isMicMuted
                 )
             )
         }
@@ -684,6 +775,34 @@ class RoomRepositoryImpl(
             }
         }
 
+        val leaderOnlyControls = json.optBoolean("leaderOnlyControls", true)
+        val votingEnabled = json.optBoolean("votingEnabled", true)
+        val skipVoteCount = json.optInt("skipVoteCount", 0)
+        val likeVoteCount = json.optInt("likeVoteCount", 0)
+        val hasLiked = json.optBoolean("hasLiked", false)
+        val hasVotedSkip = json.optBoolean("hasVotedSkip", false)
+        val queueItems = mutableListOf<RoomQueueItem>()
+        json.optJSONArray("queue")?.let { qArr ->
+            for (i in 0 until qArr.length()) {
+                val qObj = qArr.optJSONObject(i) ?: continue
+                queueItems.add(
+                    RoomQueueItem(
+                        id = qObj.optString("id"),
+                        roomId = id,
+                        title = qObj.optString("title", "Queued video"),
+                        subtitle = qObj.optString("subtitle", ""),
+                        mediaUrl = qObj.optString("mediaUrl", ""),
+                        durationSeconds = qObj.optLong("durationSeconds", 0L),
+                        addedByUserId = qObj.optString("addedBy", ""),
+                        addedByName = qObj.optString("addedByName", "Member"),
+                        skipVoteCount = 0,
+                        skipVotesRequired = 1,
+                        skipVoterIds = emptyList()
+                    )
+                )
+            }
+        }
+
         return NebulaRoom(
             id = id,
             inviteCode = inviteCode,
@@ -702,7 +821,14 @@ class RoomRepositoryImpl(
             playbackPositionLabel = String.format("%02d:%02d", positionMs / 60000L, (positionMs / 1000L) % 60L),
             durationLabel = String.format("%02d:%02d", durationSeconds / 60, durationSeconds % 60),
             tags = parsedTags,
-            playMode = PlayMode.POLL_PLAY
+            playMode = PlayMode.ADMIN_PLAY,
+            leaderOnlyControls = leaderOnlyControls,
+            votingEnabled = votingEnabled,
+            skipVoteCount = skipVoteCount,
+            likeVoteCount = likeVoteCount,
+            hasLiked = hasLiked,
+            hasVotedSkip = hasVotedSkip,
+            queue = queueItems
         )
     }
 

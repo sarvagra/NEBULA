@@ -257,7 +257,9 @@ data class SharedMediaItem(
  */
 data class RoomParticipant(
     val user: NebulaUser,
-    val isHost: Boolean = false
+    val isHost: Boolean = false,
+    val isMicMuted: Boolean = true,
+    val isSpeaking: Boolean = false
 )
 
 /**
@@ -323,16 +325,23 @@ data class NebulaRoom(
     val participants: List<RoomParticipant> = emptyList(),
     val isPlaying: Boolean = true,
     val mediaEnded: Boolean = false,
-    val playbackPositionMs: Long = 762000L, // 12:42
-    val playbackPositionLabel: String = "12:42",
-    val durationLabel: String = "2:49:00",
-    val playMode: PlayMode = PlayMode.POLL_PLAY,
+    val playbackPositionMs: Long = 0L,
+    val playbackPositionLabel: String = "00:00",
+    val durationLabel: String = "00:00",
+    val playMode: PlayMode = PlayMode.ADMIN_PLAY,
     val activePoll: RoomPoll? = null,
     val serverTimestamp: Long = System.currentTimeMillis(),
     val recentMessages: List<RoomChatMessage> = emptyList(),
     val tags: List<String> = emptyList(),
     val maxParticipants: Int = 24,
-    val description: String = ""
+    val description: String = "",
+    val leaderOnlyControls: Boolean = true,
+    val votingEnabled: Boolean = true,
+    val skipVoteCount: Int = 0,
+    val likeVoteCount: Int = 0,
+    val hasLiked: Boolean = false,
+    val hasVotedSkip: Boolean = false,
+    val queue: List<RoomQueueItem> = emptyList()
 ) {
     companion object {
         val SampleRooms = listOf(

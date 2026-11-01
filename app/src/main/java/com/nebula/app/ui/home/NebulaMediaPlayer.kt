@@ -56,10 +56,10 @@ import java.util.concurrent.atomic.AtomicReference
  */
 
 /** Drift a guest tolerates before correcting. Matches the YouTube surface's budget. */
-const val GUEST_DRIFT_TOLERANCE_MS = 700L
+const val GUEST_DRIFT_TOLERANCE_MS = 1500L
 
 /** How often a host publishes its playhead while playing. */
-private const val HOST_SAMPLE_INTERVAL_MS = 500L
+private const val HOST_SAMPLE_INTERVAL_MS = 1500L
 
 /**
  * Whether a guest should seek to the shared position.

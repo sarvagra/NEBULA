@@ -8,6 +8,7 @@ import { RoomModel } from '../models/Room';
 import { MessageModel } from '../models/Message';
 import { PollModel } from '../models/Poll';
 import { RefreshTokenModel } from '../models/RefreshToken';
+import { RoomQueueItemModel } from '../models/RoomQueueItem';
 import { isValidObjectId } from '../middlewares/validation';
 
 interface AuthenticatedSocketUser {
@@ -219,6 +220,15 @@ export function notifyRoomDissolved(roomId: string): void {
   liveSampleClockByRoom.delete(roomId);
   roomIo?.to(`room:${roomId}`).emit('room:removed', { roomId, reason: 'dissolved' });
 }
+
+export function notifyRoomSettingsUpdated(roomId: string, data: any): void {
+  roomIo?.to(`room:${roomId}`).emit('room:settings_updated', data);
+}
+
+export function notifyRoomVotingUpdated(roomId: string, voting: any): void {
+  roomIo?.to(`room:${roomId}`).emit('room:voting_updated', voting);
+}
+
 
 export function initSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
@@ -537,8 +547,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
-          socket.emit('error', { message: 'Forbidden: Only the room host can switch media' });
+        const canControl = room.hostId === user.id || room.leaderOnlyControls === false;
+        if (!canControl || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
+          socket.emit('error', { message: 'Forbidden: Only the room host can switch media in leader mode' });
           return;
         }
         if (isStaleCommand(data.roomId, data.version)) {
@@ -588,6 +599,30 @@ export function initSocketServer(httpServer: HttpServer): Server {
         }
         const room = await RoomModel.findById(roomId);
         if (!room || room.hostId !== user.id) return;
+
+        // Auto-advance if there is a next queued item
+        const nextQueueItem = await RoomQueueItemModel.findOne({ roomId }).sort({ createdAt: 1 });
+        if (nextQueueItem) {
+          room.mediaState.title = nextQueueItem.title;
+          room.mediaState.subtitle = nextQueueItem.subtitle;
+          room.mediaState.mediaUrl = nextQueueItem.mediaUrl;
+          room.mediaState.durationSeconds = nextQueueItem.durationSeconds;
+          room.mediaState.playbackPosition = 0;
+          room.mediaState.isPlaying = true;
+          await room.save();
+          await RoomQueueItemModel.deleteOne({ _id: nextQueueItem._id });
+          notifyRoomMediaSwitch(roomId, {
+            title: nextQueueItem.title,
+            subtitle: nextQueueItem.subtitle,
+            mediaUrl: nextQueueItem.mediaUrl,
+            durationSeconds: nextQueueItem.durationSeconds,
+            playbackPosition: 0,
+            isPlaying: true,
+          });
+          notifyRoomQueueChanged(roomId);
+          return;
+        }
+
         const positionMs = Math.max(0, Number(data.positionMs) || 0);
         const timestamp = Date.now();
         const version = bumpPlaybackVersion(roomId);
@@ -633,9 +668,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        // SERVER AUTHORIZATION CHECK
-        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
-          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
+        const canControlPlay = room.hostId === user.id || room.leaderOnlyControls === false;
+        if (!canControlPlay || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
+          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback in leader mode' });
           return;
         }
         if (isStaleCommand(data.roomId, data.version)) {
@@ -672,8 +707,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
-          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
+        const canControlPause = room.hostId === user.id || room.leaderOnlyControls === false;
+        if (!canControlPause || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
+          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback in leader mode' });
           return;
         }
         if (isStaleCommand(data.roomId, data.version)) {
@@ -710,8 +746,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const room = await RoomModel.findById(data.roomId);
         if (!room) return;
 
-        if (room.hostId !== user.id || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
-          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback' });
+        const canControlSeek = room.hostId === user.id || room.leaderOnlyControls === false;
+        if (!canControlSeek || !joinedRooms.has(data.roomId) || !room.participants.some((participant) => participant.userId === user.id)) {
+          socket.emit('error', { message: 'Forbidden: Only the room host can control synchronized playback in leader mode' });
           return;
         }
         if (isStaleCommand(data.roomId, data.version)) {
@@ -849,7 +886,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       }
     });
 
-    // 4. CHAT REACTIONS
+    // 4. CHAT REACTIONS & FLOATING ROOM REACTIONS
     socket.on('chat:reaction', async (data: { roomId: string; emoji: string; messageId?: string }) => {
       try {
         if (!data || !data.roomId || !data.emoji || !isValidObjectId(data.roomId)) return;
@@ -863,6 +900,42 @@ export function initSocketServer(httpServer: HttpServer): Server {
           userId: user.id,
           displayName: user.displayName,
           messageId: data.messageId,
+        });
+      } catch {
+        // Ignored
+      }
+    });
+
+    socket.on('room:reaction', async (data: { roomId: string; emoji: string }) => {
+      try {
+        if (!data || !data.roomId || !data.emoji || !isValidObjectId(data.roomId)) return;
+        const room = await RoomModel.findById(data.roomId);
+        if (!room || !room.participants.some((p) => p.userId === user.id)) return;
+        const safeEmoji = data.emoji.slice(0, 8);
+        io.to(`room:${data.roomId}`).emit('room:reaction', {
+          id: new mongoose.Types.ObjectId().toString(),
+          emoji: safeEmoji,
+          userId: user.id,
+          displayName: user.displayName,
+          timestamp: Date.now(),
+        });
+      } catch {
+        // Ignored
+      }
+    });
+
+    socket.on('room:mic_status', async (data: { roomId: string; isMuted: boolean }) => {
+      try {
+        if (!data || !data.roomId || !isValidObjectId(data.roomId)) return;
+        const isMuted = data.isMuted !== false;
+        await RoomModel.updateOne(
+          { _id: data.roomId, 'participants.userId': user.id },
+          { $set: { 'participants.$.isMicMuted': isMuted } }
+        );
+        io.to(`room:${data.roomId}`).emit('participant:mic_toggled', {
+          roomId: data.roomId,
+          userId: user.id,
+          isMuted,
         });
       } catch {
         // Ignored

@@ -341,6 +341,12 @@ class HomeViewModel(
                 _uiState.value = _uiState.value.copy(roomQueue = items)
             }
         }
+        viewModelScope.launch {
+            roomRepository.floatingReactions.collect { reaction ->
+                val current = _uiState.value.floatingReactions.takeLast(19) + reaction
+                _uiState.value = _uiState.value.copy(floatingReactions = current)
+            }
+        }
 
         // Connectivity is part of the UI state so the chat can say it is offline instead
         // of leaving a spinner running, and so the moment it comes back the unsent
@@ -666,7 +672,9 @@ class HomeViewModel(
         privacy: RoomPrivacy,
         tags: List<String>,
         mediaItem: SharedMediaItem?,
-        maxParticipants: Int = 20
+        maxParticipants: Int = 24,
+        leaderOnlyControls: Boolean = true,
+        votingEnabled: Boolean = true
     ) {
         viewModelScope.launch {
             val quote = roomCreationQuotes.random()
@@ -682,7 +690,9 @@ class HomeViewModel(
                     activityType = RoomActivityType.WATCH,
                     mediaItem = mediaItem,
                     tags = tags,
-                    maxParticipants = maxParticipants
+                    maxParticipants = maxParticipants,
+                    leaderOnlyControls = leaderOnlyControls,
+                    votingEnabled = votingEnabled
                 )
                 val finalRoom = created
 
@@ -719,12 +729,18 @@ class HomeViewModel(
 
     fun onUpdateRoomSettings(
         name: String?,
-        maxParticipants: Int?,
-        tags: List<String>?
+        privacy: RoomPrivacy? = null,
+        leaderOnlyControls: Boolean? = null,
+        votingEnabled: Boolean? = null,
+        maxParticipants: Int? = null,
+        tags: List<String>? = null
     ) {
         viewModelScope.launch {
             val updated = roomRepository.updateRoomSettings(
                 name = name,
+                privacy = privacy,
+                leaderOnlyControls = leaderOnlyControls,
+                votingEnabled = votingEnabled,
                 maxParticipants = maxParticipants,
                 tags = tags
             )
@@ -735,6 +751,22 @@ class HomeViewModel(
                 showToast("Room settings could not be saved. Check your connection and permissions.")
             }
         }
+    }
+
+    fun onVoteLike() {
+        viewModelScope.launch {
+            roomRepository.voteLike()
+        }
+    }
+
+    fun onVoteSkip() {
+        viewModelScope.launch {
+            roomRepository.voteSkip()
+        }
+    }
+
+    fun onToggleMic(isMuted: Boolean) {
+        roomRepository.toggleMic(isMuted)
     }
 
     fun onTransferHost(newHostId: String? = null, random: Boolean = false) {

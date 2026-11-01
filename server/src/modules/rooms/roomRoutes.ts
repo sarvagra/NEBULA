@@ -16,6 +16,8 @@ import {
   voteSkipQueueItem,
   advanceRoomQueue,
   removeRoomQueueItem,
+  voteLikeCurrentMedia,
+  voteSkipCurrentMedia,
 } from './roomController';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/authMiddleware';
 import { validateBody, validateObjectIdParam } from '../../middlewares/validation';
@@ -32,6 +34,9 @@ roomRouter.post('/', authMiddleware, roomCreateRateLimiter, validateBody(CreateR
 roomRouter.post('/:id/join', validateObjectIdParam('id'), authMiddleware, roomJoinRateLimiter, joinRoom);
 roomRouter.post('/:id/leave', validateObjectIdParam('id'), authMiddleware, leaveRoom);
 roomRouter.put('/:id/settings', validateObjectIdParam('id'), authMiddleware, updateRoomSettings);
+roomRouter.patch('/:id/settings', validateObjectIdParam('id'), authMiddleware, updateRoomSettings);
+roomRouter.post('/:id/vote-like', validateObjectIdParam('id'), authMiddleware, voteLikeCurrentMedia);
+roomRouter.post('/:id/vote-skip', validateObjectIdParam('id'), authMiddleware, voteSkipCurrentMedia);
 roomRouter.post('/:id/transfer-host', validateObjectIdParam('id'), authMiddleware, transferHost);
 roomRouter.post('/:id/invite', validateObjectIdParam('id'), authMiddleware, validateBody(InviteRoomSchema), inviteRoomParticipant);
 // Room queue: any member may add and vote, only the host may force the next item.

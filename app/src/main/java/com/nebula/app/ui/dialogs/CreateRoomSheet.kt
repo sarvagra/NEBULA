@@ -183,7 +183,7 @@ fun isSupportedDirectStream(url: String): Boolean {
 @Composable
 fun CreateRoomSheet(
     isVisible: Boolean,
-    onCreateRoom: (name: String, privacy: RoomPrivacy, tags: List<String>, maxParticipants: Int, media: SharedMediaItem?) -> Unit,
+    onCreateRoom: (name: String, privacy: RoomPrivacy, tags: List<String>, maxParticipants: Int, media: SharedMediaItem?, leaderOnlyControls: Boolean, votingEnabled: Boolean) -> Unit,
     onDismiss: () -> Unit,
     entitlementParticipantCap: Int? = null,
     viewerTier: NebulaSubscriptionTier? = null,
@@ -202,6 +202,8 @@ fun CreateRoomSheet(
     var sourceUrl by remember { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var isVerifyingLink by remember { mutableStateOf(false) }
+    var leaderOnlyControls by remember { mutableStateOf(true) }
+    var votingEnabled by remember { mutableStateOf(true) }
 
     var selectedTags by remember { mutableStateOf<List<String>>(emptyList()) }
     var isYouTubeBrowserOpen by remember { mutableStateOf(false) }
@@ -631,6 +633,40 @@ fun CreateRoomSheet(
                 }
             }
 
+            // 5. ROOM CONTROLS (Rave-style Leader vs Everyone)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "ROOM CONTROLS", style = sectionHeaderStyle)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(theme.colors.surface)
+                        .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (leaderOnlyControls) "Leader Only Controls" else "Everyone Can Control",
+                            style = theme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary)
+                        )
+                        Text(
+                            text = if (leaderOnlyControls) "Only host can play, pause, seek, and queue" else "Any participant can control playback and queue",
+                            style = hintStyle
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = leaderOnlyControls,
+                        onCheckedChange = { leaderOnlyControls = it },
+                        colors = androidx.compose.material3.SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = theme.colors.primaryAccent
+                        )
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(4.dp))
 
             // 6. CREATE ROOM CTA BUTTON
@@ -660,7 +696,9 @@ fun CreateRoomSheet(
                         selectedPrivacy,
                         safeTags,
                         safeMaxParticipants,
-                        selectedMedia
+                        selectedMedia,
+                        leaderOnlyControls,
+                        votingEnabled
                     )
                 },
                 colors = ButtonDefaults.buttonColors(

@@ -14,6 +14,7 @@ interface IRoomRepository {
 
     /** Items the room has agreed to watch later, oldest first. */
     val queue: StateFlow<List<RoomQueueItem>>
+    val floatingReactions: kotlinx.coroutines.flow.SharedFlow<com.nebula.app.domain.model.RoomReactionItem>
 
     suspend fun createRoom(
         name: String,
@@ -21,13 +22,18 @@ interface IRoomRepository {
         activityType: RoomActivityType = RoomActivityType.WATCH,
         mediaItem: SharedMediaItem? = null,
         tags: List<String>? = null,
-        maxParticipants: Int? = null
+        maxParticipants: Int? = null,
+        leaderOnlyControls: Boolean = true,
+        votingEnabled: Boolean = true
     ): NebulaRoom
 
     suspend fun joinRoom(roomId: String): NebulaRoom?
     suspend fun leaveRoom(newHostId: String? = null)
     suspend fun updateRoomSettings(
         name: String? = null,
+        privacy: RoomPrivacy? = null,
+        leaderOnlyControls: Boolean? = null,
+        votingEnabled: Boolean? = null,
         maxParticipants: Int? = null,
         tags: List<String>? = null
     ): NebulaRoom?
@@ -40,6 +46,9 @@ interface IRoomRepository {
     fun restartVideo()
     suspend fun sendRoomMessage(content: String)
     suspend fun sendReaction(emoji: String)
+    fun toggleMic(isMuted: Boolean)
+    suspend fun voteLike(): Boolean
+    suspend fun voteSkip(): Boolean
     suspend fun votePoll(optionId: String): Boolean
     suspend fun switchPlayMode(playMode: com.nebula.app.domain.model.PlayMode)
     suspend fun updateMedia(title: String, mediaUrl: String, durationSeconds: Long = 0): NebulaRoom?

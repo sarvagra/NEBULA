@@ -27,7 +27,11 @@ class RoomSocketClient(
      * Fired when the room queue changes. The payload only says *that* it changed, so
      * the repository reloads instead of patching a list it cannot see the whole of.
      */
-    private val onQueueChanged: () -> Unit = {}
+    private val onQueueChanged: () -> Unit = {},
+    private val onReaction: (JSONObject) -> Unit = {},
+    private val onMicToggled: (JSONObject) -> Unit = {},
+    private val onVotingUpdated: (JSONObject) -> Unit = {},
+    private val onSettingsUpdated: (JSONObject) -> Unit = {}
 ) {
     private var socket: Socket? = null
     private var roomId: String? = null
@@ -77,6 +81,18 @@ class RoomSocketClient(
             on("participant:joined") { onParticipantsChanged() }
             on("participant:left") { onParticipantsChanged() }
             on("participant:updated") { onParticipantsChanged() }
+            on("participant:mic_toggled") { args ->
+                (args.firstOrNull() as? JSONObject)?.let(onMicToggled)
+            }
+            on("room:reaction") { args ->
+                (args.firstOrNull() as? JSONObject)?.let(onReaction)
+            }
+            on("room:voting_updated") { args ->
+                (args.firstOrNull() as? JSONObject)?.let(onVotingUpdated)
+            }
+            on("room:settings_updated") { args ->
+                (args.firstOrNull() as? JSONObject)?.let(onSettingsUpdated)
+            }
             on("room:host_changed") { args ->
                 val payload = args.firstOrNull() as? JSONObject
                 this@RoomSocketClient.hostId = payload?.optString("newHostId")?.takeIf { it.isNotBlank() } ?: this@RoomSocketClient.hostId
@@ -263,7 +279,13 @@ class RoomSocketClient(
     fun sendReaction(emoji: String) {
         val currentRoom = roomId ?: return
         if (emoji.isBlank()) return
+        socket?.emit("room:reaction", JSONObject().put("roomId", currentRoom).put("emoji", emoji))
         socket?.emit("chat:reaction", JSONObject().put("roomId", currentRoom).put("emoji", emoji))
+    }
+
+    fun toggleMic(isMuted: Boolean) {
+        val currentRoom = roomId ?: return
+        socket?.emit("room:mic_status", JSONObject().put("roomId", currentRoom).put("isMuted", isMuted))
     }
 
     fun isConnected(): Boolean = socket?.connected() == true
@@ -344,7 +366,7 @@ class RoomSocketClient(
                     .put("timestamp", now)
                     .put("version", playbackVersion)
             )
-        }, 0L, 250L, TimeUnit.MILLISECONDS)
+        }, 0L, 2000L, TimeUnit.MILLISECONDS)
     }
 
     private fun isHost(): Boolean {

@@ -293,6 +293,7 @@ fun HomeScreen(
                 friendRequests = uiState.friendRequests,
                 suggestedPeople = uiState.suggestedPeople,
                 queue = uiState.roomQueue,
+                floatingReactions = uiState.floatingReactions,
                 actions = NebulaRoomActions(
                     onAcceptFriendRequest = { viewModel.onAcceptFriendRequest(it) },
                     onDeclineFriendRequest = { viewModel.onDeclineFriendRequest(it) },
@@ -306,8 +307,8 @@ fun HomeScreen(
                     onHostVideoEnded = { viewModel.onHostVideoEnded(it) },
                     onRestartVideo = { viewModel.onRestartRoomVideo() },
                     onViewParticipantProfile = { viewModel.onOpenFriendProfile(it) },
-                    onUpdateRoomSettings = { name, max, tags ->
-                        viewModel.onUpdateRoomSettings(name, max, tags)
+                    onUpdateRoomSettings = { name, privacy, leaderOnlyControls, votingEnabled, max, tags ->
+                        viewModel.onUpdateRoomSettings(name, privacy, leaderOnlyControls, votingEnabled, max, tags)
                     },
                     onTransferHost = { newHostId, random ->
                         viewModel.onTransferHost(newHostId, random)
@@ -323,7 +324,10 @@ fun HomeScreen(
                     onAdvanceQueue = { viewModel.onAdvanceRoomQueue() },
                     onRemoveQueueItem = { viewModel.onRemoveQueueItem(it) },
                     onInviteFriend = { viewModel.onInviteFriendToActiveRoom(it) },
-                    onShareRoomInChat = { viewModel.onShareRoomIntoDm(it) }
+                    onShareRoomInChat = { viewModel.onShareRoomIntoDm(it) },
+                    onVoteLike = { viewModel.onVoteLike() },
+                    onVoteSkip = { viewModel.onVoteSkip() },
+                    onToggleMic = { isMuted -> viewModel.onToggleMic(isMuted) }
                 )
             )
         } else if (uiState.activeSocialConversation != null) {
@@ -746,8 +750,8 @@ fun HomeScreen(
             is ActiveModalSheet.CreateRoom -> {
                 CreateRoomSheet(
                     isVisible = true,
-                    onCreateRoom = { name, privacy, tags, maxParticipants, media ->
-                        viewModel.onCreateRoom(name, privacy, tags, media, maxParticipants)
+                    onCreateRoom = { name, privacy, tags, maxParticipants, media, leaderOnlyControls, votingEnabled ->
+                        viewModel.onCreateRoom(name, privacy, tags, media, maxParticipants, leaderOnlyControls, votingEnabled)
                     },
                     // Let the sheet surface a rejected link inline before create.
                     verifySourceLink = { url -> com.nebula.app.data.backend.NebulaApiClient.verifyMediaLink(url) },

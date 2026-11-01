@@ -8,7 +8,7 @@ import { AnalyticsEventModel } from '../../models/AnalyticsEvent';
 import { UserModel } from '../../models/User';
 import { FriendshipModel } from '../../models/Friendship';
 import { NotificationModel } from '../../models/Notification';
-import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomQueueChanged } from '../../realtime/socketServer';
+import { notifyRoomDissolved, notifyRoomHostChanged, notifyRoomMediaSwitch, notifyRoomParticipantKicked, notifyRoomParticipantLeft, notifyRoomQueueChanged, notifyRoomSettingsUpdated, notifyRoomVotingUpdated } from '../../realtime/socketServer';
 import { entitlementsForTier } from '../../utils/entitlements';
 import { tryVerifyPlayableLink } from '../../services/mediaLinkService';
 import { RoomQueueItemModel } from '../../models/RoomQueueItem';
@@ -385,6 +385,8 @@ export async function createRoom(req: Request, res: Response): Promise<void> {
         },
       ],
       maxParticipants,
+      leaderOnlyControls: typeof req.body.leaderOnlyControls === 'boolean' ? req.body.leaderOnlyControls : true,
+      votingEnabled: typeof req.body.votingEnabled === 'boolean' ? req.body.votingEnabled : true,
       inviteCode: generateInviteCode(),
       });
     } catch (error) {
@@ -693,10 +695,19 @@ export async function updateRoomSettings(req: Request, res: Response): Promise<v
       return;
     }
 
-    const { name, maxParticipants, tags } = req.body;
+    const { name, privacy, leaderOnlyControls, votingEnabled, maxParticipants, tags } = req.body;
 
     if (name && typeof name === 'string' && name.trim().length >= 2) {
       room.name = name.trim();
+    }
+    if (privacy && ['public', 'friends', 'invite_only'].includes(privacy)) {
+      room.privacy = privacy;
+    }
+    if (typeof leaderOnlyControls === 'boolean') {
+      room.leaderOnlyControls = leaderOnlyControls;
+    }
+    if (typeof votingEnabled === 'boolean') {
+      room.votingEnabled = votingEnabled;
     }
     if (typeof maxParticipants === 'number' && maxParticipants > 0) {
       room.maxParticipants = maxParticipants;
@@ -706,10 +717,91 @@ export async function updateRoomSettings(req: Request, res: Response): Promise<v
     }
 
     await room.save();
+    const updatedDTO = toPublicRoomDTO(room, req.user.id);
     notifyRoomHostChanged(id, room.hostId);
-    res.json({ success: true, data: toPublicRoomDTO(room, req.user.id) });
+    notifyRoomSettingsUpdated(id, updatedDTO);
+    res.json({ success: true, data: updatedDTO });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Failed to update room settings' });
+  }
+}
+
+export async function voteLikeCurrentMedia(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const userId = req.user!.id;
+    const hasLiked = (room.likeVotes || []).includes(userId);
+    room.likeVotes = hasLiked
+      ? room.likeVotes.filter((id) => id !== userId)
+      : [...(room.likeVotes || []), userId];
+    await room.save();
+    notifyRoomVotingUpdated(room._id.toString(), {
+      likeCount: room.likeVotes.length,
+      skipCount: (room.skipVotes || []).length,
+      skipVotesRequired: skipVotesRequired(room.participants.length),
+    });
+    res.json({
+      success: true,
+      data: {
+        liked: !hasLiked,
+        likeCount: room.likeVotes.length,
+        skipCount: (room.skipVotes || []).length,
+      },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to record like vote' });
+  }
+}
+
+export async function voteSkipCurrentMedia(req: Request, res: Response): Promise<void> {
+  try {
+    const room = await roomForMember(req, res);
+    if (!room) return;
+    const userId = req.user!.id;
+    const hasVotedSkip = (room.skipVotes || []).includes(userId);
+    room.skipVotes = hasVotedSkip
+      ? room.skipVotes.filter((id) => id !== userId)
+      : [...(room.skipVotes || []), userId];
+    await room.save();
+
+    const required = skipVotesRequired(room.participants.length);
+    const skipped = !hasVotedSkip && room.skipVotes.length >= required;
+    if (skipped) {
+      room.skipVotes = [];
+      const next = await RoomQueueItemModel.findOne({ roomId: room._id.toString() }).sort({ createdAt: 1 });
+      if (next) {
+        await playQueueItem(room, next);
+      } else {
+        room.mediaState.isPlaying = false;
+        await room.save();
+        notifyRoomMediaSwitch(room._id.toString(), {
+          title: room.mediaState.title,
+          subtitle: room.mediaState.subtitle,
+          mediaUrl: room.mediaState.mediaUrl,
+          durationSeconds: room.mediaState.durationSeconds,
+          playbackPosition: 0,
+          isPlaying: false,
+        });
+      }
+    }
+    notifyRoomVotingUpdated(room._id.toString(), {
+      likeCount: (room.likeVotes || []).length,
+      skipCount: room.skipVotes.length,
+      skipVotesRequired: required,
+      skipped,
+    });
+    res.json({
+      success: true,
+      data: {
+        hasVotedSkip: !hasVotedSkip,
+        skipped,
+        skipCount: room.skipVotes.length,
+        skipVotesRequired: required,
+      },
+    });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to record skip vote' });
   }
 }
 

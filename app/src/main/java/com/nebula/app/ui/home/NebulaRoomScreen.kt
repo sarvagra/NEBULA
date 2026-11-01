@@ -105,7 +105,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -114,10 +116,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.SkipNext
 import com.nebula.app.domain.model.NebulaRoom
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.domain.model.RoomChatMessage
 import com.nebula.app.domain.model.RoomParticipant
+import com.nebula.app.domain.model.RoomPrivacy
+import com.nebula.app.domain.model.RoomReactionItem
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.PABottomSheet
 import com.nebula.app.ui.dialogs.AttachmentPickerSheet
@@ -128,13 +141,12 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * NebulaRoomScreen:
  * The central social shared space in NEBULA.
- * - Top Bar: Back, Room Title, Member List Icon, Room Settings Icon (Admin only), Leave Room Button
- * - YouTube Video Area: Single native seekbar/controls without duplicate overlays
- * - Participants row (Avatars with live watching status)
- * - Realtime Room Chat feed
- * - Room Composer with Paperclip attachment picker
- * - Room Members Sheet with 3-dots admin mute/unmute and member public profile click
- * - Room Options Sheet with invite, share, host settings and leave
+ * - Top Bar: Back, Room Title + Privacy Chip, Mic Mute Toggle, Share/Invite, Playlist, Media Search, Room Options
+ * - Media Video Area: Synchronized playback with drift-tolerant clock
+ * - Rave Audience Voting: Like and Skip voting pills + Quick Emoji reactions
+ * - Live Member Avatar Strip: Speaking halos, 👑 Leader badge, 🎙️❌ Mute badge, Context Action Dialog
+ * - Live Chat Feed with Floating Reaction Bursts
+ * - Rich attachment sharing and Room Settings sheet
  */
 data class NebulaRoomActions(
     val onAcceptFriendRequest: (String) -> Unit = {},
@@ -149,7 +161,7 @@ data class NebulaRoomActions(
     val onHostVideoEnded: (Long) -> Unit = {},
     val onRestartVideo: () -> Unit = {},
     val onViewParticipantProfile: (NebulaUser) -> Unit = {},
-    val onUpdateRoomSettings: (name: String?, max: Int?, tags: List<String>?) -> Unit = { _, _, _ -> },
+    val onUpdateRoomSettings: (name: String?, privacy: RoomPrivacy?, leaderOnlyControls: Boolean?, votingEnabled: Boolean?, max: Int?, tags: List<String>?) -> Unit = { _, _, _, _, _, _ -> },
     val onTransferHost: (newHostId: String?, random: Boolean) -> Unit = { _, _ -> },
     val onShareRoomInChat: (NebulaUser) -> Unit = {},
     val onTogglePlayPause: () -> Unit = {},
@@ -162,7 +174,10 @@ data class NebulaRoomActions(
     val onAddToQueue: (title: String, mediaUrl: String) -> Unit = { _, _ -> },
     val onVoteSkipQueueItem: (String) -> Unit = {},
     val onAdvanceQueue: () -> Unit = {},
-    val onRemoveQueueItem: (String) -> Unit = {}
+    val onRemoveQueueItem: (String) -> Unit = {},
+    val onVoteLike: () -> Unit = {},
+    val onVoteSkip: () -> Unit = {},
+    val onToggleMic: (Boolean) -> Unit = {}
 )
 
 data class PendingRoomShareMedia(
@@ -181,6 +196,7 @@ fun NebulaRoomScreen(
     friendRequests: List<com.nebula.app.domain.model.NebulaFriendRequest> = emptyList(),
     suggestedPeople: List<NebulaUser> = emptyList(),
     queue: List<com.nebula.app.domain.model.RoomQueueItem> = emptyList(),
+    floatingReactions: List<RoomReactionItem> = emptyList(),
     actions: NebulaRoomActions = NebulaRoomActions(),
     modifier: Modifier = Modifier
 ) {
@@ -210,6 +226,9 @@ fun NebulaRoomScreen(
     val onVoteSkipQueueItem = actions.onVoteSkipQueueItem
     val onAdvanceQueue = actions.onAdvanceQueue
     val onRemoveQueueItem = actions.onRemoveQueueItem
+    val onVoteLike = actions.onVoteLike
+    val onVoteSkip = actions.onVoteSkip
+    val onToggleMic = actions.onToggleMic
     val roomQueue = queue
     val theme = Theme.current
     val context = LocalContext.current
@@ -234,8 +253,11 @@ fun NebulaRoomScreen(
         room.hostId == currentUserId ||
             room.participants.any { it.user.id == currentUserId && it.isHost }
         )
+    val canControlPlayback = isCurrentUserAdmin || !room.leaderOnlyControls
+    var isMicMuted by remember { mutableStateOf(false) }
+    var selectedMemberForMenu by remember { mutableStateOf<RoomParticipant?>(null) }
     val seekTo = { positionMs: Long ->
-        if (isCurrentUserAdmin) hostSeekCommand = (++seekCommandId) to positionMs
+        if (canControlPlayback) hostSeekCommand = (++seekCommandId) to positionMs
         onSeekTo(positionMs)
     }
 
@@ -443,9 +465,7 @@ fun NebulaRoomScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // 1. TOP BAR — room identity on the left, playlist and room options on the right.
-        // Participants, share, settings and leave live inside the options sheet, so the
-        // header stays two controls wide instead of six.
+        // 1. TOP BAR — room identity + privacy chip, mic mute toggle, share/invite link, playlist, and options.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -468,17 +488,39 @@ fun NebulaRoomScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 }
-                Column {
-                    Text(
-                        text = roomName,
-                        style = theme.typography.bodyLarge.copy(
-                            color = theme.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.5.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Column(modifier = Modifier.padding(start = 2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = roomName,
+                            style = theme.typography.bodyLarge.copy(
+                                color = theme.colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(theme.colors.surfaceElevated)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = room.privacy.label,
+                                style = theme.typography.caption.copy(
+                                    color = theme.colors.textSecondary,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                        }
+                    }
                     Text(
                         text = "${participantsList.size} watching • $hostDisplayName",
                         style = theme.typography.caption.copy(
@@ -495,7 +537,58 @@ fun NebulaRoomScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                // Playlist: everything queued for this room, and the way in to add to it.
+                // Mic Mute / Unmute Button
+                IconButton(
+                    onClick = {
+                        isMicMuted = !isMicMuted
+                        onToggleMic(isMicMuted)
+                    },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(if (!isMicMuted) Color(0xFF22C55E).copy(alpha = 0.2f) else theme.colors.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (!isMicMuted) Icons.Default.Mic else Icons.Default.MicOff,
+                            contentDescription = if (!isMicMuted) "Mute Microphone" else "Unmute Microphone",
+                            tint = if (!isMicMuted) Color(0xFF22C55E) else theme.colors.textSecondary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+
+                // Share / Universal Invite Link Button
+                IconButton(
+                    onClick = {
+                        val code = room.inviteCode?.takeIf { it.isNotBlank() } ?: room.id
+                        val shareUrl = "https://nebula-73kb.onrender.com/room/$code"
+                        try {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Nebula Watch Party", shareUrl)
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "Invite link copied to clipboard!", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) { /* ignore */ }
+                        val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TEXT, "Join my watch party on Nebula! 🍿✨\n$shareUrl")
+                        }
+                        context.startActivity(android.content.Intent.createChooser(share, "Share Watch Party"))
+                    },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share Room Link",
+                        tint = theme.colors.textPrimary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                // Playlist
                 IconButton(
                     onClick = { showRoomQueue = true },
                     modifier = Modifier.size(34.dp)
@@ -529,7 +622,8 @@ fun NebulaRoomScreen(
                     }
                 }
 
-                if (isCurrentUserAdmin) {
+                // Add / Switch Media (if host or if everyone can control)
+                if (canControlPlayback) {
                     IconButton(
                         onClick = { showMediaSearchSheet = true },
                         modifier = Modifier.size(34.dp)
@@ -543,6 +637,7 @@ fun NebulaRoomScreen(
                     }
                 }
 
+                // Room Options (3 dots)
                 IconButton(
                     onClick = {
                         showMembersSheet = true
@@ -571,7 +666,7 @@ fun NebulaRoomScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clickable(enabled = isCurrentUserAdmin) { showMediaSearchSheet = true },
+                        .clickable(enabled = canControlPlayback) { showMediaSearchSheet = true },
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -585,7 +680,7 @@ fun NebulaRoomScreen(
                             modifier = Modifier.size(30.dp)
                         )
                         Text(
-                            text = if (isCurrentUserAdmin) "Tap to put something on" else "The host is picking something",
+                            text = if (canControlPlayback) "Tap to put something on" else "The host is picking something",
                             style = theme.typography.caption.copy(color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                         )
                     }
@@ -593,7 +688,7 @@ fun NebulaRoomScreen(
             } else {
                 RoomPlayerSurface(
                     room = room,
-                    isHost = isCurrentUserAdmin,
+                    isHost = canControlPlayback,
                     locallyPaused = guestLocallyPaused,
                     hostSeekCommand = hostSeekCommand,
                     onHostSample = onHostPlaybackSample,
@@ -602,7 +697,7 @@ fun NebulaRoomScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                if (isCurrentUserAdmin) {
+                if (canControlPlayback) {
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
@@ -621,8 +716,6 @@ fun NebulaRoomScreen(
                         )
                     }
                 } else {
-                    // A guest may still step out of the shared timeline for a moment
-                    // without leaving the room.
                     Box(
                         Modifier
                             .align(Alignment.TopStart)
@@ -664,40 +757,136 @@ fun NebulaRoomScreen(
             }
         }
 
-        // Live member avatar strip below player
+        // 3. RAVE-STYLE AUDIENCE VOTING & EMOJI REACTION STRIP
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (room.votingEnabled) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Like Button Pill
+                    Row(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(
+                                if (room.hasLiked) theme.colors.primaryAccent.copy(alpha = 0.25f)
+                                else theme.colors.surfaceElevated
+                            )
+                            .border(
+                                1.dp,
+                                if (room.hasLiked) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                RoundedCornerShape(15.dp)
+                            )
+                            .clickable { onVoteLike() }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ThumbUp,
+                            contentDescription = "Vote Like",
+                            tint = if (room.hasLiked) theme.colors.primaryAccent else theme.colors.textSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "${room.likeVoteCount}",
+                            style = theme.typography.caption.copy(
+                                color = if (room.hasLiked) theme.colors.primaryAccent else theme.colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+
+                    // Skip Vote Pill
+                    val requiredSkips = Math.ceil(participantsList.size / 2.0).toInt().coerceAtLeast(1)
+                    Row(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(
+                                if (room.hasVotedSkip) Color(0xFFF59E0B).copy(alpha = 0.25f)
+                                else theme.colors.surfaceElevated
+                            )
+                            .border(
+                                1.dp,
+                                if (room.hasVotedSkip) Color(0xFFF59E0B) else theme.colors.surfaceBorder,
+                                RoundedCornerShape(15.dp)
+                            )
+                            .clickable { onVoteSkip() }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Vote Skip",
+                            tint = if (room.hasVotedSkip) Color(0xFFF59E0B) else theme.colors.textSecondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "Skip ${room.skipVoteCount}/$requiredSkips",
+                            style = theme.typography.caption.copy(
+                                color = if (room.hasVotedSkip) Color(0xFFF59E0B) else theme.colors.textSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Quick Emoji Reaction Bar (Rave Style)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(start = 4.dp)
+            ) {
+                listOf("❤️", "😂", "🔥", "👏", "😮", "🎉").forEach { emoji ->
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(theme.colors.surfaceElevated.copy(alpha = 0.6f))
+                            .clickable { onSendReaction(emoji) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = emoji, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+
+        // 4. PARTICIPANT AVATAR STRIP WITH LIVE HALO & BADGES
         if (participantsList.isNotEmpty()) {
-            androidx.compose.foundation.layout.Row(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                androidx.compose.foundation.lazy.LazyRow(
+                LazyRow(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(participantsList) { p ->
-                        Box(
-                            modifier = Modifier
-                                .clickable { onViewParticipantProfile(p.user) }
-                        ) {
-                            NebulaAvatarImage(
-                                avatarUrl = p.user.avatarUrl,
-                                fallbackLetter = p.user.avatarLetter,
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .border(
-                                        width = if (p.isHost) 1.5.dp else 1.dp,
-                                        color = if (p.isHost) theme.colors.primaryAccent else Color.White.copy(alpha = 0.2f),
-                                        shape = androidx.compose.foundation.shape.CircleShape
-                                    )
-                            )
-                        }
+                    items(participantsList, key = { it.user.id }) { p ->
+                        ParticipantAvatarPill(
+                            participant = p,
+                            onClick = { selectedMemberForMenu = p }
+                        )
                     }
                 }
 
+                // Member Count Pill
                 androidx.compose.material3.Surface(
                     onClick = { showMembersSheet = true },
                     shape = RoundedCornerShape(12.dp),
@@ -711,7 +900,7 @@ fun NebulaRoomScreen(
                         Box(
                             modifier = Modifier
                                 .size(6.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .clip(CircleShape)
                                 .background(Color(0xFF22C55E))
                         )
                         Text(
@@ -725,8 +914,7 @@ fun NebulaRoomScreen(
             }
         }
 
-        // 5. LIVE CHAT — the feed fades into the dark under the player, so messages
-        // dissolve as they scroll up instead of meeting a hard edge.
+        // 5. LIVE CHAT — the feed fades into the dark under the player, with floating reaction bursts
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -758,6 +946,14 @@ fun NebulaRoomScreen(
                             )
                         )
                     )
+            )
+
+            // Floating Reactions Burst Overlay (Rave Style)
+            FloatingReactionsOverlay(
+                reactions = floatingReactions,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 12.dp)
             )
         }
 
@@ -1049,17 +1245,131 @@ fun NebulaRoomScreen(
         RoomSettingsSheet(
             isVisible = showRoomSettings,
             roomName = roomName,
+            privacy = room.privacy,
+            leaderOnlyControls = room.leaderOnlyControls,
+            votingEnabled = room.votingEnabled,
             maxParticipants = maxParticipants,
             tags = roomTags,
-            onSaveSettings = { newName, newMax, newTags ->
+            onSaveSettings = { newName, newPrivacy, newLeaderControls, newVoting, newMax, newTags ->
                 roomName = newName
                 maxParticipants = newMax
                 roomTags = newTags
                 showRoomSettings = false
-                onUpdateRoomSettings(newName, newMax, newTags)
+                onUpdateRoomSettings(newName, newPrivacy, newLeaderControls, newVoting, newMax, newTags)
                 Toast.makeText(context, "Room settings updated successfully", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showRoomSettings = false }
+        )
+    }
+
+    // Participant Context Menu Dialog (Rave Style)
+    selectedMemberForMenu?.let { member ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { selectedMemberForMenu = null },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    NebulaAvatarImage(
+                        avatarUrl = member.user.avatarUrl,
+                        fallbackLetter = member.user.avatarLetter,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = member.user.displayName,
+                                style = theme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold, color = theme.colors.textPrimary)
+                            )
+                            if (member.isHost) {
+                                Text(text = "👑 Leader", fontSize = 11.sp, color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            text = "@${member.user.username}",
+                            style = theme.typography.caption.copy(color = theme.colors.textSecondary)
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    // View Profile
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.colors.surface)
+                            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                            .clickable {
+                                selectedMemberForMenu = null
+                                onViewParticipantProfile(member.user)
+                            }
+                            .padding(12.dp)
+                    ) {
+                        Text("👤 View Profile", color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // Direct Message
+                    if (member.user.id != currentUserId) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(theme.colors.surface)
+                                .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    selectedMemberForMenu = null
+                                    onMessageFriend(member.user)
+                                }
+                                .padding(12.dp)
+                        ) {
+                            Text("💬 Direct Message", color = theme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Host actions: Make Leader & Kick
+                    if (isCurrentUserAdmin && member.user.id != currentUserId) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(theme.colors.primaryAccent.copy(alpha = 0.15f))
+                                .border(1.dp, theme.colors.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    selectedMemberForMenu = null
+                                    onTransferHost(member.user.id, false)
+                                }
+                                .padding(12.dp)
+                        ) {
+                            Text("👑 Make Room Leader", color = theme.colors.primaryAccent, fontWeight = FontWeight.Bold)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFEF4444).copy(alpha = 0.12f))
+                                .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    selectedMemberForMenu = null
+                                    onKickParticipant(member.user.id)
+                                }
+                                .padding(12.dp)
+                        ) {
+                            Text("🚫 Remove from Room", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedMemberForMenu = null }) {
+                    Text("Close", color = theme.colors.textSecondary)
+                }
+            },
+            containerColor = theme.colors.surfaceElevated
         )
     }
 
@@ -1459,6 +1769,58 @@ private fun RoomChatMessageItem(message: RoomChatMessage) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FloatingReactionsOverlay(
+    reactions: List<RoomReactionItem>,
+    modifier: Modifier = Modifier
+) {
+    val recent = remember(reactions.size) {
+        reactions.takeLast(6)
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.BottomCenter) {
+        recent.forEach { item ->
+            androidx.compose.runtime.key(item.id) {
+                FloatingReactionBubble(emoji = item.emoji, senderName = item.senderName)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingReactionBubble(emoji: String, senderName: String) {
+    val animY = remember { Animatable(0f) }
+    val animAlpha = remember { Animatable(1f) }
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.coroutineScope {
+            launch {
+                animY.animateTo(-160f, animationSpec = tween(1800, easing = FastOutSlowInEasing))
+            }
+            launch {
+                kotlinx.coroutines.delay(1000)
+                animAlpha.animateTo(0f, animationSpec = tween(800))
+            }
+        }
+    }
+
+    if (animAlpha.value > 0.05f) {
+        Row(
+            modifier = Modifier
+                .alpha(animAlpha.value)
+                .offset(y = animY.value.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = emoji, fontSize = 20.sp)
+            Text(text = senderName, fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }

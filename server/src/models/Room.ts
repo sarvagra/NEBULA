@@ -15,6 +15,7 @@ export interface IRoomParticipant {
   interests?: string[];
   joinedAt: Date;
   isHost: boolean;
+  isMicMuted?: boolean;
 }
 
 export interface IRoomMediaState {
@@ -24,6 +25,19 @@ export interface IRoomMediaState {
   playbackPosition: number;
   isPlaying: boolean;
   mediaUrl: string;
+  version?: number;
+  updatedAt?: Date;
+}
+
+export interface IRoomQueueItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  mediaUrl: string;
+  durationSeconds: number;
+  addedBy: string;
+  addedByName: string;
+  addedAt: Date;
 }
 
 export interface IRoom extends Document {
@@ -36,6 +50,11 @@ export interface IRoom extends Document {
   isAgeRestricted: boolean;
   isEnded: boolean;
   mediaState: IRoomMediaState;
+  queue: IRoomQueueItem[];
+  leaderOnlyControls: boolean;
+  votingEnabled: boolean;
+  skipVotes: string[];
+  likeVotes: string[];
   participants: IRoomParticipant[];
   invitedUserIds: string[];
   kickedUserIds: string[];
@@ -63,7 +82,25 @@ const RoomSchema = new Schema<IRoom>(
       playbackPosition: { type: Number, default: 0 },
       isPlaying: { type: Boolean, default: false },
       mediaUrl: { type: String, default: '' },
+      version: { type: Number, default: 0 },
+      updatedAt: { type: Date, default: Date.now },
     },
+    queue: [
+      {
+        id: { type: String, required: true },
+        title: { type: String, default: 'Untitled' },
+        subtitle: { type: String, default: '' },
+        mediaUrl: { type: String, required: true },
+        durationSeconds: { type: Number, default: 0 },
+        addedBy: { type: String, required: true },
+        addedByName: { type: String, default: 'Participant' },
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
+    leaderOnlyControls: { type: Boolean, default: true },
+    votingEnabled: { type: Boolean, default: true },
+    skipVotes: { type: [String], default: [] },
+    likeVotes: { type: [String], default: [] },
     participants: [
       {
         userId: { type: String, required: true },
@@ -77,13 +114,13 @@ const RoomSchema = new Schema<IRoom>(
         interests: { type: [String], default: [] },
         joinedAt: { type: Date, default: Date.now },
         isHost: { type: Boolean, default: false },
+        isMicMuted: { type: Boolean, default: false },
       },
     ],
     invitedUserIds: { type: [String], default: [] },
     inviteCode: { type: String, unique: true, sparse: true, index: true },
-    // A host kick blocks re-entry until the room changes host or is removed.
     kickedUserIds: { type: [String], default: [] },
-    maxParticipants: { type: Number, default: 24 },
+    maxParticipants: { type: Number, default: 50 },
   },
   {
     timestamps: true,

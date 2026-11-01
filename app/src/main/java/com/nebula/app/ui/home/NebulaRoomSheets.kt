@@ -4,6 +4,12 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,6 +121,7 @@ import com.nebula.app.domain.model.NebulaRoom
 import com.nebula.app.domain.model.NebulaUser
 import com.nebula.app.domain.model.RoomChatMessage
 import com.nebula.app.domain.model.RoomParticipant
+import com.nebula.app.domain.model.RoomPrivacy
 import com.nebula.app.theme.Theme
 import com.nebula.app.ui.components.PABottomSheet
 import com.nebula.app.ui.dialogs.AttachmentPickerSheet
@@ -547,19 +554,24 @@ private fun RoomOptionTile(
 internal fun RoomSettingsSheet(
     isVisible: Boolean,
     roomName: String,
+    privacy: RoomPrivacy,
+    leaderOnlyControls: Boolean,
+    votingEnabled: Boolean,
     maxParticipants: Int,
     tags: List<String>,
-    onSaveSettings: (String, Int, List<String>) -> Unit,
+    onSaveSettings: (String, RoomPrivacy, Boolean, Boolean, Int, List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
     val theme = Theme.current
     var nameState by remember(roomName, isVisible) { mutableStateOf(roomName) }
+    var privacyState by remember(privacy, isVisible) { mutableStateOf(privacy) }
+    var leaderOnlyControlsState by remember(leaderOnlyControls, isVisible) { mutableStateOf(leaderOnlyControls) }
+    var votingEnabledState by remember(votingEnabled, isVisible) { mutableStateOf(votingEnabled) }
     var maxState by remember(maxParticipants, isVisible) { mutableIntStateOf(maxParticipants) }
     var tagsState by remember(tags, isVisible) { mutableStateOf(tags.toSet()) }
 
     val availableTags = listOf("Cinema", "Music", "WatchParty", "Chill", "Study", "Anime", "Gaming", "Lounge")
-    // Same steps as the create-room sheet: 4 · 8 · 12 · 16 · 20 · 24.
-    val maxOptions = listOf(4, 8, 12, 16, 20, 24)
+    val maxOptions = listOf(4, 8, 12, 16, 20, 24, 50)
 
     PABottomSheet(
         isVisible = isVisible,
@@ -599,6 +611,143 @@ internal fun RoomSettingsSheet(
                     ),
                     singleLine = true
                 )
+            }
+
+            // Room Privacy Selector
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "PRIVACY",
+                    style = theme.typography.caption.copy(
+                        color = theme.colors.textSecondary,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        fontSize = 11.sp
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        RoomPrivacy.PUBLIC to "Public",
+                        RoomPrivacy.FRIENDS to "Friends",
+                        RoomPrivacy.INVITE_ONLY to "Invite Only"
+                    ).forEach { (priv, label) ->
+                        val isSelected = privacyState == priv
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) theme.colors.primaryAccent else theme.colors.surface)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) theme.colors.primaryAccent else theme.colors.surfaceBorder,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable { privacyState = priv },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                style = theme.typography.caption.copy(
+                                    color = if (isSelected) Color.White else theme.colors.textPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Room Playback Controls (Leader vs Everyone)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(theme.colors.surface)
+                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (leaderOnlyControlsState) "Leader Controls Playback" else "Everyone Controls Playback",
+                            style = theme.typography.bodyMedium.copy(
+                                color = theme.colors.textPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        Text(
+                            text = if (leaderOnlyControlsState) "Only the host can play, pause, seek, and change media" else "All room participants can play, pause, seek, and pick media",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                    Switch(
+                        checked = leaderOnlyControlsState,
+                        onCheckedChange = { leaderOnlyControlsState = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = theme.colors.primaryAccent,
+                            uncheckedThumbColor = theme.colors.textSecondary,
+                            uncheckedTrackColor = theme.colors.surfaceElevated
+                        )
+                    )
+                }
+            }
+
+            // Voting Toggle (Like / Skip)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(theme.colors.surface)
+                    .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Audience Voting & Likes",
+                            style = theme.typography.bodyMedium.copy(
+                                color = theme.colors.textPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        Text(
+                            text = "Allow members to vote like and vote skip on current video",
+                            style = theme.typography.caption.copy(
+                                color = theme.colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                    Switch(
+                        checked = votingEnabledState,
+                        onCheckedChange = { votingEnabledState = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = theme.colors.primaryAccent,
+                            uncheckedThumbColor = theme.colors.textSecondary,
+                            uncheckedTrackColor = theme.colors.surfaceElevated
+                        )
+                    )
+                }
             }
 
             // Max Participants
@@ -704,6 +853,9 @@ internal fun RoomSettingsSheet(
                     .clickable {
                         onSaveSettings(
                             nameState.ifBlank { "Watch Lounge" },
+                            privacyState,
+                            leaderOnlyControlsState,
+                            votingEnabledState,
                             maxState,
                             tagsState.toList()
                         )
@@ -731,45 +883,82 @@ internal fun ParticipantAvatarPill(
     onClick: () -> Unit
 ) {
     val theme = Theme.current
+    val isSpeaking = participant.isSpeaking && !participant.isMicMuted
+    val infiniteTransition = rememberInfiniteTransition(label = "halo")
+    val haloAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "haloAlpha"
+    )
 
-    Row(
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(theme.colors.surface)
-            .border(1.dp, theme.colors.surfaceBorder, RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(2.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(theme.colors.surfaceElevated),
-            contentAlignment = Alignment.Center
-        ) {
-            NebulaAvatarImage(participant.user.avatarUrl, participant.user.avatarLetter, modifier = Modifier.size(22.dp))
+        // Halo Ring if speaking
+        if (isSpeaking) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .border(
+                        width = 2.dp,
+                        color = Color(0xFF22C55E).copy(alpha = haloAlpha),
+                        shape = CircleShape
+                    )
+            )
         }
 
-        Text(
-            text = participant.user.displayName.split(" ").first(),
-            style = theme.typography.caption.copy(
-                color = theme.colors.textPrimary,
-                fontWeight = FontWeight.Medium,
-                fontSize = 11.5.sp
-            )
+        // Avatar
+        NebulaAvatarImage(
+            avatarUrl = participant.user.avatarUrl,
+            fallbackLetter = participant.user.avatarLetter,
+            modifier = Modifier
+                .size(32.dp)
+                .border(
+                    width = if (participant.isHost) 1.5.dp else 1.dp,
+                    color = if (participant.isHost) Color(0xFFF59E0B) else Color.White.copy(alpha = 0.2f),
+                    shape = CircleShape
+                )
         )
 
+        // Crown badge for host (👑)
         if (participant.isHost) {
-            Text(
-                text = "HOST",
-                style = theme.typography.caption.copy(
-                    color = theme.colors.primaryAccent,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(13.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF59E0B)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "👑", fontSize = 7.sp)
+            }
+        }
+
+        // Mic muted badge
+        if (participant.isMicMuted) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(13.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFEF4444)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MicOff,
+                    contentDescription = "Muted",
+                    tint = Color.White,
+                    modifier = Modifier.size(8.dp)
                 )
-            )
+            }
         }
     }
 }
